@@ -1,0 +1,90 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Feahter's DSH plugins",
+    "zh": "Feahter 的 DSH 插件"
+  },
+  "description": {
+    "en": "Self-hosted index of DeepSeek Harness bundles.",
+    "zh": "DeepSeek Harness 插件的自建索引。"
+  },
+  "metadata": {
+    "categories": {
+      "voice": {
+        "title": {
+          "en": "Voice",
+          "zh": "语音"
+        }
+      }
+    },
+    "labels": {
+      "experimental": {
+        "title": {
+          "en": "Experimental",
+          "zh": "实验性"
+        }
+      }
+    },
+    "sortKeys": {
+      "updated": {
+        "title": {
+          "en": "Updated",
+          "zh": "更新时间"
+        },
+        "order": "desc"
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-realtime-voice",
+      "title": {
+        "en": "Realtime voice input",
+        "zh": "实时语音输入"
+      },
+      "description": {
+        "en": "Continuous dictation for the composer: speak, watch the words appear live, and every paused sentence is written into the input box by the local SenseVoice model.",
+        "zh": "输入框连续听写：边说边出字，停顿即断句并由本地 SenseVoice 写入输入框。"
+      },
+      "icon": "plugin/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-realtime-voice",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-realtime-voice",
+        "directory": "plugin"
+      },
+      "metadata": {
+        "category": "voice",
+        "keywords": [
+          "realtime",
+          "dictation",
+          "speech-to-text",
+          "sensevoice",
+          "voice-input",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1793885748
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793885748,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-realtime-voice",
+            "commit": "73a8be88381fbbe5f7a9ee842122bc4554a206bf",
+            "path": "plugin"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
+    }
+  ]
+}
