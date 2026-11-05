@@ -52,12 +52,12 @@
         "en": "Continuous dictation for the composer: speak, watch the words appear live, and every paused sentence is written into the input box by the local SenseVoice model.",
         "zh": "输入框连续听写：边说边出字，停顿即断句并由本地 SenseVoice 写入输入框。"
       },
-      "icon": "plugin/icon.svg",
+      "icon": "plugins/realtime-voice/icon.svg",
       "author": "Feahter",
-      "homepage": "https://github.com/Feahter/dsh-realtime-voice",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice",
       "repository": {
-        "url": "https://github.com/Feahter/dsh-realtime-voice",
-        "directory": "plugin"
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/realtime-voice"
       },
       "metadata": {
         "category": "voice",
@@ -82,9 +82,9 @@
           "publishTimestamp": 1793885748,
           "source": {
             "type": "git",
-            "url": "https://github.com/Feahter/dsh-realtime-voice",
-            "commit": "73a8be88381fbbe5f7a9ee842122bc4554a206bf",
-            "path": "plugin"
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "a483a06a0b8a4cae191a04cc91f308f123569842",
+            "path": "plugins/realtime-voice"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.4"
@@ -102,12 +102,12 @@
         "en": "Sidebar panel plus github_* agent tools to browse repositories, triage issues, inspect pull requests, and create or close issues. Reuses your local gh CLI login (or GH_TOKEN) without exposing the token to the browser.",
         "zh": "侧边栏面板 + github_* 工具：浏览仓库、处理 Issue、查看 Pull Request、新建或关闭 Issue；自动复用本机 gh CLI 登录（或 GH_TOKEN），token 不下发浏览器。"
       },
-      "icon": "github-manager/icon.svg",
+      "icon": "plugins/github-manager/icon.svg",
       "author": "Feahter",
-      "homepage": "https://github.com/Feahter/dsh-realtime-voice/tree/main/github-manager",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/github-manager",
       "repository": {
-        "url": "https://github.com/Feahter/dsh-realtime-voice",
-        "directory": "github-manager"
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/github-manager"
       },
       "metadata": {
         "category": "developer-tools",
@@ -130,9 +130,9 @@
           "publishTimestamp": 1793890084,
           "source": {
             "type": "git",
-            "url": "https://github.com/Feahter/dsh-realtime-voice",
-            "commit": "8595baa6ceac9bc1bd9f42e4b3d3e04967fe5ecc",
-            "path": "github-manager"
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "a483a06a0b8a4cae191a04cc91f308f123569842",
+            "path": "plugins/github-manager"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.4"
