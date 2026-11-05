@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GitHub project manager">
+  <defs>
+    <linearGradient id="ghm-icon-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f8f83"/>
+      <stop offset="1" stop-color="#1f5f8b"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#ghm-icon-bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="21" cy="18" r="5" fill="#ffffff" stroke="none"/>
+    <circle cx="21" cy="46" r="5" fill="#ffffff" stroke="none"/>
+    <circle cx="43" cy="24" r="5" fill="#ffffff" stroke="none"/>
+    <path d="M21 23v18"/>
+    <path d="M43 29v6a8 8 0 0 1-8 8h-9"/>
+  </g>
+</svg>

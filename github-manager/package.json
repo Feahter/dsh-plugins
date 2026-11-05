@@ -1,0 +1,58 @@
+{
+  "name": "dsh-github-manager",
+  "version": "1.0.0",
+  "description": "GitHub project manager for the DeepSeek Harness: a sidebar panel for repositories, issues and pull requests, plus github_* agent tools.",
+  "license": "MIT",
+  "author": "Feahter",
+  "homepage": "https://github.com/Feahter/dsh-realtime-voice/tree/main/github-manager",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-realtime-voice.git",
+    "directory": "github-manager"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "github",
+    "repositories",
+    "issues",
+    "pull-requests",
+    "gh-cli",
+    "panel"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    ".verify-host.mjs",
+    ".verify-client.mjs"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}

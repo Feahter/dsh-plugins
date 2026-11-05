@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub project manager",
+    "description": "Browse repositories, issues, and pull requests from a sidebar panel, and manage GitHub projects through github_* agent tools."
+  }
+}

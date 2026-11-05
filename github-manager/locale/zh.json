@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub 项目管理",
+    "description": "在侧边栏面板中浏览仓库、Issue 与 Pull Request，并通过 github_* 工具在对话里管理 GitHub 项目。"
+  }
+}
