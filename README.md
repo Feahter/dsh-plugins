@@ -1,6 +1,6 @@
 # dsh-realtime-voice
 
-Continuous realtime dictation for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) composer. Click the microphone once, speak, and each sentence is written into the input box as you pause. Recognition runs entirely on your machine with SenseVoiceSmall (ONNX, int8) — audio never leaves the device and no model tokens are consumed.
+Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
 ## Add the plugin market index
 
@@ -10,31 +10,36 @@ This repository is a self-hosted plugin market index for DSH:
 https://raw.githubusercontent.com/Feahter/dsh-realtime-voice/main/index.json
 ```
 
-In the Harness Web UI open **Plugins → Discover** (or Settings → Plugins → Discover), add that index URL, then search for **Realtime voice input** and install it.
+In the Harness Web UI open **Plugins → Discover** (or Settings → Plugins → Discover), add that index URL, then search for the plugin you want and install it.
+
+## Plugins
+
+### Realtime voice input
+
+Continuous dictation for the composer: click the microphone once, speak, and each paused sentence is written into the input box. Recognition runs entirely on your machine with SenseVoiceSmall (ONNX, int8) — audio never leaves the device and no model tokens are consumed.
+
+- Source: [`plugin/`](./plugin)
+- Requirements: DSH `>= 0.2.1-rc.4` with the experimental **Voice input** bundle enabled (it provides the local SenseVoice recognizer and the `speech` Host Remote), plus a microphone.
+- Details: [`plugin/README.md`](./plugin/README.md)
+
+### GitHub project manager
+
+A sidebar GitHub panel and a family of `github_*` agent tools: browse repositories, triage issues, inspect pull requests, create or close issues, and comment — from the Web UI or from chat. Credentials are resolved on the Host from your existing `gh auth login` (including macOS keyring), or from `GH_TOKEN` / `GITHUB_TOKEN`; the token never reaches the browser.
+
+- Source: [`github-manager/`](./github-manager)
+- Requirements: DSH `>= 0.2.1-rc.4`, a GitHub account, and `gh auth login` or a `GH_TOKEN` / `GITHUB_TOKEN` with `repo` scope.
+- Details: [`github-manager/README.md`](./github-manager/README.md)
 
 ## Install manually
 
-The package lives in [`plugin/`](./plugin). The market index pins an exact commit; the equivalent manual install is:
+The market index pins an exact commit for every version. The equivalent manual installs:
 
 ```bash
 dsh plugin install "git+https://github.com/Feahter/dsh-realtime-voice.git#<commit>&path:/plugin"
+dsh plugin install "git+https://github.com/Feahter/dsh-realtime-voice.git#<commit>&path:/github-manager"
 ```
 
-or point the plugin manager at a checkout of `plugin/`.
-
-## Requirements
-
-- DeepSeek Harness `>= 0.2.1-rc.4` with the experimental **Voice input** bundle enabled (it provides the local SenseVoice recognizer and the `speech` Host Remote). Prepare the model once in the plugin manager if the cache is empty.
-- A microphone; macOS asks for microphone permission on first use.
-
-## How it works
-
-- Browser side: `getUserMedia` → 16 kHz PCM → energy VAD with noise-floor calibration, 300 ms pre-roll, 120 ms speech onset, 600 ms pause endpoint, 15 s segment cap.
-- While a segment is open the client re-transcribes the growing buffer every 700 ms (throttled to 1200 ms past 8 s, 12 s window) through the existing `speech/transcribe` Host Remote.
-- Partial text is displayed live in a panel above the composer; only the final endpoint transcript is inserted into the draft through `inputActions.insertText`, so a revision mid-sentence can never corrupt the composer.
-- If the draft changes during dictation, the transcript is kept and offered for manual insertion.
-
-Parameters were measured on an Intel i7-8569U: endpoint-to-text ≈ 0.8 s, per-call latency 0.55 s at a 12 s window, transcript content CER 0.0 % versus one-shot full-file recognition.
+or point the plugin manager at a checkout of the corresponding directory.
 
 ## License
 
