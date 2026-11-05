@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Realtime voice input",
+    "description": "Continuous dictation: speak and the local SenseVoice model writes each sentence into the composer as you pause.",
+    "detail": "docs/DETAIL.md"
+  }
+}

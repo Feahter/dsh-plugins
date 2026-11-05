@@ -1,0 +1,54 @@
+{
+  "name": "dsh-realtime-voice",
+  "version": "0.1.0",
+  "description": "Continuous realtime dictation for the DeepSeek Harness composer, powered by the local SenseVoice recognizer",
+  "license": "MIT",
+  "author": "Feahter",
+  "homepage": "https://github.com/Feahter/dsh-realtime-voice",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-realtime-voice.git",
+    "directory": "plugin"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "dictation",
+    "speech-to-text",
+    "sensevoice",
+    "realtime",
+    "voice-input"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "docs"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}
