@@ -3,8 +3,8 @@
 一个常驻的 DeepSeek Harness 插件：在 Web 侧边栏提供 GitHub 项目管理面板，同时注册一组
 `github_*` 工具，让我在对话里也能查询和管理仓库、Issue 与 Pull Request。
 
-本插件与 [Realtime voice input](../plugin) 维护在同一个仓库
-[`Feahter/dsh-realtime-voice`](https://github.com/Feahter/dsh-realtime-voice)，
+本插件与 [Realtime voice input](../realtime-voice) 是同一个仓库
+[`Feahter/dsh-plugins`](https://github.com/Feahter/dsh-plugins) 中同级的两个插件，
 并收录在同一份插件市场索引中。
 
 ## 安装
@@ -12,7 +12,7 @@
 在 Harness Web UI 的 **插件 → 发现** 中添加索引：
 
 ```
-https://raw.githubusercontent.com/Feahter/dsh-realtime-voice/main/index.json
+https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
 ```
 
 然后搜索 **GitHub project manager** 安装。索引会钉住包含本插件的精确 commit。
@@ -20,7 +20,7 @@ https://raw.githubusercontent.com/Feahter/dsh-realtime-voice/main/index.json
 手动安装（`<commit>` 取自 `index.json` 中该版本的 `source.commit`，或直接用 `main`）：
 
 ```bash
-dsh plugin install "git+https://github.com/Feahter/dsh-realtime-voice.git#<commit>&path:/github-manager"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/github-manager"
 ```
 
 ## 凭据

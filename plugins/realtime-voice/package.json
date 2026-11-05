@@ -4,11 +4,11 @@
   "description": "Continuous realtime dictation for the DeepSeek Harness composer, powered by the local SenseVoice recognizer",
   "license": "MIT",
   "author": "Feahter",
-  "homepage": "https://github.com/Feahter/dsh-realtime-voice",
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Feahter/dsh-realtime-voice.git",
-    "directory": "plugin"
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/realtime-voice"
   },
   "keywords": [
     "dsh-plugin",

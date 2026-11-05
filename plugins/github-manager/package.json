@@ -4,11 +4,11 @@
   "description": "GitHub project manager for the DeepSeek Harness: a sidebar panel for repositories, issues and pull requests, plus github_* agent tools.",
   "license": "MIT",
   "author": "Feahter",
-  "homepage": "https://github.com/Feahter/dsh-realtime-voice/tree/main/github-manager",
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/github-manager",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Feahter/dsh-realtime-voice.git",
-    "directory": "github-manager"
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/github-manager"
   },
   "keywords": [
     "dsh-plugin",

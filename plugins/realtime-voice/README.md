@@ -4,13 +4,20 @@
 
 - 识别完全在本机 CPU 上运行（SenseVoiceSmall ONNX int8），不上传音频、不消耗对话 token。
 - 复用 DSH 自带的「语音输入」Bundle：语音服务、本地模型与 `speech` Remote 都由它提供。**请勿禁用该 Bundle**，否则本插件会因为拿不到语音服务而提示“模型尚未就绪”。
-- 参数来自同机实测（见仓库 `sim/RESULTS.md`）：VAD 阈值自适应校准、语音起点 120 ms、断句静音 600 ms、预录 300 ms、实时重识别节奏 700 ms（长句自动降到 1200 ms）、部分转写窗口 12 s、单段上限 15 s。
+- 参数来自同机实测（见本目录 `docs/DETAIL.md`）：VAD 阈值自适应校准、语音起点 120 ms、断句静音 600 ms、预录 300 ms、实时重识别节奏 700 ms（长句自动降到 1200 ms）、部分转写窗口 12 s、单段上限 15 s。
 - 只有“断句后的最终文本”会写入输入框；实时部分文字只显示在输入框上方的面板里（SenseVoice 每次重解码会重新标点，直接插入会导致反复改写）。
 - 若插入时草稿被改动（例如你手动编辑或提交了消息），文本会保留在面板中并提供“插入”按钮。
 
 ## 安装
 
-已通过 plugin_manager 安装并启用（本地目录链接）：`@local/realtime-voice`。
+收录在本仓库的市场索引中：在 Harness Web UI 的 **插件 → 发现** 添加
+`https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json`，搜索 **Realtime voice input** 安装。
+
+手动安装（`<commit>` 取自 `index.json` 中该版本的 `source.commit`）：
+
+```bash
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/realtime-voice"
+```
 
 ## 结构
 
