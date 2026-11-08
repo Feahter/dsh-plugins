@@ -141,7 +141,8 @@ proposal.revert, config.invalid`.
       agentPreset,             // string | null
       delegationDepth,         // number | 0
       title,                   // from session/title event, else first user text (<= 80 chars)
-      tags: [],                // string[]
+      tags: [],                // string[] — manual ∪ auto, deduped, cap 24
+      autoTags: [],            // string[] — the last set this plugin computed (DESIGN §10)
       status,                  // 'archived' | 'pinned' | 'trash'
       note,                    // string
       digest,                  // sha256 of the compressed file bytes
@@ -159,6 +160,9 @@ proposal.revert, config.invalid`.
   `trash`; delete with `purge: true` removes the entry and its derived files
   (`sessions/<id>.json|.md`). **The DSH session file is never modified or removed.**
 - `tags` are lowercase, trimmed, deduped, `[a-z0-9._:-]`, max 32 chars, max 24 per entry.
+- Tags in the `auto:` namespace are owned by the plugin (§10). Recomputing them removes the
+  previous `autoTags` and never touches a manual tag; a manual tag that happens to start with
+  `auto:` is still manual once it has been written through `update()`.
   `update()` **rejects** a tag that violates the charset, the length cap or the count with
   `invalid-tag`; it only normalizes case and surrounding whitespace. Silent sanitization
   (`"Not A Tag!"` -> `"not-a-tag"`) is forbidden: the caller would search for the tag it typed.
@@ -459,6 +463,7 @@ export function decodeSessionFile(file) -> { header, events, frames, tornStart }
 export function computeFacts({ header, events, file, slug }) -> SessionFacts     // pure
 export function renderTranscript(facts, events, { maxBytes }) -> string          // pure
 export function deriveTitle({ header, events }) -> string
+export function deriveAutoTags(facts, { cohortMedianTokens?, limit? }) -> string[]   // pure, DESIGN §10
 
 export class ArchiveStore {
   constructor({ rootDir, sessionRoots, editTools, checkTools, maxTranscriptBytes })
@@ -467,6 +472,7 @@ export class ArchiveStore {
   async list({ query, tag, status, workspace, limit, offset, sort })  -> { total, entries }
   async get(id)                                    -> { entry, facts } | null
   async transcript(id)                             -> string | null
+  async autotag({ id, dryRun })                    -> { entries, tags, total }  // recompute auto tags
   async sync({ refresh })                          -> { scanned, imported, refreshed, skipped, failed: [{file, error}] }
   async update(id, patch)                          -> entry        // {title?, tags?, status?, note?, pinned?}
   async remove(id, { purge })                      -> { removed, purged }
@@ -544,7 +550,7 @@ run is older than `autoRunEveryDays` the plugin runs plan+do+check once in the b
 `autoAdopt: true`, one `prompt-section` lesson — text that lives in the plugin's own root.
 Journal actions: `run.auto`, `run.act` (with `auto: true`).
 
-Agent tools (10). `execute(args, exec)`; every handler validates args itself and returns
+Agent tools (11). `execute(args, exec)`; every handler validates args itself and returns
 a plain JSON-serializable object. All tool errors are returned as `{ ok: false, error: { code, message } }`
 — never thrown (the harness would turn a throw into a generic tool failure).
 
@@ -554,6 +560,7 @@ a plain JSON-serializable object. All tool errors are returned as `{ ok: false, 
 | `archive_get` | `{ id, transcript?: boolean, maxChars? }` | `{ ok, entry, facts, transcript? }` |
 | `archive_sync` | `{ refresh?: boolean }` | `{ ok, scanned, imported, refreshed, skipped, failed }` |
 | `archive_update` | `{ id, title?, tags?, status?, note? }` | `{ ok, entry }` |
+| `archive_autotag` | `{ id?, dryRun?, limit? }` | `{ ok, updated, total, sample: [{id, autoTags}] }` — recompute the §10 tags for one entry or the whole archive |
 | `archive_delete` | `{ id, purge?: boolean }` | `{ ok, removed, purged }` |
 | `rsi_plan` | `{ days?, workspace?, tag?, limit?, targets? }` | `{ ok, run }` |
 | `rsi_run` | `{ runId?, days?, workspace?, tag?, limit?, targets? }` | `{ ok, run }` — plan+do+check in one call; the cohort is the Harness-archived set unless `cohort.source` says `all` |
@@ -577,6 +584,7 @@ body cap 256 KiB; `{ok:false,error:{code,message}}` on failure; status codes:
 | `PATCH /sessions/:id` | `{title?,note?,tags?,status?}` |
 | `DELETE /sessions/:id?purge=0\|1` | trash or purge the archive entry |
 | `POST /sync` | `{refresh?}` |
+| `POST /autotag` | `{id?,dryRun?,limit?}` — recompute §10 tags (panel button) |
 | `GET /runs?limit=` / `GET /runs/:id` | list / one |
 | `POST /runs` | plan+do+check from body `{days?,workspace?,tag?,status?,limit?}` |
 | `POST /runs/:id/act` | generate proposals for that run (rsi_act semantics) |
@@ -599,6 +607,10 @@ Page = three tabs (归档 Archive / 炼金 PDCA / 提案 Proposals) driven entir
 `fetch('/api/archive-rsi/...')`. Plain `React.createElement`, no external imports.
 No config schema on the client (it cannot have one).
 
+The Archive tab also carries a **Re-derive tags** action next to Sync, which posts
+`/autotag {dryRun:false}` and reports `{updated, tags}` (§10). Auto tags are rendered as ordinary
+chips in the existing tag column, so no new client-side state machine is needed.
+
 ---
 
 ## 8. Config (host, `readConfig(raw)` with defaults + warnings)
@@ -617,6 +629,8 @@ No config schema on the client (it cannot have one).
   skillsRoot: '',           // '' → ~/.agents/skills
   autoAdopt: false,          // even when true: at most one prompt-section lesson per run
   autoRunEveryDays: 7,       // 0 disables the boot-time continuous run
+  autoTag: true,             // derive §10 tags on every sync
+  autoTagLimit: 8,           // max auto tags per session (manual tags are extra)
   autoPropose: true,         // auto run also writes proposals (never adoptions)
   editTools: [...DEFAULT_EDIT_TOOLS],
   checkTools: [...DEFAULT_CHECK_TOOLS]
@@ -643,3 +657,58 @@ Unknown keys → warning, ignored. Never throw on bad config; clamp numbers.
 4. `.verify-client.mjs`: loads `client.js` under a stub module loader with a stub
    `react`, asserts both slot registrations and that the page component renders
    (renderToString-level smoke, no DOM required).
+5. Automatic tags: the five checks in §10.3, plus "every derived tag matches
+   `/^auto:[a-z0-9.:_-]+$/` and is <= 32 characters" over the real corpus.
+
+---
+
+## 10. Automatic tags
+
+Every sync (and the `archive_autotag` tool) derives a deterministic tag set from
+`SessionFacts`. No model is called: a tag is either a fact of the log or it is not
+written, and every rule below is a predicate on numbers already in §3.
+
+### 10.1 Namespace and lifecycle
+
+- Auto tags live in the `auto:` prefix and are recorded in `entry.autoTags`.
+- Recomputation is `tags := (tags − previousAutoTags) ∪ nextAutoTags`, deduped, then capped at
+  24 total by dropping the *auto* tail first. Manual tags therefore survive every sync, and an
+  auto tag whose predicate stopped holding disappears.
+- The plugin never writes auto tags through `update()`, so `strictTags` (§2.1) keeps rejecting
+  caller-supplied tags that are not `[a-z0-9._:-]`. Auto tags are built from already-safe
+  fragments: every fragment is lowercased and every character outside `[a-z0-9._:-]` becomes
+  `-`; the whole tag is truncated to 32 characters.
+- `autoTagLimit` (default 8) caps the auto set; rules are applied in the priority order below
+  and the list is truncated.
+
+### 10.2 Rules (exact predicates; all read `SessionFacts`)
+
+| # | tag | predicate | notes |
+|---|---|---|---|
+| T1 | `auto:preset.<preset>` | `agentPreset` is a non-empty string | the preset the session ran under |
+| T2 | `auto:origin.<user\|subagent\|other>` | `origin` normalized; `origin === 'subagent'` or `delegationDepth > 0` → `subagent`; empty/unknown → `other` | `user` only when `origin === 'user'` |
+| T3 | `auto:err.<code>` | a single `tools[].errorCodes` entry with `count >= 3`, or the whole session's `toolErrorRate` **and** that code is the modal one; code lowercased with `.`/`_` kept | one tag only, the modal code |
+| T4 | `auto:gap.verify` | `edits.count > 0 && afterLastEditChecks === 0` | the R4 predicate |
+| T5 | `auto:fail.turn` | `turnEnds.error + turnEnds['max-tokens'] + turnEnds.aborted + turnEnds.interrupted > 0` | |
+| T6 | `auto:repeat` | `repeated.length > 0` | identical call re-issued |
+| T7 | `auto:correction` | `counters.corrections > 0` **or** at least one `humanTexts[]` entry matching the §5.1 correction pattern | |
+| T8 | `auto:ctx.pressure` | `peakContextRatio >= 0.6` | |
+| T9 | `auto:ctx.heavy` | `0.3 <= peakContextRatio < 0.6` | mutually exclusive with T8 |
+| T10 | `auto:cost.high` | `cohortMedianTokens > 0 && usage.totalTokens >= 3 * cohortMedianTokens && usage.totalTokens >= 200000` | needs the cohort median; when it is unavailable the rule is skipped |
+| T11 | `auto:scale.long` | `counters.steps >= 100` | |
+| T12 | `auto:tool.<name>` | for the top `min(2, …)` tools by `calls` with `calls >= 5` | the fragment is charset-safe per §10.1, so `mcp__x__y` stays `mcp__x__y` (`_` is allowed); only characters outside `[a-z0-9._:-]` become `-` |
+| T13 | `auto:lang.zh` / `auto:lang.en` | over `humanTexts[].text`: `zh` when CJK characters ≥ 30% of all letters, `en` when ASCII letters ≥ 70% of all letters; the two predicates are independent, so a genuinely mixed session gets **both**, a pure session gets exactly one | no human text, or < 20 letters → no tag |
+
+Priority order for truncation: **T3, T4, T5, T6, T7, T2, T1, T8, T9, T10, T11, T12, T13.**
+
+### 10.3 Acceptance checks (added to the harness)
+
+- A crafted facts object with a modal error code and no post-edit check yields both
+  `auto:err.<code>` and `auto:gap.verify`, in that order before any tool tag.
+- A clean session yields `auto:origin.*` plus at most one scale/lang tag and no health tag.
+- Recompute keeps a manual tag: `update({tags:['manual-x']})` then `autotag` → `manual-x` still
+  present, stale auto tags gone.
+- `dryRun: true` writes nothing (the index file's sha is unchanged) but reports the tags.
+- `autoTag: false` disables derivation during `sync` while leaving existing tags untouched.
+
+---

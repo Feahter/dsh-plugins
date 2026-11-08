@@ -21,9 +21,12 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 import {
+  AUTO_TAG_PREFIX,
   ArchiveStore,
+  DEFAULT_AUTO_TAG_LIMIT,
   DEFAULT_CHECK_TOOLS,
   DEFAULT_EDIT_TOOLS,
+  deriveAutoTags,
 } from './archive.js';
 import {
   DEFAULT_TARGETS,
@@ -66,6 +69,8 @@ export const DEFAULTS = {
   autoAdopt: false,
   autoRunEveryDays: 7,
   autoPropose: true,
+  autoTag: true,
+  autoTagLimit: DEFAULT_AUTO_TAG_LIMIT,
   editTools: DEFAULT_EDIT_TOOLS,
   checkTools: DEFAULT_CHECK_TOOLS,
 };
@@ -112,7 +117,7 @@ export function readConfig(raw) {
     if (typeof raw[key] === 'string') config[key] = expandHome(raw[key]);
     else if (raw[key] !== undefined) warnings.push(`config "${key}" must be a string`);
   }
-  const booleanKeys = ['protocolSection', 'lessonsSection', 'syncOnBoot', 'autoAdopt', 'autoPropose'];
+  const booleanKeys = ['protocolSection', 'lessonsSection', 'syncOnBoot', 'autoAdopt', 'autoPropose', 'autoTag'];
   for (const key of booleanKeys) {
     if (typeof raw[key] === 'boolean') config[key] = raw[key];
     else if (raw[key] !== undefined) warnings.push(`config "${key}" must be a boolean`);
@@ -130,6 +135,11 @@ export function readConfig(raw) {
     if (Number.isFinite(raw.autoRunEveryDays) && raw.autoRunEveryDays >= 0) {
       config.autoRunEveryDays = Math.min(365, raw.autoRunEveryDays);
     } else warnings.push('config "autoRunEveryDays" must be a number >= 0');
+  }
+  if (raw.autoTagLimit !== undefined) {
+    if (Number.isFinite(raw.autoTagLimit) && raw.autoTagLimit >= 0) {
+      config.autoTagLimit = Math.min(24, Math.floor(raw.autoTagLimit));
+    } else warnings.push('config "autoTagLimit" must be a number >= 0');
   }
   if (raw.limit !== undefined) {
     if (Number.isFinite(raw.limit)) config.limit = Math.min(500, Math.max(1, Math.floor(raw.limit)));
@@ -442,6 +452,7 @@ function buildTools({ store, config, paths, state, ensureReady }) {
               harnessArchived: entry.harnessArchived,
               harnessPinned: entry.harnessPinned,
               tags: entry.tags,
+              autoTags: entry.autoTags || [],
               metrics: entry.metrics,
             };
           }),
@@ -535,6 +546,37 @@ function buildTools({ store, config, paths, state, ensureReady }) {
         };
         const entry = await store1.update(id, patch);
         return ok({ entry });
+      },
+    ),
+  );
+
+  tools.push(
+    defineTool(
+      'archive_autotag',
+      'Recompute the automatic tags (auto:*: preset, origin, error hotspot, verification gap, turn failure, repeat, correction, context pressure, cost outlier, scale, top tools, language) for one archived session or the whole archive. Deterministic — no model call — manual-tag safe, and idempotent. dryRun computes without writing.',
+      {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Session id; omit to retag the whole archive.' },
+          dryRun: { type: 'boolean', description: 'Compute and report without writing.' },
+          limit: { type: 'number', description: 'Max auto tags per session (default from config).' },
+        },
+        additionalProperties: false,
+      },
+      async (args) => {
+        const store1 = await ensureReady();
+        if (config.autoTag === false) {
+          return {
+            ok: false,
+            error: { code: 'auto-tag-disabled', message: 'autoTag is false in this profile; the archive_autotag tool is read-only' },
+          };
+        }
+        const result = await store1.autotag({
+          id: asId(args.id) || '',
+          dryRun: asBoolean(args.dryRun, false),
+          limit: Number.isFinite(args.limit) ? Math.max(0, Math.floor(args.limit)) : null,
+        });
+        return ok({ prefix: AUTO_TAG_PREFIX, ...result });
       },
     ),
   );
@@ -941,6 +983,15 @@ async function route({ store, paths, url, segments, method, body }) {
     }
   }
 
+  if (first === 'autotag' && method === 'POST') {
+    const result = await store.autotag({
+      id: typeof body.id === 'string' ? body.id : '',
+      dryRun: body.dryRun === true,
+      limit: Number.isFinite(body.limit) ? Math.max(0, Math.floor(body.limit)) : null,
+    });
+    return { payload: { ok: true, prefix: AUTO_TAG_PREFIX, ...result } };
+  }
+
   if (first === 'sync' && method === 'POST') {
     const result = await store.sync({ refresh: Boolean(body.refresh) });
     return {
@@ -1071,6 +1122,8 @@ export function apply(ctx, rawConfig) {
     editTools: config.editTools,
     checkTools: config.checkTools,
     maxTranscriptBytes: config.maxTranscriptBytes,
+    autoTag: config.autoTag,
+    autoTagLimit: config.autoTagLimit,
   });
   const state = { lessons: '', lastError: null, ready: null, bootSync: null };
 

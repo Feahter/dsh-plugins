@@ -60,6 +60,7 @@ pnpm add link:/Users/fuzhuo/Documents/deepseek-harness/default-workspace/archive
 | `archive_get` | 单条详情：元数据 + 事实（轮次、每工具调用/错误、上下文压力、编辑-验证缺口、重复调用），可选渲染后的 Markdown 记录 |
 | `archive_update` | 改标题 / 标签 / 备注 / 状态（`archived` / `pinned` / `trash`） |
 | `archive_delete` | 移出归档（进回收站）或 `purge` 连派生文件一起删；**原始会话文件永远不动** |
+| `archive_autotag` | 按规则重算自动标签（单条或全库），`dryRun` 只算不写 |
 
 ### PDCA / RSI
 
@@ -82,6 +83,30 @@ pnpm add link:/Users/fuzhuo/Documents/deepseek-harness/default-workspace/archive
 它只写在插件自己的 `lessons.md` 里，碰不到任何用户文件）。
 
 于是每次启动都在既有语料上重新度量一次，指标序列与 `journal.jsonl` 一起构成可回溯的 RSI 轨迹。
+
+## 自动标签
+
+每次 sync（以及 `archive_autotag`）都会从 `SessionFacts` 派生一组 `auto:*` 标签。**不调用模型**：
+一条标签要么是日志里的事实，要么不写。规则见 [DESIGN §10](./DESIGN.md)：
+
+| 前缀 | 触发条件 | 例 |
+|---|---|---|
+| `auto:err.<code>` | 某个错误码累计 ≥3 次（取众数） | `auto:err.fs_stale_version` |
+| `auto:gap.verify` | 有编辑、但最后一次编辑后没有任何检查命令 | — |
+| `auto:fail.turn` | 回合以 error / max-tokens / aborted / interrupted 结束 | — |
+| `auto:repeat` | 同工具同参数被重复调用 | — |
+| `auto:correction` | 用户纠正过（与 §5.1 同一套正则） | — |
+| `auto:origin.*` / `auto:preset.*` | 是谁跑的、跑在哪个预设下 | `auto:origin.subagent`、`auto:preset.router` |
+| `auto:ctx.pressure` / `auto:ctx.heavy` | 上下文峰值 ≥60% / 30–60% | — |
+| `auto:cost.high` | token 用量 ≥ 同批中位数 3 倍且 ≥20 万 | — |
+| `auto:scale.long` | ≥100 步 | — |
+| `auto:tool.<name>` | 调用次数最多的 2 个工具（各 ≥5 次） | `auto:tool.bash` |
+| `auto:lang.zh` / `auto:lang.en` | 人类消息里中日韩字符 ≥30% / 拉丁字母 ≥70% | — |
+
+生命周期是「手动优先、自动可重算」：重算时只删除**上次由插件自己写的**那批（记录在
+`entry.autoTags`），手动标签永远保留；`autoTag: false` 会关掉 sync 时的派生，已有标签不动。
+标签仍是 `[a-z0-9._:-]`、单条 ≤32 字符、每条会话合计 ≤24 个，采集按「问题类 → 身份类 →
+规模类 → 工具类 → 语言类」的优先级截断。
 
 ## 度量口径（都可复算）
 
@@ -121,6 +146,8 @@ pnpm add link:/Users/fuzhuo/Documents/deepseek-harness/default-workspace/archive
     autoAdopt: false       # 即便开启也只自动采纳一条 prompt 教训
     autoRunEveryDays: 7    # 上次 run 超过 N 天就在启动后后台跑一轮 PDCA（0 = 关闭）
     autoPropose: true      # 自动 run 也生成提案（但不采纳）
+    autoTag: true          # 每次 sync 派生自动标签
+    autoTagLimit: 8        # 每条会话最多几个自动标签（手动标签另算）
     editTools: ['write', 'edit']
     checkTools: ['bash', 'pwsh', 'bash_persistent']
 ```

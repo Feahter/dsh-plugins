@@ -74,6 +74,9 @@ window.__ModuleLoader__.load({
       sync: '同步',
       syncing: '同步中…',
       syncDone: '同步完成：新增 {imported}，刷新 {refreshed}，跳过 {skipped}，失败 {failed}',
+      retag: '重算标签',
+      retagging: '重算中…',
+      retagDone: '自动标签已重算：{updated} 个会话，{tags} 个标签',
 
       selectSessionTitle: '选择一个会话',
       selectSessionHint: '在左侧选择会话，查看工具、耗时、上下文与转录。',
@@ -336,6 +339,9 @@ window.__ModuleLoader__.load({
       sync: 'Sync',
       syncing: 'Syncing…',
       syncDone: 'Sync finished: {imported} imported, {refreshed} refreshed, {skipped} skipped, {failed} failed',
+      retag: 'Re-derive tags',
+      retagging: 'Tagging…',
+      retagDone: 'Automatic tags re-derived: {updated} sessions, {tags} tags',
 
       selectSessionTitle: 'Select a session',
       selectSessionHint: 'Pick a session on the left to inspect tools, durations, context, and transcript.',
@@ -2561,6 +2567,31 @@ window.__ModuleLoader__.load({
         }
       }
 
+      async function retagSessions() {
+        if (pendingRef.current) return;
+        pendingRef.current = 'retag';
+        setBusy('retag');
+        try {
+          const result = await api('/autotag', { method: 'POST', body: { dryRun: false } });
+          if (!result.ok) {
+            setNotice({ kind: 'error', text: t('actionFailed', { message: result.message }) });
+            return;
+          }
+          const data = result.data && typeof result.data === 'object' ? result.data : {};
+          setNotice({
+            kind: 'success',
+            text: t('retagDone', {
+              updated: formatInt(asCount(data.updated)),
+              tags: formatInt(asCount(data.tags)),
+            }),
+          });
+          setReloadKey((value) => value + 1);
+        } finally {
+          pendingRef.current = '';
+          setBusy('');
+        }
+      }
+
       async function saveSession() {
         if (!detail || !draft || pendingRef.current) return;
         const entry = detail.entry;
@@ -2830,7 +2861,15 @@ window.__ModuleLoader__.load({
                 disabled: busy === 'sync',
                 title: t('sync'),
               }, busy === 'sync' ? h(Spinner) : h(SyncIcon, { size: 14 }),
-              busy === 'sync' ? t('syncing') : t('sync'))),
+              busy === 'sync' ? t('syncing') : t('sync')),
+              h('button', {
+                type: 'button',
+                className: 'dsh-archive-rsi-btn',
+                onClick: retagSessions,
+                disabled: busy === 'retag',
+                title: t('retag'),
+              }, busy === 'retag' ? h(Spinner) : null,
+              busy === 'retag' ? t('retagging') : t('retag'))),
             h('div', { className: 'dsh-archive-rsi-sidebarMeta' },
               t('sessionsTotal', { count: formatInt(visibleSessions.length) })),
             sessionsError

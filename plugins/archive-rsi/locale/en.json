@@ -241,5 +241,8 @@
   "proposalRationaleLabel": "Rationale",
   "proposalRunLabel": "Run",
   "proposalEvalLabel": "Adoption evaluation",
-  "proposalBodyEmpty": "No body text"
+  "proposalBodyEmpty": "No body text",
+  "retag": "Re-derive tags",
+  "retagging": "Tagging…",
+  "retagDone": "Automatic tags re-derived: {updated} sessions, {tags} tags"
 }

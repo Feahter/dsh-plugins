@@ -417,6 +417,162 @@ export function decodeSessionFile(file) {
  * @param {{ header?: object, events?: object[] }} input
  * @returns {string}
  */
+/**
+ * Automatic tag prefix (DESIGN §10). Everything the plugin owns lives under it so
+ * recomputation can delete its own tags without ever touching a manual one.
+ */
+export const AUTO_TAG_PREFIX = 'auto:';
+export const DEFAULT_AUTO_TAG_LIMIT = 8;
+const MAX_TAGS_TOTAL = 24;
+
+/** One tag fragment: lowercase, charset-safe, bounded. */
+function tagFragment(value, max = 32) {
+  const text = String(value == null ? '' : value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9._:-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return text.slice(0, max);
+}
+
+/** A whole auto tag, guaranteed to satisfy the §2.1 charset and the 32-char cap. */
+function autoTag(fragment) {
+  const body = tagFragment(fragment, 32 - AUTO_TAG_PREFIX.length);
+  return body ? `${AUTO_TAG_PREFIX}${body}` : '';
+}
+
+/**
+ * Derive the automatic tag set for one session (DESIGN §10.2).
+ *
+ * Pure: every predicate reads `SessionFacts` only. The single cohort input is
+ * `cohortMedianTokens`, without which rule T10 is skipped rather than guessed.
+ *
+ * @param {object} facts - SessionFacts (§3).
+ * @param {{ cohortMedianTokens?: number, limit?: number }} [options]
+ * @returns {string[]} tags in priority order, deduped, at most `limit` long.
+ */
+export function deriveAutoTags(facts, options = {}) {
+  const input = isObject(facts) ? facts : {};
+  const limit = Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit)) : DEFAULT_AUTO_TAG_LIMIT;
+  if (limit === 0) return [];
+
+  const counters = isObject(input.counters) ? input.counters : {};
+  const tools = Array.isArray(input.tools) ? input.tools.filter(isObject) : [];
+  const humanTexts = Array.isArray(input.humanTexts) ? input.humanTexts.filter(isObject) : [];
+  const turnEnds = isObject(input.turnEnds) ? input.turnEnds : {};
+  const usage = isObject(input.usage) ? input.usage : {};
+  const edits = isObject(input.edits) ? input.edits : {};
+  const out = [];
+  const push = (tag) => {
+    if (tag && !out.includes(tag)) out.push(tag);
+  };
+
+  // T3 — the modal error code, when it is systematic.
+  let modalCode = '';
+  let modalCount = 0;
+  for (const tool of tools) {
+    const codes = isObject(tool.errorCodes) ? tool.errorCodes : {};
+    for (const [code, count] of Object.entries(codes)) {
+      const value = Number(count);
+      if (Number.isFinite(value) && value > modalCount) {
+        modalCount = value;
+        modalCode = code;
+      }
+    }
+  }
+  if (modalCode && modalCount >= 3) push(autoTag(`err.${tagFragment(modalCode, 20)}`));
+
+  // T4 — the R4 predicate: edited, then never checked.
+  if (finiteOr(edits.count, 0) > 0 && finiteOr(input.afterLastEditChecks, 0) === 0) push(autoTag('gap.verify'));
+
+  // T5 — a turn that failed rather than produced work.
+  const failedTurns =
+    finiteOr(turnEnds.error, 0) +
+    finiteOr(turnEnds['max-tokens'], 0) +
+    finiteOr(turnEnds.aborted, 0) +
+    finiteOr(turnEnds.interrupted, 0);
+  if (failedTurns > 0) push(autoTag('fail.turn'));
+
+  // T6 — the same call re-issued.
+  if (Array.isArray(input.repeated) && input.repeated.length > 0) push(autoTag('repeat'));
+
+  // T7 — the user had to correct the agent.
+  const corrections = finiteOr(counters.corrections, 0) || humanTexts.filter((row) => correctionMatches(row.text)).length;
+  if (corrections > 0) push(autoTag('correction'));
+
+  // T2 / T1 — who ran it, under what preset.
+  const origin = String(input.origin || '').toLowerCase();
+  const depth = finiteOr(input.delegationDepth, 0);
+  if (origin === 'subagent' || depth > 0) push(autoTag('origin.subagent'));
+  else if (origin === 'user') push(autoTag('origin.user'));
+  else push(autoTag('origin.other'));
+  const preset = String(input.agentPreset || '').trim();
+  if (preset) push(autoTag(`preset.${tagFragment(preset, 24)}`));
+
+  // T8 / T9 — context pressure, mutually exclusive.
+  const ratio = finiteOr(input.peakContextRatio, 0);
+  if (ratio >= 0.6) push(autoTag('ctx.pressure'));
+  else if (ratio >= 0.3) push(autoTag('ctx.heavy'));
+
+  // T10 — cost outlier against the cohort.
+  const median = finiteOr(options.cohortMedianTokens, 0);
+  const totalTokens = finiteOr(usage.totalTokens, 0);
+  if (median > 0 && totalTokens >= 3 * median && totalTokens >= 200_000) push(autoTag('cost.high'));
+
+  // T11 — long mechanical session.
+  if (finiteOr(counters.steps, 0) >= 100) push(autoTag('scale.long'));
+
+  // T12 — the two most-used tools, when they carry real volume.
+  const ranked = tools
+    .map((tool) => ({ name: String(tool.name || ''), calls: finiteOr(tool.calls, 0) }))
+    .filter((tool) => tool.name && tool.calls >= 5)
+    .sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name))
+    .slice(0, 2);
+  for (const tool of ranked) push(autoTag(`tool.${tagFragment(tool.name, 20)}`));
+
+  // T13 — dominant language of the human turns (mixed sessions get both).
+  let cjk = 0;
+  let ascii = 0;
+  for (const row of humanTexts) {
+    const text = String(row.text || '');
+    cjk += (text.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).length;
+    ascii += (text.match(/[A-Za-z]/g) || []).length;
+  }
+  const letters = cjk + ascii;
+  if (letters >= 20) {
+    if (cjk / letters >= 0.3) push(autoTag('lang.zh'));
+    if (ascii / letters >= 0.7) push(autoTag('lang.en'));
+  }
+
+  return out.slice(0, limit);
+}
+
+/**
+ * Merge manual and automatic tags: manual first, auto after, deduped, capped.
+ * Auto tags beyond `autoLimit` (or beyond the 24-tag total) are dropped first.
+ *
+ * @param {string[]} manual
+ * @param {string[]} auto
+ */
+export function mergeTags(manual, auto) {
+  const autoList = (Array.isArray(auto) ? auto : []).filter((tag) => typeof tag === 'string' && tag);
+  const seen = new Set();
+  const out = [];
+  for (const tag of Array.isArray(manual) ? manual : []) {
+    if (typeof tag !== 'string' || !tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+    if (out.length >= MAX_TAGS_TOTAL) return out;
+  }
+  for (const tag of autoList.slice(0, MAX_TAGS_TOTAL)) {
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+    if (out.length >= MAX_TAGS_TOTAL) return out;
+  }
+  return out;
+}
+
 export function deriveTitle({ header, events } = {}) {
   const head = isObject(header) ? header : {};
   const list = Array.isArray(events) ? events : [];
@@ -1154,6 +1310,8 @@ export class ArchiveStore {
   #checkTools;
   #maxTranscriptBytes;
   #by;
+  #autoTag;
+  #autoTagLimit;
   #index = null;
   #queue = Promise.resolve();
 
@@ -1167,6 +1325,8 @@ export class ArchiveStore {
     editTools = DEFAULT_EDIT_TOOLS,
     checkTools = DEFAULT_CHECK_TOOLS,
     maxTranscriptBytes = DEFAULT_MAX_TRANSCRIPT_BYTES,
+    autoTag = true,
+    autoTagLimit = DEFAULT_AUTO_TAG_LIMIT,
     by = 'archive-rsi',
   } = {}) {
     const explicit = typeof rootDir === 'string' ? rootDir.trim() : '';
@@ -1185,6 +1345,10 @@ export class ArchiveStore {
       ? Math.floor(maxTranscriptBytes)
       : DEFAULT_MAX_TRANSCRIPT_BYTES;
     this.#by = typeof by === 'string' && by ? by : 'archive-rsi';
+    this.#autoTag = autoTag !== false;
+    this.#autoTagLimit = Number.isFinite(autoTagLimit)
+      ? Math.min(MAX_TAGS_TOTAL, Math.max(0, Math.floor(autoTagLimit)))
+      : DEFAULT_AUTO_TAG_LIMIT;
   }
 
   /** Absolute archive root this store owns. */
@@ -1200,6 +1364,43 @@ export class ArchiveStore {
 
   #archivePath() {
     return this.#file('archive.json');
+  }
+
+  /** Median of `metrics.totalTokens` across the indexed corpus (0 when unknown). */
+  #medianTokens(index) {
+    const values = Object.values(index.entries)
+      .map((entry) => finiteOr(isObject(entry.metrics) ? entry.metrics.totalTokens : 0, 0))
+      .filter((value) => value > 0)
+      .sort((a, b) => a - b);
+    if (values.length === 0) return 0;
+    return values[Math.ceil(values.length * 0.5) - 1];
+  }
+
+  /** Read the stored SessionFacts for one entry without touching the write queue. */
+  async #loadFactsFor(id) {
+    try {
+      const raw = await readText(this.#sessionJsonPath(id), null);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return isObject(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Recompute one entry's auto tags (DESIGN §10.1).
+   *
+   * `tags := (tags − previousAutoTags) ∪ nextAutoTags`, so a manual tag always
+   * survives and an auto tag whose predicate stopped holding disappears.
+   */
+  async #retagEntry(entry, facts, cohortMedianTokens, limit) {
+    const previousAuto = Array.isArray(entry.autoTags) ? entry.autoTags : [];
+    const manual = (Array.isArray(entry.tags) ? entry.tags : []).filter((tag) => !previousAuto.includes(tag));
+    const nextAuto = deriveAutoTags(facts, { cohortMedianTokens, limit });
+    entry.tags = mergeTags(manual, nextAuto);
+    entry.autoTags = nextAuto;
+    return nextAuto;
   }
 
   #sessionJsonPath(id) {
@@ -1244,6 +1445,7 @@ export class ArchiveStore {
       delegationDepth: finiteOr(value.delegationDepth, 0),
       title: stringOr(value.title, ''),
       tags,
+      autoTags: normalizeTags(Array.isArray(value.autoTags) ? value.autoTags : []),
       status: normalizeStatus(value.status),
       note: stringOr(value.note, ''),
       digest: stringOr(value.digest, ''),
@@ -1492,6 +1694,7 @@ export class ArchiveStore {
       const discovered = await this.#discover();
       result.scanned = discovered.length;
       const seen = new Set();
+      const cohortMedianTokens = this.#medianTokens(index);
       for (const found of discovered) {
         seen.add(found.id);
         try {
@@ -1542,6 +1745,7 @@ export class ArchiveStore {
             delegationDepth: finiteOr(head.delegationDepth, 0),
             title: facts.title,
             tags: previous && Array.isArray(previous.tags) ? normalizeTags(previous.tags) : [],
+            autoTags: previous && Array.isArray(previous.autoTags) ? previous.autoTags : [],
             status: previous ? normalizeStatus(previous.status) : 'archived',
             note: previous ? stringOr(previous.note, '') : '',
             digest,
@@ -1549,6 +1753,9 @@ export class ArchiveStore {
             metrics: indexEntryMetrics(facts),
           };
           index.entries[found.id] = this.#normalizeEntry(entry);
+          if (this.#autoTag) {
+            await this.#retagEntry(index.entries[found.id], facts, cohortMedianTokens, this.#autoTagLimit);
+          }
           if (previous) {
             result.refreshed += 1;
             await this.journal('sync.refresh', found.id, { digest, eventCount: events.length });
@@ -1617,7 +1824,9 @@ export class ArchiveStore {
           error.code = 'invalid-tag';
           throw error;
         }
-        entry.tags = strictTags(value);
+        // Manual tags replace the manual half only; the auto half stays visible
+        // until the next §10 recomputation decides whether it still holds.
+        entry.tags = mergeTags(strictTags(value), Array.isArray(entry.autoTags) ? entry.autoTags : []);
       }
       if (fields.note !== undefined) {
         entry.note = stringOr(fields.note, '').slice(0, MAX_NOTE_CHARS);
@@ -1636,6 +1845,58 @@ export class ArchiveStore {
       await this.#writeIndex();
       await this.journal('archive.update', entry.id, { fields: Object.keys(fields) });
       return JSON.parse(JSON.stringify(entry));
+    });
+  }
+
+  /**
+   * Recompute the automatic tags (DESIGN §10) for one entry or the whole archive.
+   *
+   * Idempotent and manual-tag safe: each entry's previous `autoTags` are removed
+   * before the new set is merged in. `dryRun` performs the same computation and
+   * writes nothing.
+   *
+   * @param {{ id?: string, dryRun?: boolean, limit?: number }} [options]
+   * @returns {Promise<{updated: number, tags: number, total: number, dryRun: boolean,
+   *   sample: Array<{id: string, autoTags: string[]}>}>}
+   */
+  async autotag({ id = '', dryRun = false, limit = null } = {}) {
+    return this.#enqueue(async () => {
+      const index = await this.#loadIndex();
+      const cap = Number.isFinite(limit)
+        ? Math.min(MAX_TAGS_TOTAL, Math.max(0, Math.floor(limit)))
+        : this.#autoTagLimit;
+      const cohortMedianTokens = this.#medianTokens(index);
+      const requested = typeof id === 'string' && id ? this.#safeId(id) : '';
+      if (requested && !index.entries[requested]) {
+        throw Object.assign(new Error(`no archived session "${requested}"`), { code: 'not-found' });
+      }
+      const keys = requested
+        ? [requested]
+        : Object.keys(index.entries).filter((key) => index.entries[key] && !index.entries[key].missing);
+      let updated = 0;
+      let tags = 0;
+      const sample = [];
+      for (const key of keys) {
+        const entry = index.entries[key];
+        const facts = await this.#loadFactsFor(key);
+        if (!facts) continue;
+        const next = await this.#retagEntry(entry, facts, cohortMedianTokens, cap);
+        updated += 1;
+        tags += next.length;
+        if (sample.length < 5) sample.push({ id: key, autoTags: next });
+      }
+      if (!dryRun && updated > 0) {
+        await this.#writeIndex();
+        await this.journal('archive.autotag', requested || 'all', { updated, tags });
+      }
+      return {
+        updated,
+        tags,
+        total: keys.length,
+        dryRun: Boolean(dryRun),
+        sample,
+        ...(requested ? { entry: JSON.parse(JSON.stringify(index.entries[requested])) } : {}),
+      };
     });
   }
 

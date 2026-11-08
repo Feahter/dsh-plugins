@@ -6,8 +6,9 @@
  * the bundle: it imports `index.js`/`archive.js`/`alchemy.js` directly, builds a
  * fake Cordis-like context (tools / systemPrompt / webServer / connection) and
  * drives every surface the contract describes: config, zstd decoding, facts,
- * the on-disk store, cohort metrics, R1-R10, the PDCA loop, proposal adoption,
- * the ten `archive_*`/`rsi_*` tools, and the `/api/archive-rsi/*` routes.
+ * the on-disk store, cohort metrics, R1-R10, the automatic §10 tags, the PDCA
+ * loop, proposal adoption, the eleven `archive_*`/`rsi_*` tools, and the
+ * `/api/archive-rsi/*` routes.
  *
  * Test roots live under $TMPDIR (or /tmp) and are removed before exit.
  * Exit code 0 only when every check passes.
@@ -43,6 +44,8 @@ const {
   computeFacts,
   deriveTitle,
   renderTranscript,
+  deriveAutoTags,
+  mergeTags,
   DEFAULT_EDIT_TOOLS,
   DEFAULT_CHECK_TOOLS,
 } = archiveModule;
@@ -142,6 +145,16 @@ function sameSha(a, b) {
   return a === b;
 }
 
+/**
+ * The caller-owned half of `entry.tags` (DESIGN §10.1): everything that is not
+ * in `entry.autoTags`. Used by the pre-§10 update/PATCH checks, which assert an
+ * exact manual list while the plugin-owned auto half must stay visible.
+ */
+function manualTags(entry) {
+  const auto = new Set(Array.isArray(entry && entry.autoTags) ? entry.autoTags : []);
+  return (Array.isArray(entry && entry.tags) ? entry.tags : []).filter((tag) => !auto.has(tag));
+}
+
 // =================================================================== utilities
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -231,6 +244,16 @@ async function copySessionFixture(base, files, count) {
 
 function frame(body) {
   return zstdCompressSync(Buffer.from(body, 'utf8'));
+}
+
+/** Write one authored session as a concatenation of one-frame-per-JSONL-row. */
+async function writeSessionFixture(sessionsRoot, slug, { header, events }) {
+  const dir = path.join(sessionsRoot, slug, header.id);
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, 'session.v4.jsonl.zstd');
+  const rows = [header, ...events].map((row) => `${JSON.stringify(row)}\n`);
+  await fs.writeFile(file, Buffer.concat(rows.map((row) => frame(row))));
+  return { file, root: sessionsRoot };
 }
 
 /** Entry count of <root>/archive.json, 0 when absent/unreadable. */
@@ -660,6 +683,7 @@ const TOOL_NAMES = [
   'archive_get',
   'archive_sync',
   'archive_update',
+  'archive_autotag',
   'archive_delete',
   'rsi_plan',
   'rsi_run',
@@ -673,6 +697,9 @@ const BAD_ARGS = {
   archive_get: { id: 42, transcript: 'yes', maxChars: 'wide' },
   archive_sync: { refresh: 'yes' },
   archive_update: { id: {}, title: 5, tags: 'release', status: 9, note: [] },
+  // `no-such-session` keeps the wrong-typed execution read-only: unknown ids are
+  // rejected before the dry-run flag matters.
+  archive_autotag: { id: 'no-such-session', dryRun: 'yes', limit: 'many' },
   archive_delete: { id: [], purge: 'yes' },
   rsi_plan: { days: 'x', workspace: [], tag: {}, limit: 'x', targets: 'nope' },
   rsi_run: { runId: 5, days: 'x', workspace: [], limit: {}, targets: 5 },
@@ -932,6 +959,26 @@ function factFixture() {
   return { header, events };
 }
 
+/**
+ * A synthetic session whose computed facts satisfy exactly T2 (`origin:user`)
+ * and T4 (one edit, zero checks after it) — the two tags TAG.5/TAG.6/TAG.7
+ * expect from the on-disk store.
+ */
+function autoTagFixture(id = 'auto-fixture') {
+  const t0 = 1_700_000_000_000;
+  const header = { type: 'session', version: 4, id, createdAt: t0, cwd: '/tmp/proj', origin: 'user', isSeeded: false };
+  const events = [
+    { type: 'turn/start', seq: 1, time: t0 + 1000, data: { turn: 1 } },
+    // Short enough to stay below T13's 20-letter threshold, so no lang tag.
+    { type: 'user/message', seq: 2, time: t0 + 1100, data: { content: [{ type: 'text', text: 'write it please' }], source: { kind: 'user' } } },
+    { type: 'tool/call', seq: 3, time: t0 + 1200, data: { turn: 1, step: 1, callId: 'c1', name: 'write', arguments: '{"file_path":"/tmp/a.txt","content":"x"}' } },
+    { type: 'tool/result', seq: 4, time: t0 + 1300, data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', isError: false, content: [{ type: 'text', text: 'wrote' }] } } },
+    { type: 'assistant/message', seq: 5, time: t0 + 1400, data: { turn: 1, step: 1, message: { role: 'assistant', content: [] }, stream: false, usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 } } },
+    { type: 'turn/end', seq: 6, time: t0 + 1500, data: { turn: 1, reason: { kind: 'completed' } } },
+  ];
+  return { header, events };
+}
+
 async function phaseFacts() {
   console.log('\n# 3. SessionFacts (DESIGN §3)');
 
@@ -1101,7 +1148,15 @@ async function phaseStore() {
     if (!entry || typeof entry !== 'object') mismatches.push('update returned no entry');
     else {
       if (entry.title !== 'Renamed by verifier') mismatches.push(`title: expected "Renamed by verifier", got ${JSON.stringify(entry.title)}`);
-      if (JSON.stringify(entry.tags) !== JSON.stringify(['release', 'ops:2026'])) mismatches.push(`tags: expected ["release","ops:2026"], got ${JSON.stringify(entry.tags)}`);
+      // §10.1: tags = manual ∪ auto. The manual half stays exact; the auto half
+      // computed by sync() must remain visible and unduplicated.
+      const manual = manualTags(entry);
+      if (JSON.stringify(manual) !== JSON.stringify(['release', 'ops:2026'])) {
+        mismatches.push(`tags: expected manual ["release","ops:2026"], got ${JSON.stringify(entry.tags)} (manual ${JSON.stringify(manual)})`);
+      }
+      if (JSON.stringify(entry.tags) !== JSON.stringify([...manual, ...(entry.autoTags || [])])) {
+        mismatches.push(`tags: expected manual ∪ auto, got ${JSON.stringify(entry.tags)} (auto ${JSON.stringify(entry.autoTags)})`);
+      }
       if (entry.note !== 'note text') mismatches.push(`note: expected "note text", got ${JSON.stringify(entry.note)}`);
       if (entry.status !== 'pinned') mismatches.push(`status: expected pinned, got ${JSON.stringify(entry.status)}`);
     }
@@ -1109,8 +1164,9 @@ async function phaseStore() {
     // `update` to reject an invalid tag with a coded error. Both are asserted:
     // a conforming tag normalizes, an out-of-charset tag is refused.
     const normalized = await store.update(id, { tags: ['RSI', 'ops:2026', 'rsI'] });
-    if (JSON.stringify(normalized.tags) !== JSON.stringify(['rsi', 'ops:2026'])) {
-      mismatches.push(`normalized tags: expected ["rsi","ops:2026"], got ${JSON.stringify(normalized.tags)}`);
+    const normalizedManual = manualTags(normalized);
+    if (JSON.stringify(normalizedManual) !== JSON.stringify(['rsi', 'ops:2026'])) {
+      mismatches.push(`normalized tags: expected ["rsi","ops:2026"], got ${JSON.stringify(normalized.tags)} (manual ${JSON.stringify(normalizedManual)})`);
     }
     let invalidTagCode = null;
     try {
@@ -1316,6 +1372,256 @@ async function phaseRules() {
     assertArray(findings, 'findings');
     assertEqual(findings.length, 0, 'findings length');
     return '0 findings';
+  });
+}
+
+async function phaseAutotags() {
+  console.log('\n# 6b. automatic tags (DESIGN §10)');
+
+  const CHARSET = /^auto:[a-z0-9.:_-]+$/;
+  const VERIFY_GAP = 'auto:gap.verify';
+  const ORIGIN_USER = 'auto:origin.user';
+
+  // T1-T7 in one crafted facts object: every health tag plus origin/preset.
+  const healthFacts = makeFacts({
+    sessionId: 'tag-health',
+    origin: 'user',
+    agentPreset: 'router',
+    counters: { corrections: 2 },
+    tools: [toolRow('bash', 2, 3, { EINVAL: 3 })],
+    repeated: [{ name: 'read', argKey: 'aaaaaaaaaaaa', times: 2, seqs: [3, 4] }],
+    edits: { count: 1, seqs: [5], byTool: { write: 1 } },
+    afterLastEditChecks: 0,
+    turnEnds: { completed: 1, error: 1 },
+    peakContextRatio: 0.2,
+  });
+
+  await check('TAG.1', 'T1-T7 fire together and the health tags precede origin/preset in priority order', () => {
+    const expected = [
+      'auto:err.einval',
+      VERIFY_GAP,
+      'auto:fail.turn',
+      'auto:repeat',
+      'auto:correction',
+      ORIGIN_USER,
+      'auto:preset.router',
+    ];
+    const tags = deriveAutoTags(healthFacts, { limit: 20 });
+    assertArray(tags, 'deriveAutoTags(...)');
+    if (JSON.stringify(tags) !== JSON.stringify(expected)) {
+      throw new Error(`tags: expected ${JSON.stringify(expected)}, got ${JSON.stringify(tags)}`);
+    }
+    const healthPrefixes = ['auto:err.', 'auto:gap.', 'auto:fail.', 'auto:repeat', 'auto:correction'];
+    const lastHealth = Math.max(...healthPrefixes.map((prefix) => tags.findIndex((tag) => tag === prefix || tag.startsWith(prefix))));
+    const firstOrigin = tags.findIndex((tag) => tag.startsWith('auto:origin.'));
+    const firstPreset = tags.findIndex((tag) => tag.startsWith('auto:preset.'));
+    if (!(lastHealth < firstOrigin && lastHealth < firstPreset)) {
+      throw new Error(`priority: health index ${lastHealth} must precede origin ${firstOrigin} and preset ${firstPreset} (${JSON.stringify(tags)})`);
+    }
+    return `${tags.length} tags: ${tags.join(' ')}`;
+  });
+
+  await check('TAG.2', 'T8/T9 are mutually exclusive and T10 needs a positive cohort median', () => {
+    const pressure = deriveAutoTags(makeFacts({ sessionId: 'tag-ctx-high', origin: 'user', peakContextRatio: 0.65 }));
+    const heavy = deriveAutoTags(makeFacts({ sessionId: 'tag-ctx-mid', origin: 'user', peakContextRatio: 0.45 }));
+    const costFacts = makeFacts({ sessionId: 'tag-cost', origin: 'user', usage: { totalTokens: 900000 } });
+    const cost = deriveAutoTags(costFacts, { cohortMedianTokens: 200000 });
+    const noMedian = deriveAutoTags(costFacts, { cohortMedianTokens: 0 });
+    const mismatches = [];
+    if (!pressure.includes('auto:ctx.pressure')) mismatches.push(`0.65: missing auto:ctx.pressure (${JSON.stringify(pressure)})`);
+    if (pressure.includes('auto:ctx.heavy')) mismatches.push(`0.65: auto:ctx.heavy must not fire (${JSON.stringify(pressure)})`);
+    if (!heavy.includes('auto:ctx.heavy')) mismatches.push(`0.45: missing auto:ctx.heavy (${JSON.stringify(heavy)})`);
+    if (heavy.includes('auto:ctx.pressure')) mismatches.push(`0.45: auto:ctx.pressure must not fire (${JSON.stringify(heavy)})`);
+    if (!cost.includes('auto:cost.high')) mismatches.push(`900k vs median 200k: missing auto:cost.high (${JSON.stringify(cost)})`);
+    if (noMedian.includes('auto:cost.high')) mismatches.push(`median 0: auto:cost.high must be skipped (${JSON.stringify(noMedian)})`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return 'pressure/heavy exclusive; cost.high gated on the median';
+  });
+
+  await check('TAG.3', 'T12 tags the top tools charset-safely and T13 detects zh/en only from human text', () => {
+    const tools = makeFacts({
+      sessionId: 'tag-tools',
+      origin: 'user',
+      tools: [toolRow('mcp__a__b', 7, 0, {}), toolRow('bash', 6, 0, {}), toolRow('read', 5, 0, {})],
+    });
+    const tagSet = deriveAutoTags(tools);
+    const zh = deriveAutoTags(makeFacts({
+      sessionId: 'tag-zh',
+      origin: 'user',
+      humanTexts: [{ seq: 1, chars: 21, text: '请检查这个文件然后重新运行测试并且报告结果' }],
+    }));
+    const en = deriveAutoTags(makeFacts({
+      sessionId: 'tag-en',
+      origin: 'user',
+      humanTexts: [{ seq: 1, chars: 40, text: 'please re-run the checks and report the results' }],
+    }));
+    const none = deriveAutoTags(makeFacts({ sessionId: 'tag-none', origin: 'user', humanTexts: [] }));
+    const mismatches = [];
+    if (!tagSet.includes('auto:tool.mcp__a__b')) mismatches.push(`missing the mcp tool tag (${JSON.stringify(tagSet)})`);
+    if (!tagSet.includes('auto:tool.bash')) mismatches.push(`missing auto:tool.bash (${JSON.stringify(tagSet)})`);
+    if (tagSet.includes('auto:tool.read')) mismatches.push(`auto:tool.read is outside the top two tools (${JSON.stringify(tagSet)})`);
+    const mcpTag = tagSet.find((tag) => tag.includes('mcp'));
+    if (!mcpTag) mismatches.push('no mcp tool tag to charset-check');
+    else if (!CHARSET.test(mcpTag)) mismatches.push(`mcp tool tag ${JSON.stringify(mcpTag)} is not charset-safe`);
+    if (!zh.includes('auto:lang.zh')) mismatches.push(`Chinese-only text: missing auto:lang.zh (${JSON.stringify(zh)})`);
+    if (zh.includes('auto:lang.en')) mismatches.push(`Chinese-only text: auto:lang.en must not fire (${JSON.stringify(zh)})`);
+    if (!en.includes('auto:lang.en')) mismatches.push(`ASCII-only text: missing auto:lang.en (${JSON.stringify(en)})`);
+    if (en.includes('auto:lang.zh')) mismatches.push(`ASCII-only text: auto:lang.zh must not fire (${JSON.stringify(en)})`);
+    if (none.some((tag) => tag.startsWith('auto:lang.'))) mismatches.push(`empty humanTexts: a lang tag fired (${JSON.stringify(none)})`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `tools ${tagSet.filter((tag) => tag.startsWith('auto:tool.')).join(',')}; lang zh/en/none`;
+  });
+
+  await check('TAG.4', 'limit is honoured (3/0) and every tag matches the charset and the 32-char cap', () => {
+    const full = deriveAutoTags(healthFacts, { limit: 20 });
+    const three = deriveAutoTags(healthFacts, { limit: 3 });
+    const zero = deriveAutoTags(healthFacts, { limit: 0 });
+    const longPreset = deriveAutoTags(makeFacts({
+      sessionId: 'tag-long',
+      origin: 'user',
+      agentPreset: 'a-very-long-preset-name-that-exceeds-the-cap',
+    }));
+    const mismatches = [];
+    if (three.length !== 3) mismatches.push(`limit 3: expected exactly 3 tags, got ${three.length}`);
+    if (JSON.stringify(three) !== JSON.stringify(full.slice(0, 3))) {
+      mismatches.push(`limit 3: expected ${JSON.stringify(full.slice(0, 3))}, got ${JSON.stringify(three)}`);
+    }
+    if (!Array.isArray(zero) || zero.length !== 0) mismatches.push(`limit 0: expected [], got ${JSON.stringify(zero)}`);
+    for (const tag of [...full, ...three, ...longPreset]) {
+      if (!CHARSET.test(tag)) mismatches.push(`tag ${JSON.stringify(tag)} does not match ${CHARSET}`);
+      if (tag.length > 32) mismatches.push(`tag ${JSON.stringify(tag)} is ${tag.length} chars (> 32)`);
+    }
+    const longTag = longPreset.find((tag) => tag.startsWith('auto:preset.'));
+    if (!longTag) mismatches.push('a long preset produced no preset tag to truncate');
+    else if (longTag.length > 32) mismatches.push(`truncated preset tag is ${longTag.length} chars (> 32)`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    const longest = Math.max(...[...full, ...longPreset].map((tag) => tag.length));
+    return `limit 3 -> ${three.length}, limit 0 -> 0, longest ${longest} chars`;
+  });
+
+  let autoBase = null;
+  let autoStore = null;
+  let autoId = '';
+
+  await check('TAG.5', 'sync() derives T2/T4 into entry.autoTags and keeps them visible in entry.tags', async () => {
+    autoBase = await makeBase('autotag-sync');
+    const authored = await writeSessionFixture(path.join(autoBase, 'sessions'), 'auto-slug', autoTagFixture('auto-fixture'));
+    autoStore = new ArchiveStore({ rootDir: path.join(autoBase, 'archive'), sessionRoots: [authored.root] });
+    await autoStore.init();
+    const synced = await autoStore.sync({ refresh: true });
+    assertEqual(synced.imported, 1, 'sync().imported');
+    const index = await autoStore.index();
+    autoId = Object.keys(index.entries)[0];
+    assert(autoId, 'sync() imported no entry');
+    const got = await autoStore.get(autoId);
+    assert(got && got.entry, 'get() returned no entry after sync');
+    const expected = [VERIFY_GAP, ORIGIN_USER];
+    const mismatches = [];
+    if (JSON.stringify(got.entry.autoTags) !== JSON.stringify(expected)) {
+      mismatches.push(`autoTags: expected ${JSON.stringify(expected)}, got ${JSON.stringify(got.entry.autoTags)}`);
+    }
+    if (JSON.stringify(got.entry.tags) !== JSON.stringify(expected)) {
+      mismatches.push(`tags (no manual tags yet): expected ${JSON.stringify(expected)}, got ${JSON.stringify(got.entry.tags)}`);
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `${autoId}: ${expected.join(', ')}`;
+  });
+
+  await check('TAG.6', 'update() keeps the manual and auto halves; autotag() re-derives without duplicating either', async () => {
+    assert(autoStore && autoId, 'prerequisite: TAG.5 failed');
+    const expectedAuto = [VERIFY_GAP, ORIGIN_USER];
+    const updated = await autoStore.update(autoId, { tags: ['manual-keep'] });
+    const mismatches = [];
+    if (!updated || typeof updated !== 'object') mismatches.push('update() returned no entry');
+    else {
+      const updatedManual = manualTags(updated);
+      if (JSON.stringify(updatedManual) !== JSON.stringify(['manual-keep'])) {
+        mismatches.push(`manual tags after update: expected ["manual-keep"], got ${JSON.stringify(updatedManual)}`);
+      }
+      if (JSON.stringify(updated.tags) !== JSON.stringify(['manual-keep', ...expectedAuto])) {
+        mismatches.push(`tags after update: expected ${JSON.stringify(['manual-keep', ...expectedAuto])}, got ${JSON.stringify(updated.tags)}`);
+      }
+    }
+    const retagged = await autoStore.autotag({ id: autoId });
+    let entry = retagged && retagged.entry;
+    if (!entry) entry = (await autoStore.get(autoId)).entry;
+    if (!entry) throw new Error('autotag() left no entry to inspect');
+    const manual = manualTags(entry);
+    if (JSON.stringify(manual) !== JSON.stringify(['manual-keep'])) mismatches.push(`manual tags after autotag: ${JSON.stringify(manual)}`);
+    if (JSON.stringify(entry.autoTags) !== JSON.stringify(expectedAuto)) {
+      mismatches.push(`autoTags after autotag: expected ${JSON.stringify(expectedAuto)}, got ${JSON.stringify(entry.autoTags)}`);
+    }
+    if (JSON.stringify(entry.tags) !== JSON.stringify(['manual-keep', ...expectedAuto])) {
+      mismatches.push(`tags after autotag: expected ${JSON.stringify(['manual-keep', ...expectedAuto])}, got ${JSON.stringify(entry.tags)}`);
+    }
+    const seen = new Set();
+    for (const tag of entry.tags || []) {
+      if (seen.has(tag)) mismatches.push(`duplicate tag ${JSON.stringify(tag)}`);
+      seen.add(tag);
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `${entry.tags.length} tags: ${entry.tags.join(', ')}`;
+  });
+
+  await check('TAG.7', 'autotag({dryRun:true}) writes nothing but reports updated>=1 and the sample tags', async () => {
+    assert(autoStore && autoBase && autoId, 'prerequisite: TAG.5 failed');
+    const indexFile = path.join(autoBase, 'archive', 'archive.json');
+    const before = await fileState(indexFile);
+    const result = await autoStore.autotag({ dryRun: true });
+    const after = await fileState(indexFile);
+    const mismatches = [];
+    if (before === null) mismatches.push(`${indexFile} does not exist`);
+    if (!sameSha(before, after)) mismatches.push(`archive.json sha changed: ${before} -> ${after}`);
+    if (!result || typeof result !== 'object') mismatches.push('autotag() returned no object');
+    else {
+      if (!(typeof result.updated === 'number' && result.updated >= 1)) {
+        mismatches.push(`updated: expected a number >= 1, got ${JSON.stringify(result.updated)}`);
+      }
+      assertArray(result.sample, 'autotag().sample');
+      if (!result.sample.some((row) => Array.isArray(row.autoTags) && row.autoTags.includes(ORIGIN_USER))) {
+        mismatches.push(`sample does not carry ${ORIGIN_USER}: ${JSON.stringify(result.sample)}`);
+      }
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `updated=${result.updated}, sha ${String(before).slice(0, 12)} unchanged`;
+  });
+
+  await check('TAG.8', 'autoTag:false derives nothing during sync; mergeTags dedupes and caps at 24', async () => {
+    const base = await makeBase('autotag-disabled');
+    const authored = await writeSessionFixture(path.join(base, 'sessions'), 'auto-slug', autoTagFixture('auto-off'));
+    const store = new ArchiveStore({ rootDir: path.join(base, 'archive'), sessionRoots: [authored.root], autoTag: false });
+    await store.init();
+    await store.sync({ refresh: true });
+    const index = await store.index();
+    const id = Object.keys(index.entries)[0];
+    assert(id, 'sync() imported no entry');
+    let entry = index.entries[id];
+    const mismatches = [];
+    if (!Array.isArray(entry.autoTags) || entry.autoTags.length !== 0) {
+      mismatches.push(`autoTags with autoTag:false: expected [], got ${JSON.stringify(entry.autoTags)}`);
+    }
+    if ((entry.tags || []).some((tag) => String(tag).startsWith('auto:'))) {
+      mismatches.push(`auto: tags leaked into tags: ${JSON.stringify(entry.tags)}`);
+    }
+    await store.update(id, { tags: ['manual-only'] });
+    await store.sync({ refresh: true });
+    entry = (await store.index()).entries[id];
+    if (JSON.stringify(entry.tags) !== JSON.stringify(['manual-only'])) {
+      mismatches.push(`manual tag was not preserved across a disabled sync: ${JSON.stringify(entry.tags)}`);
+    }
+    if ((entry.autoTags || []).length !== 0) mismatches.push(`autoTag:false derived ${JSON.stringify(entry.autoTags)}`);
+    const merged = mergeTags(['a'], ['a', 'b']);
+    if (JSON.stringify(merged) !== JSON.stringify(['a', 'b'])) {
+      mismatches.push(`mergeTags(['a'],['a','b']): expected ["a","b"], got ${JSON.stringify(merged)}`);
+    }
+    const capped = mergeTags(
+      Array.from({ length: 20 }, (_, i) => `m${i}`),
+      Array.from({ length: 20 }, (_, i) => `auto:x${i}`),
+    );
+    if (capped.length !== 24) mismatches.push(`mergeTags cap: expected 24 total, got ${capped.length}`);
+    if (new Set(capped).size !== capped.length) mismatches.push('mergeTags produced duplicates at the cap');
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `autoTag:false -> ${entry.tags.length} manual tag(s); mergeTags cap 24`;
   });
 }
 
@@ -1597,13 +1903,14 @@ async function phaseWiring() {
   const root = path.join(base, 'root');
   const stub = await applyPlugin({ config: { rootDir: root } });
 
-  await check('WIR.1', 'apply() registers exactly the 10 §7.3 tools with valid definitions', () => {
+  await check('WIR.1', 'apply() registers exactly the 11 §7.3 tools with valid definitions', () => {
     const names = [...stub.state.tools.keys()];
     const mismatches = [];
-    if (names.length !== 10) mismatches.push(`tool count: expected 10, got ${names.length} (${names.join(', ')})`);
+    if (names.length !== 11) mismatches.push(`tool count: expected 11, got ${names.length} (${names.join(', ')})`);
     if (new Set(names).size !== names.length) mismatches.push('tool names are not unique');
     for (const expected of TOOL_NAMES) if (!names.includes(expected)) mismatches.push(`missing tool ${expected}`);
     for (const extra of names.filter((name) => !TOOL_NAMES.includes(name))) mismatches.push(`unexpected tool ${extra}`);
+    if (!names.includes('archive_autotag')) mismatches.push('§7.3 tool archive_autotag is not registered');
     for (const [name, definition] of stub.state.tools) {
       if (typeof definition.description !== 'string' || definition.description.length < 20) mismatches.push(`${name}: description too short`);
       if (!definition.parameters || definition.parameters.type !== 'object') mismatches.push(`${name}: parameters are not an object schema`);
@@ -1611,7 +1918,7 @@ async function phaseWiring() {
       if (!definition.output || typeof definition.output.render !== 'function') mismatches.push(`${name}: output.render() missing`);
     }
     if (mismatches.length) throw new Error(mismatches.join('; '));
-    return `10 tools: ${names.join(', ')}`;
+    return `11 tools: ${names.join(', ')}`;
   });
 
   await check('WIR.2', 'exactly one prompt section named tool:archive-rsi with a finite numeric order', () => {
@@ -1801,7 +2108,7 @@ async function phaseRoutes() {
 
   const real = await realSessionFiles();
   if (real.length < 2) {
-    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6']) {
+    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6', 'WEB.7']) {
       printSkip(id, 'web route behaviour', 'need 2 real session files, found ' + real.length);
     }
     return;
@@ -1815,7 +2122,7 @@ async function phaseRoutes() {
   });
   const handler = stub.state.routes[0] && stub.state.routes[0].handler;
   if (!handler) {
-    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6']) printFail(id, 'web route behaviour', 'no route handler registered');
+    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6', 'WEB.7']) printFail(id, 'web route behaviour', 'no route handler registered');
     return;
   }
 
@@ -1847,7 +2154,14 @@ async function phaseRoutes() {
     const mismatches = [];
     if (fetched.entry.title !== 'Patched by verifier') mismatches.push(`title: ${JSON.stringify(fetched.entry.title)}`);
     if (fetched.entry.note !== 'route note') mismatches.push(`note: ${JSON.stringify(fetched.entry.note)}`);
-    if (JSON.stringify(fetched.entry.tags) !== JSON.stringify(['route'])) mismatches.push(`tags: ${JSON.stringify(fetched.entry.tags)}`);
+    // §10.1: the plugin-owned auto half stays visible after a manual PATCH.
+    const manual = manualTags(fetched.entry);
+    if (JSON.stringify(manual) !== JSON.stringify(['route'])) {
+      mismatches.push(`manual tags: expected ["route"], got ${JSON.stringify(fetched.entry.tags)} (manual ${JSON.stringify(manual)})`);
+    }
+    if (JSON.stringify(fetched.entry.tags) !== JSON.stringify([...manual, ...(fetched.entry.autoTags || [])])) {
+      mismatches.push(`tags: expected manual ∪ auto, got ${JSON.stringify(fetched.entry.tags)}`);
+    }
     if (fetched.entry.status !== 'pinned') mismatches.push(`status: ${JSON.stringify(fetched.entry.status)}`);
     if (mismatches.length) throw new Error(mismatches.join('; '));
     return entryId;
@@ -1893,6 +2207,20 @@ async function phaseRoutes() {
     assert(response.json && response.json.ok === false, 'body.ok should be false');
     stub.ref.value = { requestRejection() { return undefined; } };
     return '503';
+  });
+
+  await check('WEB.7', 'POST /api/archive-rsi/autotag with {dryRun:true} returns {ok:true} and a numeric updated', async () => {
+    const response = await httpCall(handler, {
+      method: 'POST',
+      url: '/api/archive-rsi/autotag',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dryRun: true }),
+    });
+    assertEqual(response.status, 200, `status (body ${JSON.stringify(response.json).slice(0, 200)})`);
+    assert(response.json && response.json.ok === true, `body.ok: ${JSON.stringify(response.json).slice(0, 200)}`);
+    assertNumber(response.json.updated, 'body.updated');
+    if (!(response.json.updated >= 1)) throw new Error(`body.updated: expected >= 1, got ${JSON.stringify(response.json.updated)}`);
+    return `updated=${response.json.updated}`;
   });
 }
 
@@ -2002,6 +2330,7 @@ async function main() {
     ['store', phaseStore],
     ['metrics', phaseMetrics],
     ['rules', phaseRules],
+    ['autotags', phaseAutotags],
     ['pdca', phasePdca],
     ['adoption', phaseAdoption],
     ['wiring', phaseWiring],

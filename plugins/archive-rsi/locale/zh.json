@@ -241,5 +241,8 @@
   "proposalRationaleLabel": "理由",
   "proposalRunLabel": "所属运行",
   "proposalEvalLabel": "采纳评估",
-  "proposalBodyEmpty": "没有正文"
+  "proposalBodyEmpty": "没有正文",
+  "retag": "重算标签",
+  "retagging": "重算中…",
+  "retagDone": "自动标签已重算：{updated} 个会话，{tags} 个标签"
 }
