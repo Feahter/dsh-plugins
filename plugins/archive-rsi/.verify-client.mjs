@@ -163,12 +163,18 @@ function requireOnlyReact(react, requested) {
 // ------------------------------------------------------------- stub documents
 
 function makeDocumentStub() {
+  // `apply` inserts the plugin stylesheet; record it so a check can assert the
+  // layout contract that keeps the PDCA panels scrollable.
+  const styles = [];
   return {
+    __styles: styles,
     querySelector() {
       return null;
     },
-    createElement() {
-      return { dataset: {}, textContent: '', remove() {} };
+    createElement(tagName) {
+      const element = { tagName, dataset: {}, textContent: '', remove() {} };
+      if (tagName === 'style') styles.push(element);
+      return element;
     },
     head: {
       appendChild() {},
@@ -354,6 +360,51 @@ check('CLI.7', 'the main page component renders a non-empty tree', () => {
   const typed = react.created.filter((element) => element && element.type !== undefined);
   assert(typed.length > 0, 'no created element carried a type');
   return `${react.created.length} elements created`;
+});
+
+check('CLI.8', 'the PDCA layout keeps its scroll contract and both locales carry the act labels', () => {
+  assert(applied, 'prerequisite: CLI.5 failed');
+  // `insertStyles` reads the *global* document, so load a sandbox that has a
+  // recording DOM stub and apply the plugin there.
+  const loaded = loadClient({ withDocument: true });
+  assert(loaded.registrations.length === 1, 'the with-document load did not register the module');
+  const exported = loaded.registrations[0].factory(requireOnlyReact(makeReact(), []));
+  const ctx = {
+    document: loaded.sandbox.document,
+    effect(fn) { const disposer = fn(); return () => { if (typeof disposer === 'function') disposer(); }; },
+    slots: { inject(_name, callback) { callback(); }, register() { return () => {}; } },
+    locale: { register() {} },
+  };
+  exported.apply(ctx);
+  const styles = (loaded.sandbox.document && loaded.sandbox.document.__styles) || [];
+  const sheet = styles.map((style) => style.textContent || '').join('\n');
+  assert(sheet.length > 1000, `the plugin stylesheet was not captured (${sheet.length} chars)`);
+
+  const rules = [
+    ['.dsh-archive-rsi-pdca{', 'grid-template-rows:minmax(0,1fr)'],
+    ['.dsh-archive-rsi-archive{', 'grid-template-rows:minmax(0,1fr)'],
+    ['.dsh-archive-rsi-panels{', 'grid-auto-rows:max-content'],
+    ['.dsh-archive-rsi-panel[data-phase="act"]', 'grid-column:1/-1'],
+    ['.dsh-archive-rsi-runActBtn', 'margin-left:auto'],
+  ];
+  const missing = [];
+  for (const [selector, declaration] of rules) {
+    const start = sheet.indexOf(selector);
+    if (start === -1) { missing.push(`${selector} rule missing`); continue; }
+    const end = sheet.indexOf('}', start);
+    const block = sheet.slice(start, end === -1 ? sheet.length : end);
+    if (!block.includes(declaration)) missing.push(`${selector} lacks ${declaration}`);
+  }
+  const dict = applied.locales[0] && applied.locales[0].dictionaries;
+  for (const language of ['zh', 'en']) {
+    const table = dict && dict[language];
+    if (!table) { missing.push(`no ${language} dictionary`); continue; }
+    for (const key of ['generateProposals', 'regenerateProposals', 'runStatusFailed', 'tagAutoHint']) {
+      if (typeof table[key] !== 'string' || !table[key]) missing.push(`${language}.${key} missing`);
+    }
+  }
+  if (missing.length) throw new Error(missing.join('; '));
+  return `stylesheet ${sheet.length} chars; scroll contract + act labels present in zh/en`;
 });
 
 // --------------------------------------------------------------------- summary

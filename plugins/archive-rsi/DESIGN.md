@@ -633,6 +633,14 @@ The Archive tab also carries a **Re-derive tags** action next to Sync, which pos
 `/autotag {dryRun:false}` and reports `{updated, tags}` (§10). Auto tags are rendered as ordinary
 chips in the existing tag column, so no new client-side state machine is needed.
 
+**Layout contract (both content tabs).** Every scroll region needs a definite height in the chain,
+so `.archive` / `.pdca` declare `grid-template-rows: minmax(0,1fr)` (an implicit `auto` row would
+shrink the panes to their min-content height and clip them instead of scrolling), and the PDCA
+panel area declares `grid-auto-rows: max-content` for the same reason — the area scrolls, the cards
+keep their natural height. The Act card spans the full width (`[data-phase="act"]{grid-column:1/-1}`)
+because findings are long, and the run header always carries the **生成提案 / 重新生成提案** action,
+so the act entry point is reachable without scrolling to the bottom of the findings list.
+
 ---
 
 ## 8. Config (host, `readConfig(raw)` with defaults + warnings)

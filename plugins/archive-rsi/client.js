@@ -263,6 +263,7 @@ window.__ModuleLoader__.load({
       evidenceEmpty: '没有证据',
       generateProposals: '生成提案',
       generatingProposals: '生成中…',
+      regenerateProposals: '重新生成提案',
       proposalsGenerated: '已生成 {count} 条提案',
       proposalsGeneratedNone: '本次运行没有新增提案',
       proposalIdsCount: '{count} 条提案',
@@ -551,6 +552,7 @@ window.__ModuleLoader__.load({
       evidenceEmpty: 'No evidence',
       generateProposals: 'Generate proposals',
       generatingProposals: 'Generating…',
+      regenerateProposals: 'Regenerate proposals',
       proposalsGenerated: '{count} proposals generated',
       proposalsGeneratedNone: 'No new proposals from this run',
       proposalIdsCount: '{count} proposals',
@@ -2459,6 +2461,22 @@ window.__ModuleLoader__.load({
                 passed: formatInt(targets.passed, props.localeId),
                 total: formatInt(targets.total, props.localeId),
               }))
+            : null,
+          // The act entry point must be reachable without scrolling through the
+          // findings: a run with findings (or proposals) always offers it here.
+          (run.act.findings.length > 0 || run.act.proposalIds.length > 0) && props.onGenerate
+            ? h('button', {
+              type: 'button',
+              className: 'dsh-archive-rsi-btn dsh-archive-rsi-btnPrimary dsh-archive-rsi-runActBtn',
+              disabled: Boolean(props.busy),
+              onClick: () => props.onGenerate(),
+            },
+            props.busy ? h(Spinner) : h(PlayIcon, { size: 13 }),
+            props.busy
+              ? t('generatingProposals')
+              : run.act.proposalIds.length
+                ? t('regenerateProposals')
+                : t('generateProposals'))
             : null),
         h('div', { className: 'dsh-archive-rsi-panels' },
           h(PlanPanel, { run, t, localeId: props.localeId }),
@@ -3421,8 +3439,8 @@ window.__ModuleLoader__.load({
       '.dsh-archive-rsi-tab:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
       '.dsh-archive-rsi-tab[data-active="true"]{color:var(--dsw-alias-label-primary);font-weight:600;border-bottom-color:var(--dsw-alias-brand-primary)}',
       '.dsh-archive-rsi-body{flex:1;min-height:0;display:flex;flex-direction:column}',
-      '.dsh-archive-rsi-archive{--rsi-cols:minmax(150px,2fr) minmax(96px,1.1fr) 104px 48px 58px 52px 66px 54px;flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,1fr);gap:11px}',
-      '.dsh-archive-rsi-pdca{flex:1;min-height:0;display:grid;grid-template-columns:minmax(190px,250px) minmax(0,1fr);gap:11px}',
+      '.dsh-archive-rsi-archive{--rsi-cols:minmax(150px,2fr) minmax(96px,1.1fr) 104px 48px 58px 52px 66px 54px;flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,1fr);grid-template-rows:minmax(0,1fr);gap:11px}',
+      '.dsh-archive-rsi-pdca{flex:1;min-height:0;display:grid;grid-template-columns:minmax(190px,250px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:11px}',
       '.dsh-archive-rsi-pane{min-height:0;min-width:0;display:flex;flex-direction:column;border:0.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);overflow:hidden}',
       '.dsh-archive-rsi-listPane,.dsh-archive-rsi-runList{overflow:hidden}',
       '.dsh-archive-rsi-listHead{display:flex;flex-direction:column;gap:7px;padding:10px 11px 8px;border-bottom:0.5px solid var(--dsw-alias-border-l1);flex:none}',
@@ -3554,8 +3572,9 @@ window.__ModuleLoader__.load({
       '.dsh-archive-rsi-runPane{overflow:hidden}',
       '.dsh-archive-rsi-runDetail{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}',
       '.dsh-archive-rsi-runDetailHead{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:10px 13px;border-bottom:0.5px solid var(--dsw-alias-border-l1);flex:none;font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
-      '.dsh-archive-rsi-panels{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:10px;align-content:start}',
+      '.dsh-archive-rsi-panels{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max-content;gap:9px;padding:10px;align-content:start}',
       '.dsh-archive-rsi-panel{min-width:0;border:0.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-base);display:flex;flex-direction:column;overflow:hidden}',
+      '.dsh-archive-rsi-panel[data-phase="act"]{grid-column:1/-1}',
       '.dsh-archive-rsi-panelHead{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:0.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2)}',
       '.dsh-archive-rsi-panelBody{display:flex;flex-direction:column;gap:9px;padding:9px 10px 11px;min-width:0}',
       '.dsh-archive-rsi-cohort{display:flex;align-items:center;gap:5px 10px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary)}',
@@ -3575,6 +3594,7 @@ window.__ModuleLoader__.load({
       '.dsh-archive-rsi-evidenceLink:hover{border-color:var(--dsw-alias-brand-primary)}',
       '.dsh-archive-rsi-evidenceSeq{font-size:9.5px;color:var(--dsw-alias-label-secondary)}',
       '.dsh-archive-rsi-panelActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:0.5px solid var(--dsw-alias-border-l1);padding-top:9px}',
+      '.dsh-archive-rsi-runActBtn{margin-left:auto;flex:none}',
       '.dsh-archive-rsi-proposals{overflow:hidden}',
       '.dsh-archive-rsi-proposalToolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
       '.dsh-archive-rsi-proposalList{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:9px;padding:9px}',
@@ -3603,7 +3623,7 @@ window.__ModuleLoader__.load({
       '.dsh-archive-rsi-tag[data-auto="true"]{border-style:dashed}',
       '.dsh-archive-rsi-page button:focus-visible,.dsh-archive-rsi-page input:focus-visible,.dsh-archive-rsi-page select:focus-visible,.dsh-archive-rsi-page textarea:focus-visible,.dsh-archive-rsi-page a:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '@media (max-width:1080px){.dsh-archive-rsi-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}',
-      '@media (max-width:980px){.dsh-archive-rsi-archive{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-pdca{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-panels{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-listPane,.dsh-archive-rsi-runList{max-height:300px}}',
+      '@media (max-width:980px){.dsh-archive-rsi-archive{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.dsh-archive-rsi-pdca{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.dsh-archive-rsi-panels{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-listPane,.dsh-archive-rsi-runList{max-height:300px}}',
       '@media (max-width:720px){.dsh-archive-rsi-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dsh-archive-rsi-editGrid{grid-template-columns:minmax(0,1fr)}}',
     ].join('\n');
 

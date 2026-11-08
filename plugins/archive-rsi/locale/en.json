@@ -222,6 +222,7 @@
   "evidenceEmpty": "No evidence",
   "generateProposals": "Generate proposals",
   "generatingProposals": "Generating…",
+  "regenerateProposals": "Regenerate proposals",
   "proposalsGenerated": "{count} proposals generated",
   "proposalsGeneratedNone": "No new proposals from this run",
   "proposalIdsCount": "{count} proposals",

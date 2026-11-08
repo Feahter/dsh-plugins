@@ -222,6 +222,7 @@
   "evidenceEmpty": "没有证据",
   "generateProposals": "生成提案",
   "generatingProposals": "生成中…",
+  "regenerateProposals": "重新生成提案",
   "proposalsGenerated": "已生成 {count} 条提案",
   "proposalsGeneratedNone": "本次运行没有新增提案",
   "proposalIdsCount": "{count} 条提案",
