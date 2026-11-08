@@ -1,0 +1,68 @@
+{
+  "name": "dsh-archive-rsi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Session archive for the DeepSeek Harness: CRUD over historical sessions, plus a PDCA alchemy loop that mines them into measurable context and tool-layer patches (tool-layer recursive self-improvement), with a management panel.",
+  "license": "MIT",
+  "author": "Feahter",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "archive.js",
+    "alchemy.js",
+    "workspace-archive.js",
+    "protocol.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "DESIGN.md",
+    ".verify-host.mjs",
+    ".verify-client.mjs"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4",
+    "node": ">=22.15"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/archive-rsi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/archive-rsi"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "sessions",
+    "archive",
+    "pdca",
+    "rsi",
+    "self-improvement",
+    "context-engineering",
+    "tooling",
+    "observability",
+    "panel"
+  ]
+}

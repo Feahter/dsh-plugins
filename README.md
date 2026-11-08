@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Both plugins live side by side under [`plugins/`](./plugins).
+Three plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -28,6 +28,13 @@ A sidebar GitHub panel and a family of `github_*` agent tools: browse repositori
 
 - Requirements: DSH `>= 0.2.1-rc.4`, a GitHub account, and `gh auth login` or a `GH_TOKEN` / `GITHUB_TOKEN` with `repo` scope.
 
+### [Session archive + PDCA alchemy](./plugins/archive-rsi)
+
+Two layers over the Harness's own session history. `archive_*` tools add curation the Harness lacks — sync, tag, note, read, trash, delete over `~/.dsh/sessions`, with the Harness's archive/pin state mirrored read-only rather than forked. `rsi_*` tools then run a PDCA loop over that corpus: they compute tool-error rate, correction rate, the edit-then-no-verification gap, context pressure and tool-catalog cost, turn the outliers into findings carrying `sessionId + seq` evidence, and emit context patches (prompt lessons, `AGENTS.md` rules, skill candidates) that can be adopted and later re-evaluated against the sessions created after adoption. That measured loop — observe, patch the context, measure again — is tool-layer recursive self-improvement.
+
+- Requirements: DSH `>= 0.2.1-rc.4` and Node `>= 22.15` (session logs are concatenated-zstd containers decoded through `node:zlib`).
+- Data lives in `~/.dsh/archive-rsi/`; original session files are never modified, moved or deleted.
+
 ## Install manually
 
 The market index pins an exact commit for every version. The equivalent manual installs:
@@ -35,6 +42,7 @@ The market index pins an exact commit for every version. The equivalent manual i
 ```bash
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/realtime-voice"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/github-manager"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/archive-rsi"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.

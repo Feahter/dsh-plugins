@@ -1,0 +1,21 @@
+# Bundle patch for dsh-archive-rsi.
+#
+# Inserts the plugin row. Every tunable has a default in the plugin; override
+# them in the profile's own cordis.patch.yml when needed, for example:
+#
+#   - id: archive-rsi
+#     name: 'dsh-archive-rsi'
+#     config:
+#       rootDir: ~/.dsh/archive-rsi
+#       days: 30
+#       limit: 40
+#       autoAdopt: false
+#       protocolSection: true
+#       lessonsSection: true
+#       syncOnBoot: true
+#       agentsFile: ~/.agents/AGENTS.md
+#       skillsRoot: ~/.agents/skills
+#
+- insert:
+    - id: archive-rsi
+      name: 'dsh-archive-rsi'
