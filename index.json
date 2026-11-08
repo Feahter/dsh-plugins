@@ -21,6 +21,12 @@
           "en": "Developer tools",
           "zh": "开发工具"
         }
+      },
+      "context-engineering": {
+        "title": {
+          "en": "Context engineering",
+          "zh": "上下文工程"
+        }
       }
     },
     "labels": {
@@ -133,6 +139,59 @@
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "a483a06a0b8a4cae191a04cc91f308f123569842",
             "path": "plugins/github-manager"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-archive-rsi",
+      "title": {
+        "en": "Session archive + PDCA alchemy",
+        "zh": "归档会话与 PDCA 炼金"
+      },
+      "description": {
+        "en": "CRUD over the Harness session archive plus a PDCA loop that mines historical sessions into measurable findings and adoptable context patches: tool-error rate, correction rate, verification gaps, context pressure and tool-catalog cost, each with session-level evidence, then re-measured after adoption. Tool-layer recursive self-improvement with a sidebar panel.",
+        "zh": "会话归档 CRUD + PDCA 数据炼金：从历史会话里算出工具错误率、纠正率、编辑后未验证缺口、上下文压力与工具目录成本，给出带会话级证据的 finding 与可采纳的上下文补丁，采纳后再用后续会话重估。带侧边栏面板的工具层递归自我改进。"
+      },
+      "icon": "plugins/archive-rsi/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/archive-rsi",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/archive-rsi"
+      },
+      "metadata": {
+        "category": "context-engineering",
+        "keywords": [
+          "sessions",
+          "archive",
+          "pdca",
+          "rsi",
+          "self-improvement",
+          "context-engineering",
+          "observability",
+          "panel",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794138556
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794138556,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "d7fdc2fbc421939edb4bfe19212e87e051bc9ae8",
+            "path": "plugins/archive-rsi"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.4"
