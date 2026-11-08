@@ -196,9 +196,16 @@ function asBoolean(value, fallback = false) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+/**
+ * Query/body limit. An absent query parameter arrives as `Number(null) === 0`,
+ * so a non-positive value must mean "use the fallback" — otherwise every route
+ * whose caller omits `limit` silently returns a single row.
+ */
 function asLimit(value, fallback, max = 500) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(1, Math.floor(value)));
+  if (value === null || value === undefined || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.min(max, Math.max(1, Math.floor(number)));
 }
 
 function asTags(value) {

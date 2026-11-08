@@ -2405,6 +2405,88 @@ async function phaseRoutes() {
     }
     return `crashed ${zombieId} -> failed; baseline=${baselineRunId}`;
   });
+
+  await check('WEB.11', 'POST /runs/:id/act persists proposals that the list route then returns in full', async () => {
+    const runsDir = path.join(base, 'root', 'runs');
+    const now = Date.now();
+    const runId = 'run-20260101-000001-actt';
+    const synthetic = {
+      id: runId,
+      createdAt: now - 60_000,
+      updatedAt: now - 50_000,
+      startedAt: now - 60_000,
+      finishedAt: now - 50_000,
+      phase: 'act',
+      status: 'checked',
+      cohort: { days: 0, limit: 5, workspace: null, tag: null, status: 'all' },
+      plan: { baselineRunId: null, targets: [{ metric: 'toolErrorRate', op: '<=', value: 0.05 }], hypotheses: [] },
+      do: { sessionIds: ['session-route-1'], analyzedAt: now - 55_000, coverage: { requested: 1, analyzed: 1, skipped: 0, failures: [] } },
+      check: {
+        metrics: { sessions: 1, toolCalls: 10, toolErrors: 4 },
+        perSession: [],
+        verdicts: [{ metric: 'toolErrorRate', op: '<=', target: 0.05, actual: 0.4, verdict: 'fail' }],
+        deltas: [],
+      },
+      act: {
+        findings: [{
+          id: 'f-R1-1', rule: 'R1', severity: 'high', title: 'Tool "edit" fails 40.0% of calls',
+          detail: '4 of 10 calls to edit failed (40.0%).',
+          metric: 'toolErrorRate', evidence: [{ sessionId: 'session-route-1', seq: 12 }],
+          tool: 'edit', count: 4, advice: 'Rewrite the edit tool description.',
+        }, {
+          id: 'f-R4-1', rule: 'R4', severity: 'high', title: 'No verification after the last edit (75.0%)',
+          detail: '3 of 4 sessions with edits ran no check command after the final edit.',
+          metric: 'verificationGapRate', evidence: [{ sessionId: 'session-route-1', seq: 20 }],
+          tool: null, count: 3, advice: 'After the last edit, run one check command.',
+        }],
+        proposalIds: [],
+      },
+    };
+    await fs.writeFile(path.join(runsDir, `${runId}.json`), `${JSON.stringify(synthetic, null, 2)}\n`);
+
+    const acted = await httpCall(handler, {
+      method: 'POST',
+      url: `/api/archive-rsi/runs/${encodeURIComponent(runId)}/act`,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assertEqual(acted.status, 200, `act status (body ${JSON.stringify(acted.json).slice(0, 200)})`);
+    const created = acted.json && Array.isArray(acted.json.proposals) ? acted.json.proposals : [];
+    if (created.length < 2) throw new Error(`act returned ${created.length} proposals for a run with two findings; the list check below needs more than one`);
+
+    // No `limit` in the URL: an absent query parameter must mean "the default",
+    // not "one row". This is the regression that hid generated proposals.
+    const all = await httpCall(handler, { url: '/api/archive-rsi/proposals?status=proposed' });
+    assertEqual(all.status, 200, 'proposals status');
+    const listed = all.json && Array.isArray(all.json.proposals) ? all.json.proposals : [];
+    if (listed.length < created.length) {
+      throw new Error(`GET /proposals without limit returned ${listed.length} of ${created.length} generated proposals`);
+    }
+    const ids = new Set(listed.map((item) => item.id));
+    const missing = created.filter((item) => !ids.has(item.id)).map((item) => item.id);
+    if (missing.length) throw new Error(`list route is missing proposed ids: ${missing.slice(0, 3).join(', ')}`);
+
+    const stored = await readJson(path.join(runsDir, `${runId}.json`));
+    if (stored.status !== 'closed') throw new Error(`run status after act: expected closed, got ${JSON.stringify(stored.status)}`);
+    if (!Array.isArray(stored.act && stored.act.proposalIds) || stored.act.proposalIds.length !== created.length) {
+      throw new Error(`run.act.proposalIds: expected ${created.length}, got ${JSON.stringify(stored.act && stored.act.proposalIds)}`);
+    }
+    return `${created.length} proposals generated, all ${listed.length} listed; no-limit default honoured`;
+  });
+
+  await check('WEB.12', 'GET /sessions/:id?transcript=1 is not capped to a single character by an absent maxChars', async () => {
+    const listing = await httpCall(handler, { url: '/api/archive-rsi/sessions?limit=1' });
+    assertEqual(listing.status, 200, 'sessions status');
+    const entry = listing.json && Array.isArray(listing.json.entries) ? listing.json.entries[0] : null;
+    assert(entry && typeof entry.id === 'string', 'no session to inspect');
+    const detail = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(entry.id)}?transcript=1` });
+    assertEqual(detail.status, 200, 'session detail status');
+    const transcript = detail.json && typeof detail.json.transcript === 'string' ? detail.json.transcript : '';
+    if (transcript.length <= 1) {
+      throw new Error(`transcript length ${transcript.length}: an absent maxChars must fall back to the default cap, not 1`);
+    }
+    return `transcript ${transcript.length} chars (default cap honoured)`;
+  });
 }
 
 async function phaseE2E() {

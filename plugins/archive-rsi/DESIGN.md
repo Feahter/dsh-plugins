@@ -595,6 +595,9 @@ for the panel routes, so a headless/SDK composition still gets the tools.
 
 Web routes under `/api/archive-rsi` (all fail-closed via `ctx.connection.requestRejection`;
 `503` when the connection service is absent, `401/403` matching its verdict). JSON only;
+Query limits: an absent/zero `limit` (or `maxChars`) means the route default — `Number(null) === 0`
+must never degrade a list to one row or a transcript to one character.
+
 body cap 256 KiB; `{ok:false,error:{code,message}}` on failure; status codes:
 `400 bad-argument|invalid-tag|invalid-status`, `404 not-found`, `409 not-adoptable|target-changed|path-outside-root`.
 

@@ -855,6 +855,7 @@ window.__ModuleLoader__.load({
       try {
         const response = await fetch(API_PREFIX + path, {
           method: settings.method || 'GET',
+          cache: 'no-store',
           headers: { 'content-type': 'application/json' },
           body: settings.body === undefined ? undefined : JSON.stringify(settings.body),
           credentials: 'same-origin',
@@ -2763,13 +2764,16 @@ window.__ModuleLoader__.load({
         let alive = true;
         setProposalsLoading(true);
         setProposalsError('');
-        const suffix = proposalFilter === 'all' ? '' : '?status=' + encodeURIComponent(proposalFilter);
+        const suffix = proposalFilter === 'all'
+          ? '?limit=' + String(RUN_LIMIT)
+          : '?status=' + encodeURIComponent(proposalFilter) + '&limit=' + String(RUN_LIMIT);
         api('/proposals' + suffix).then((result) => {
           if (!alive) return;
           setProposalsLoading(false);
           if (!result.ok) {
+            // A failed refresh must not blank what is already on screen — the
+            // freshly generated items in particular. The banner explains it.
             setProposalsError(result.message);
-            setProposals([]);
             return;
           }
           let list = pickArray(result.data, ['proposals', 'items', 'entries']).map(normalizeProposal);
@@ -3067,8 +3071,19 @@ window.__ModuleLoader__.load({
             if (next.id) setRun(next);
           }
           const created = pickArray(data, ['proposals']).map(normalizeProposal);
+          // Show what the POST just created without waiting for the list round
+          // trip: the tab must not look unchanged while the refetch is in flight.
+          if (created.length) {
+            setProposals((previous) => {
+              const seen = new Set(previous.map((item) => item.id));
+              const fresh = created.filter((item) => item.id && !seen.has(item.id)
+                && (proposalFilter === 'all' || item.status === proposalFilter));
+              return fresh.length ? fresh.concat(previous) : previous;
+            });
+          }
           setProposalsKey((value) => value + 1);
           setRunsKey((value) => value + 1);
+          setReloadKey((value) => value + 1);
           setNotice({
             kind: 'success',
             text: created.length
@@ -3112,6 +3127,8 @@ window.__ModuleLoader__.load({
             setProposals((previous) => previous.map((item) => (item.id === next.id ? next : item)));
           }
           setProposalsKey((value) => value + 1);
+          // Adopting/rejecting changes the overview counters (待处理提案) too.
+          setReloadKey((value) => value + 1);
           setNotice({
             kind: 'success',
             text: action === 'adopt' ? t('adoptedNotice')
