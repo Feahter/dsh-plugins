@@ -225,6 +225,7 @@
   "regenerateProposals": "重新生成提案",
   "proposalsGenerated": "已生成 {count} 条提案",
   "proposalsGeneratedNone": "本次运行没有新增提案",
+  "proposalsReused": "没有新提案，复用已有 {count} 条",
   "proposalIdsCount": "{count} 条提案",
   "actEmpty": "还没有执行 Act",
   "actHint": "点击「生成提案」把发现转成上下文补丁。",

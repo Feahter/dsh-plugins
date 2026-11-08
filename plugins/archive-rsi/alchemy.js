@@ -1507,7 +1507,45 @@ function proposalDrafts(finding, targets = {}) {
  *   mirror the host config so adoption resolves to the same file.
  * @returns {object[]} Proposal[]
  */
-export function proposalsFor(run, options = {}) {
+/**
+ * Content identity of a proposal (DESIGN §6.2).
+ *
+ * Counts move between runs ("fails 22.9% of calls" → "fails 26.0% of calls") and
+ * the id embeds a timestamp, so neither can identify "the same proposal". The
+ * fingerprint keeps (kind, target, expectedMetric) and the title with every
+ * number collapsed to `#`, which is stable across runs and derivable from
+ * proposals written before this field existed.
+ *
+ * @param {{kind?: string, target?: string, expectedMetric?: string, title?: string}} proposal
+ * @returns {string}
+ */
+export function proposalFingerprint(proposal) {
+  const source = asObject(proposal);
+  const kind = nonEmptyString(source.kind);
+  const target = nonEmptyString(source.target);
+  const metric = nonEmptyString(source.expectedMetric);
+  const title = nonEmptyString(source.title)
+    .toLowerCase()
+    .replace(/[0-9]+(?:[.,][0-9]+)?/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!kind && !metric && !title) return '';
+  return `${kind}|${target}|${metric}|${title}`;
+}
+
+/**
+ * Turn a run's findings into proposals, deduped twice (DESIGN §6.2):
+ *   1. inside this run, the same fingerprint is created once;
+ *   2. against `existing` stored proposals, an open ('proposed') one is *reused*
+ *      instead of duplicated, and an adopted one suppresses a re-proposal.
+ * Rejected / reverted ones may be proposed again — the judgment may change with
+ * new evidence.
+ *
+ * @param {object} run PdcaRun
+ * @param {{existing?: object[], now?: number}} [options]
+ * @returns {{proposals: object[], reused: object[], skipped: Array<{fingerprint: string, id: string, reason: string}>}}
+ */
+export function planProposals(run, options = {}) {
   const source = asObject(run);
   const now = resolveNow(options, source);
   const runId = typeof source.id === 'string' ? source.id : '';
@@ -1516,14 +1554,44 @@ export function proposalsFor(run, options = {}) {
     skillsRoot: configuredPath(options, 'skillsRoot', defaultSkillsRoot()),
   };
   const findings = asArray(asObject(source.act).findings).filter(isPlainObject);
+  // Newest first, so a reused proposal is the most recently generated copy.
+  const existing = asArray(options.existing)
+    .filter(isPlainObject)
+    .slice()
+    .sort((a, b) => toNumber(b.createdAt, 0) - toNumber(a.createdAt, 0));
+  const known = new Map();
+  for (const proposal of existing) {
+    const fingerprint = nonEmptyString(proposal.fingerprint) || proposalFingerprint(proposal);
+    if (!fingerprint || known.has(fingerprint)) continue;
+    known.set(fingerprint, proposal);
+  }
+
   const used = new Set();
   const proposals = [];
+  const reused = [];
+  const skipped = [];
+  const seen = new Set();
   for (const finding of findings) {
-    const seen = new Set();
     for (const entry of proposalDrafts(finding, targets)) {
-      const key = `${entry.kind}|${entry.target}|${entry.expectedMetric}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const fingerprint = proposalFingerprint({
+        kind: entry.kind,
+        target: entry.target,
+        expectedMetric: entry.expectedMetric,
+        title: entry.title || finding.title,
+      });
+      if (!fingerprint || seen.has(fingerprint)) continue;
+      seen.add(fingerprint);
+      const match = known.get(fingerprint);
+      if (match) {
+        if (match.status === 'proposed') {
+          reused.push(match);
+          continue;
+        }
+        if (match.status === 'adopted') {
+          skipped.push({ fingerprint, id: String(match.id || ''), reason: 'adopted' });
+          continue;
+        }
+      }
       proposals.push({
         id: newProposalId(now, used),
         runId,
@@ -1533,6 +1601,7 @@ export function proposalsFor(run, options = {}) {
         title: entry.title,
         rationale: entry.rationale,
         body: entry.body,
+        fingerprint,
         evidence: asArray(finding.evidence).map((item) => ({
           sessionId: String(item?.sessionId || ''),
           seq: toNumber(item?.seq),
@@ -1550,7 +1619,12 @@ export function proposalsFor(run, options = {}) {
       });
     }
   }
-  return proposals;
+  return { proposals, reused, skipped };
+}
+
+/** Proposals this run would create, ignoring what is already stored. */
+export function proposalsFor(run, options = {}) {
+  return planProposals(run, { ...asObject(options), existing: [] }).proposals;
 }
 
 // --------------------------------------------------------------------------

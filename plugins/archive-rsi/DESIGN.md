@@ -396,6 +396,7 @@ count every matching human message once, cap the per-session contribution at 3.
   body,               // the exact text that gets written (or the advisory text)
   evidence: [ {sessionId, seq} ],
   expectedMetric, expectedEffect,     // metric key + 'decrease' | 'increase'
+  fingerprint,        // content identity, see 6.2
   risk,               // 'low' | 'medium' | 'high'
   status,             // 'proposed' | 'adopted' | 'rejected' | 'reverted'
   createdAt, adoptedAt, rejectedAt, revertedAt,
@@ -413,6 +414,25 @@ count every matching human message once, cap the per-session contribution at 3.
   }
 }
 ```
+
+### 6.2 Identity and dedupe
+
+Two proposals are the same proposal when `(kind, target, expectedMetric, title)` agree after every
+number in the title is collapsed to `#` — counts move between runs ("fails 22.9% of calls" →
+"fails 26.0% of calls") and ids embed a timestamp, so neither identifies content. That string is
+stored as `fingerprint` and is derivable from proposals written before the field existed.
+
+`planProposals(run, { existing })` dedupes twice:
+
+- inside one run, the same fingerprint is created once (two findings for the same tool collapse);
+- against stored proposals: an open (`proposed`) match is **reused** — the new run references the
+  existing id and writes nothing; an `adopted` match is **skipped** (already applied); `rejected` /
+  `reverted` matches may be proposed again, because the judgement may change with new evidence.
+
+`actOnRun` (index.js) is idempotent as well: a run whose `act.proposalIds` all resolve returns them
+untouched, so clicking act twice cannot pile up a second copy. It returns
+`{ run, proposals, created, reused, skipped }`; `POST /runs/:id/act` and `rsi_act` forward those
+counts, and the panel reports "reused N" instead of claiming N new proposals.
 
 ### 6.1 Kinds, adoptability, and the exact write
 
@@ -524,6 +544,9 @@ export function planRun({ cohort, targets, baselineRunId }) -> PdcaRun      // p
 export function executeDo(run, factsList) -> PdcaRun                        // fills do (pure)
 export function executeCheck(run, factsList, baselineMetrics) -> PdcaRun    // fills check (pure)
 export function summarizeRun(run, { now?, staleMs? }) -> object             // pure; §5 summary shape
+export function planProposals(run, { existing? })
+   -> { proposals, reused, skipped }                                        // §6.2 dedupe, pure
+export function proposalFingerprint(proposal) -> string                     // §6.2 content identity
 export function proposalsFor(run) -> Proposal[]                             // pure; evidence ids kept
 export function evaluateAdoptions(proposals, factsList, { minSessions })
    -> Proposal[]                                                            // fills evaluation, pure
@@ -541,10 +564,12 @@ mutates and never reads the clock unless the caller injects `now`. `status` is d
 cannot persist a run that says it is still running.
 
 **`executeCheck` also fills `run.act.findings = deriveFindings(run.check.metrics, factsList, run.cohort)`**
-and leaves `run.act.proposalIds = []` for `proposalsFor` to fill later. `run.phase` becomes `'act'`
-after a check; `index.js` closes it after the proposals are written.
+and leaves `run.act.proposalIds = []` for `planProposals` to fill later. `run.phase` becomes `'act'`
+after a check; `index.js` closes it after the proposals are written, and `actOnRun` decides what is
+new, what was reused and what an adoption suppresses (§6.2).
 
-`proposalsFor` maps findings to proposals:
+`planProposals` maps findings to proposals (`proposalsFor` is the same list with dedupe against
+nothing stored):
 - R1/R2 → `advisory` (tool description/schema) — target `''`, title names the tool.
 - R4 → `prompt-section` (verification rule) with metric `verificationGapRate`.
 - R5 → `prompt-section` (ask-before-assume / confirm-the-intent rule) or `skill-candidate`
@@ -612,7 +637,7 @@ body cap 256 KiB; `{ok:false,error:{code,message}}` on failure; status codes:
 | `POST /autotag` | `{id?,dryRun?,limit?}` — recompute §10 tags (panel button) |
 | `GET /runs?limit=` / `GET /runs/:id` | list / one |
 | `POST /runs` | plan+do+check from body `{days?,workspace?,tag?,status?,limit?}`; reuses `runOnce` (same `run.do`/`run.check` journal, same baseline choice and same cohort defaults as `rsi_run`: `days 30`, `limit 40`, retention `archived + pinned`), returns `{ok:true, run}` with `status`. Before planning it retires a head run left `running` for longer than `RUN_STALE_MS` as `failed`, and it takes its baseline from the newest *finished* run (falling back to the newest `baselines.json` entry), so a crashed or plan-only run can neither steal the baseline nor postpone the next auto run |
-| `POST /runs/:id/act` | generate proposals for that run (rsi_act semantics) |
+| `POST /runs/:id/act` | generate proposals for that run (rsi_act semantics, §6.2 dedupe); returns `{ok, run, proposals, created, reused, skipped}` and is idempotent per run |
 | `GET /proposals?status&runId&limit` | list |
 | `POST /proposals/:id/reject` | mark rejected |
 | `POST /proposals/:id/adopt` | apply; `{"revert":true}` reverts |

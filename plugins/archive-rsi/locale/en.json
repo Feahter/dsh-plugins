@@ -225,6 +225,7 @@
   "regenerateProposals": "Regenerate proposals",
   "proposalsGenerated": "{count} proposals generated",
   "proposalsGeneratedNone": "No new proposals from this run",
+  "proposalsReused": "No new proposals; reused {count} existing",
   "proposalIdsCount": "{count} proposals",
   "actEmpty": "Act has not run yet",
   "actHint": "Click Generate proposals to turn findings into context patches.",

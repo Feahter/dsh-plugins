@@ -37,7 +37,7 @@ import {
   executeCheck,
   executeDo,
   planRun,
-  proposalsFor,
+  planProposals,
   revertProposal,
   summarizeRun,
   RUN_STALE_MS,
@@ -425,6 +425,49 @@ async function runOnce({ store, config, args, execute, ensureReady }) {
   return run;
 }
 
+/**
+ * PDCA "act": turn a run's findings into stored proposals (DESIGN §6.2).
+ *
+ * Idempotent twice over: a run that already owns resolvable proposals returns
+ * them untouched, and content-identical proposals are reused rather than
+ * duplicated across runs. Shared by `rsi_act`, `POST /runs/:id/act` and the
+ * boot-time auto run so the three paths cannot drift.
+ *
+ * @param {{store: object, run: object}} input
+ * @returns {Promise<{run: object, proposals: object[], created: number, reused: number,
+ *   skipped: Array<{fingerprint: string, id: string, reason: string}>}>}
+ */
+async function actOnRun({ store, run }) {
+  const existingIds = Array.isArray(run.act && run.act.proposalIds) ? run.act.proposalIds : [];
+  if (existingIds.length) {
+    const resolved = [];
+    for (const id of existingIds) {
+      const proposal = await store.getProposal(id);
+      if (proposal) resolved.push(proposal);
+    }
+    if (resolved.length === existingIds.length) {
+      run.phase = 'closed';
+      run.status = 'closed';
+      await store.saveRun(run);
+      return { run, proposals: resolved, created: 0, reused: resolved.length, skipped: [] };
+    }
+  }
+  const all = await store.listProposals({ limit: 500 });
+  const plan = planProposals(run, { existing: all });
+  for (const proposal of plan.proposals) await store.saveProposal(proposal);
+  run.act.proposalIds = plan.reused.map((proposal) => proposal.id).concat(plan.proposals.map((proposal) => proposal.id));
+  run.phase = 'closed';
+  run.status = 'closed';
+  await store.saveRun(run);
+  return {
+    run,
+    proposals: plan.reused.concat(plan.proposals),
+    created: plan.proposals.length,
+    reused: plan.reused.length,
+    skipped: plan.skipped,
+  };
+}
+
 // --------------------------------------------------------------- tools
 
 function buildTools({ store, config, paths, state, ensureReady }) {
@@ -716,14 +759,13 @@ function buildTools({ store, config, paths, state, ensureReady }) {
             error: { code: 'no-findings', message: 'run.act.findings missing; re-run rsi_run to regenerate this run' },
           };
         }
-        const proposals = proposalsFor(run);
-        for (const proposal of proposals) await store1.saveProposal(proposal);
-        run.act.proposalIds = proposals.map((proposal) => proposal.id);
-        run.phase = 'closed';
-        run.status = 'closed';
-        await store1.saveRun(run);
-        await store1.journal('run.act', run.id, { proposals: run.act.proposalIds.length });
-        return ok({ run, proposals });
+        const result = await actOnRun({ store: store1, run });
+        await store1.journal('run.act', run.id, {
+          created: result.created,
+          reused: result.reused,
+          skipped: result.skipped.length,
+        });
+        return ok({ run: result.run, proposals: result.proposals, created: result.created, reused: result.reused, skipped: result.skipped });
       },
     ),
   );
@@ -1099,13 +1141,22 @@ async function route({ store, paths, config, url, segments, method, body, ensure
     if (!run.check) {
       return { status: 409, payload: { ok: false, error: { code: 'not-checked', message: 'run has no check phase' } } };
     }
-    const proposals = proposalsFor(run);
-    for (const proposal of proposals) await store.saveProposal(proposal);
-    run.act.proposalIds = proposals.map((proposal) => proposal.id);
-    run.phase = 'closed';
-    run.status = 'closed';
-    await store.saveRun(run);
-    return { payload: { ok: true, run, proposals } };
+    const result = await actOnRun({ store, run });
+    await store.journal('run.act', run.id, {
+      created: result.created,
+      reused: result.reused,
+      skipped: result.skipped.length,
+    });
+    return {
+      payload: {
+        ok: true,
+        run: result.run,
+        proposals: result.proposals,
+        created: result.created,
+        reused: result.reused,
+        skipped: result.skipped,
+      },
+    };
   }
 
   if (first === 'proposals' && !second && method === 'GET') {
@@ -1217,16 +1268,23 @@ export function apply(ctx, rawConfig) {
       const run = await runOnce({ store, config, args: {}, execute: true, ensureReady: async () => store });
       let proposals = [];
       if (config.autoPropose) {
-        proposals = proposalsFor(run);
-        for (const proposal of proposals) await store.saveProposal(proposal);
-        run.act.proposalIds = proposals.map((proposal) => proposal.id);
-        await store.journal('run.act', run.id, { proposals: run.act.proposalIds.length, auto: true });
+        const result = await actOnRun({ store, run });
+        proposals = result.proposals;
+        run.phase = 'closed';
+        run.status = 'closed';
+        await store.journal('run.act', run.id, {
+          created: result.created,
+          reused: result.reused,
+          skipped: result.skipped.length,
+          auto: true,
+        });
+      } else {
+        // Close the run regardless of autoPropose so the latest run always reads
+        // as finished, not as a stuck "running" heartbeat.
+        run.phase = 'closed';
+        run.status = 'closed';
+        await store.saveRun(run);
       }
-      // Close the run regardless of autoPropose so the latest run always reads
-      // as finished, not as a stuck "running" heartbeat.
-      run.phase = 'closed';
-      run.status = 'closed';
-      await store.saveRun(run);
       if (config.autoAdopt) {
         const adoptable = proposals.find((proposal) => proposal.kind === 'prompt-section');
         if (adoptable) {

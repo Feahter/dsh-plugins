@@ -60,6 +60,8 @@ const {
   executeDo,
   executeCheck,
   proposalsFor,
+  planProposals,
+  proposalFingerprint,
   applyProposal,
   revertProposal,
   slugifySkill,
@@ -1816,6 +1818,45 @@ async function phasePdca() {
     if (mismatches.length) throw new Error(mismatches.join('; '));
     return `planned->running->checked; durationMs=${summary.durationMs}; targets=${summary.targets.total}`;
   });
+
+  await check('PDC.4', 'proposals are deduped by content fingerprint inside a run and against stored ones', () => {
+    const finding = (id, count, title) => ({
+      id, rule: 'R1', severity: 'high', tool: 'edit', count, title,
+      detail: `${count} of 10 calls to edit failed.`, metric: 'toolErrorRate', evidence: [],
+    });
+    const run = {
+      id: 'run-dedupe', createdAt: 1000, act: {
+        findings: [finding('f-1', 4, 'Tool "edit" fails 40.0% of calls'), finding('f-2', 9, 'Tool "edit" fails 90.0% of calls')],
+        proposalIds: [],
+      },
+    };
+    const mismatches = [];
+    const first = planProposals(run, { now: 2000, agentsFile: '/tmp/agents.md', skillsRoot: '/tmp/skills' });
+    if (first.proposals.length !== 1) mismatches.push(`two same-tool findings must collapse to one proposal, got ${first.proposals.length}`);
+    const fp = first.proposals[0] && first.proposals[0].fingerprint;
+    if (!fp) mismatches.push('the proposal carries no fingerprint');
+    // The count moved, so the title text differs — the fingerprint must not.
+    const other = proposalFingerprint({
+      kind: first.proposals[0].kind, target: first.proposals[0].target,
+      expectedMetric: first.proposals[0].expectedMetric, title: 'Tool "edit" fails 12.5% of calls',
+    });
+    if (other !== fp) mismatches.push(`fingerprint drifted with the count: ${JSON.stringify({ fp, other })}`);
+
+    const reused = planProposals(run, { now: 3000, existing: first.proposals });
+    if (reused.proposals.length !== 0 || reused.reused.length !== 1) {
+      mismatches.push(`an open duplicate must be reused (created ${reused.proposals.length}, reused ${reused.reused.length})`);
+    }
+    const adopted = planProposals(run, { now: 3000, existing: [{ ...first.proposals[0], status: 'adopted' }] });
+    if (adopted.proposals.length !== 0 || adopted.skipped.length !== 1) {
+      mismatches.push(`an adopted proposal must not be re-proposed (created ${adopted.proposals.length}, skipped ${adopted.skipped.length})`);
+    }
+    const rejected = planProposals(run, { now: 3000, existing: [{ ...first.proposals[0], status: 'rejected' }] });
+    if (rejected.proposals.length !== 1) {
+      mismatches.push(`a rejected proposal may be proposed again, got ${rejected.proposals.length}`);
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `1 proposal for 2 same-tool findings; reuse/adopted/rejected semantics hold (${fp.slice(0, 40)}…)`;
+  });
 }
 
 async function phaseAdoption() {
@@ -2486,6 +2527,68 @@ async function phaseRoutes() {
       throw new Error(`transcript length ${transcript.length}: an absent maxChars must fall back to the default cap, not 1`);
     }
     return `transcript ${transcript.length} chars (default cap honoured)`;
+  });
+
+  await check('WEB.13', 'acting on two runs with the same finding reuses one proposal instead of duplicating it', async () => {
+    const runsDir = path.join(base, 'root', 'runs');
+    const proposalsDir = path.join(base, 'root', 'proposals');
+    const stamp = Date.now();
+    const build = (id, at) => ({
+      id, createdAt: at, updatedAt: at + 10, startedAt: at, finishedAt: at + 10,
+      phase: 'act', status: 'checked',
+      cohort: { days: 0, limit: 5, workspace: null, tag: null, status: 'all' },
+      plan: { baselineRunId: null, targets: [{ metric: 'toolErrorRate', op: '<=', value: 0.05 }], hypotheses: [] },
+      do: { sessionIds: ['session-dedupe'], analyzedAt: at, coverage: { requested: 1, analyzed: 1, skipped: 0, failures: [] } },
+      check: { metrics: { sessions: 1 }, perSession: [], verdicts: [], deltas: [] },
+      act: {
+        findings: [{
+          id: 'f-R1-1', rule: 'R1', severity: 'high', title: 'Tool "edit" fails 40.0% of calls',
+          detail: '4 of 10 calls to edit failed (40.0%).', metric: 'toolErrorRate',
+          evidence: [], tool: 'edit', count: 4, advice: 'Rewrite the edit tool description.',
+        }],
+        proposalIds: [],
+      },
+    });
+    const idA = 'run-20260102-000001-ddup';
+    const idB = 'run-20260102-000002-ddup';
+    await fs.writeFile(path.join(runsDir, `${idA}.json`), `${JSON.stringify(build(idA, stamp - 5000), null, 2)}\n`);
+    await fs.writeFile(path.join(runsDir, `${idB}.json`), `${JSON.stringify(build(idB, stamp - 4000), null, 2)}\n`);
+
+    const act = async (id) => httpCall(handler, {
+      method: 'POST',
+      url: `/api/archive-rsi/runs/${encodeURIComponent(id)}/act`,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+
+    const first = await act(idA);
+    assertEqual(first.status, 200, `first act status (${JSON.stringify(first.json).slice(0, 160)})`);
+    const createdIds = (first.json.proposals || []).map((item) => item.id);
+    if (createdIds.length === 0) throw new Error('first act created no proposal');
+    const filesAfterFirst = (await fs.readdir(proposalsDir)).filter((name) => name.endsWith('.json')).length;
+
+    const second = await act(idB);
+    assertEqual(second.status, 200, `second act status (${JSON.stringify(second.json).slice(0, 160)})`);
+    if (Number(second.json.created) !== 0) throw new Error(`second run should create 0 proposals, got ${second.json.created}`);
+    if (Number(second.json.reused) < 1) throw new Error(`second run should reuse >= 1 proposal, got ${second.json.reused}`);
+    const filesAfterSecond = (await fs.readdir(proposalsDir)).filter((name) => name.endsWith('.json')).length;
+    if (filesAfterSecond !== filesAfterFirst) {
+      throw new Error(`proposal files grew from ${filesAfterFirst} to ${filesAfterSecond}: dedupe failed`);
+    }
+
+    // Same run twice: the second call must be a no-op, not another copy.
+    const third = await act(idA);
+    assertEqual(third.status, 200, 'repeat act status');
+    if (Number(third.json.created) !== 0) throw new Error(`repeat act created ${third.json.created} proposals`);
+    const filesAfterThird = (await fs.readdir(proposalsDir)).filter((name) => name.endsWith('.json')).length;
+    if (filesAfterThird !== filesAfterFirst) throw new Error(`repeat act added files: ${filesAfterFirst} -> ${filesAfterThird}`);
+
+    const storedB = await readJson(path.join(runsDir, `${idB}.json`));
+    const idsB = Array.isArray(storedB.act && storedB.act.proposalIds) ? storedB.act.proposalIds : [];
+    if (idsB.length !== 1 || !createdIds.includes(idsB[0])) {
+      throw new Error(`run B proposalIds should reference the reused proposal, got ${JSON.stringify(idsB)}`);
+    }
+    return `run A created ${createdIds.length}, run B reused ${second.json.reused}, files stayed ${filesAfterFirst}`;
   });
 }
 

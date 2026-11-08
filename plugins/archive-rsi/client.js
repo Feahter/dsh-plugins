@@ -266,6 +266,7 @@ window.__ModuleLoader__.load({
       regenerateProposals: '重新生成提案',
       proposalsGenerated: '已生成 {count} 条提案',
       proposalsGeneratedNone: '本次运行没有新增提案',
+      proposalsReused: '没有新提案，复用已有 {count} 条',
       proposalIdsCount: '{count} 条提案',
       actEmpty: '还没有执行 Act',
       actHint: '点击「生成提案」把发现转成上下文补丁。',
@@ -555,6 +556,7 @@ window.__ModuleLoader__.load({
       regenerateProposals: 'Regenerate proposals',
       proposalsGenerated: '{count} proposals generated',
       proposalsGeneratedNone: 'No new proposals from this run',
+      proposalsReused: 'No new proposals; reused {count} existing',
       proposalIdsCount: '{count} proposals',
       actEmpty: 'Act has not run yet',
       actHint: 'Click Generate proposals to turn findings into context patches.',
@@ -3071,6 +3073,9 @@ window.__ModuleLoader__.load({
             if (next.id) setRun(next);
           }
           const created = pickArray(data, ['proposals']).map(normalizeProposal);
+          // `created` counts what this call actually added; `proposals` may also
+          // include ones it reused, so the notice must not claim new cards.
+          const added = toNumber(data.created);
           // Show what the POST just created without waiting for the list round
           // trip: the tab must not look unchanged while the refetch is in flight.
           if (created.length) {
@@ -3086,9 +3091,13 @@ window.__ModuleLoader__.load({
           setReloadKey((value) => value + 1);
           setNotice({
             kind: 'success',
-            text: created.length
-              ? t('proposalsGenerated', { count: formatInt(created.length) })
-              : t('proposalsGeneratedNone'),
+            text: added !== null
+              ? (added > 0
+                ? t('proposalsGenerated', { count: formatInt(added) })
+                : t('proposalsReused', { count: formatInt(toNumber(data.reused)) }))
+              : (created.length
+                ? t('proposalsGenerated', { count: formatInt(created.length) })
+                : t('proposalsGeneratedNone')),
           });
         } finally {
           pendingRef.current = '';

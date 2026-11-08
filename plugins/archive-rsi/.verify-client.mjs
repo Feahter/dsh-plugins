@@ -399,7 +399,7 @@ check('CLI.8', 'the PDCA layout keeps its scroll contract and both locales carry
   for (const language of ['zh', 'en']) {
     const table = dict && dict[language];
     if (!table) { missing.push(`no ${language} dictionary`); continue; }
-    for (const key of ['generateProposals', 'regenerateProposals', 'runStatusFailed', 'tagAutoHint']) {
+    for (const key of ['generateProposals', 'regenerateProposals', 'proposalsReused', 'runStatusFailed', 'tagAutoHint']) {
       if (typeof table[key] !== 'string' || !table[key]) missing.push(`${language}.${key} missing`);
     }
   }
