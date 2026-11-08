@@ -425,12 +425,35 @@ export const AUTO_TAG_PREFIX = 'auto:';
 export const DEFAULT_AUTO_TAG_LIMIT = 8;
 const MAX_TAGS_TOTAL = 24;
 
-/** One tag fragment: lowercase, charset-safe, bounded. */
+/**
+ * Tag charset (DESIGN §2.1): lowercase ASCII `a-z 0-9 . _ : -` plus Han
+ * characters from the CJK Extension A (U+3400-U+4DBF), Unified
+ * (U+4E00-U+9FFF) and Compatibility (U+F900-U+FAFF) blocks. Spaces and every
+ * other punctuation mark stay banned. One shared character class feeds both the
+ * producer and the validators so they cannot drift apart.
+ */
+const TAG_CHAR_CLASS = 'a-z0-9._:\\-\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff';
+const TAG_ILLEGAL_RE = new RegExp(`[^${TAG_CHAR_CLASS}]+`, 'g');
+const TAG_VALID_RE = new RegExp(`^[${TAG_CHAR_CLASS}]+$`);
+
+/** Chinese label per known error code; unlisted codes keep their lowercase code. */
+const ERROR_CODE_LABELS = {
+  FS_STALE_VERSION: '文件版本过期',
+  FS_NOT_FOUND: '文件不存在',
+  FS_NOT_OBSERVED: '未先读取文件',
+  AUTO_REVIEW_FAILED: '自动审查失败',
+  TEAM_MEMBER_NOT_FOUND: '团队成员不存在',
+  INVALID_ARGS: '参数不合法',
+  SEARCH_FAILED: '搜索失败',
+  UNKNOWN: '未知错误',
+};
+
+/** One tag fragment: lowercase, charset-safe (Han kept), bounded. */
 function tagFragment(value, max = 32) {
   const text = String(value == null ? '' : value)
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9._:-]+/g, '-')
+    .replace(TAG_ILLEGAL_RE, '-')
     .replace(/^-+|-+$/g, '');
   return text.slice(0, max);
 }
@@ -439,6 +462,12 @@ function tagFragment(value, max = 32) {
 function autoTag(fragment) {
   const body = tagFragment(fragment, 32 - AUTO_TAG_PREFIX.length);
   return body ? `${AUTO_TAG_PREFIX}${body}` : '';
+}
+
+/** T3 detail: the Chinese name of a known error code, else the code itself. */
+function errorCodeLabel(code) {
+  const raw = String(code == null ? '' : code).trim();
+  return ERROR_CODE_LABELS[raw.toUpperCase()] || tagFragment(raw, 20);
 }
 
 /**
@@ -480,10 +509,12 @@ export function deriveAutoTags(facts, options = {}) {
       }
     }
   }
-  if (modalCode && modalCount >= 3) push(autoTag(`err.${tagFragment(modalCode, 20)}`));
+  // A code made only of illegal characters yields an empty label; keep the tag
+  // meaningful instead of emitting a bare "auto:错误热点:".
+  if (modalCode && modalCount >= 3) push(autoTag(`错误热点:${errorCodeLabel(modalCode) || '未知错误'}`));
 
   // T4 — the R4 predicate: edited, then never checked.
-  if (finiteOr(edits.count, 0) > 0 && finiteOr(input.afterLastEditChecks, 0) === 0) push(autoTag('gap.verify'));
+  if (finiteOr(edits.count, 0) > 0 && finiteOr(input.afterLastEditChecks, 0) === 0) push(autoTag('验证缺口'));
 
   // T5 — a turn that failed rather than produced work.
   const failedTurns =
@@ -491,36 +522,36 @@ export function deriveAutoTags(facts, options = {}) {
     finiteOr(turnEnds['max-tokens'], 0) +
     finiteOr(turnEnds.aborted, 0) +
     finiteOr(turnEnds.interrupted, 0);
-  if (failedTurns > 0) push(autoTag('fail.turn'));
+  if (failedTurns > 0) push(autoTag('轮次异常'));
 
   // T6 — the same call re-issued.
-  if (Array.isArray(input.repeated) && input.repeated.length > 0) push(autoTag('repeat'));
+  if (Array.isArray(input.repeated) && input.repeated.length > 0) push(autoTag('重复调用'));
 
   // T7 — the user had to correct the agent.
   const corrections = finiteOr(counters.corrections, 0) || humanTexts.filter((row) => correctionMatches(row.text)).length;
-  if (corrections > 0) push(autoTag('correction'));
+  if (corrections > 0) push(autoTag('用户纠正'));
 
   // T2 / T1 — who ran it, under what preset.
   const origin = String(input.origin || '').toLowerCase();
   const depth = finiteOr(input.delegationDepth, 0);
-  if (origin === 'subagent' || depth > 0) push(autoTag('origin.subagent'));
-  else if (origin === 'user') push(autoTag('origin.user'));
-  else push(autoTag('origin.other'));
+  if (origin === 'subagent' || depth > 0) push(autoTag('来源:子代理'));
+  else if (origin === 'user') push(autoTag('来源:直接对话'));
+  else push(autoTag('来源:其他'));
   const preset = String(input.agentPreset || '').trim();
-  if (preset) push(autoTag(`preset.${tagFragment(preset, 24)}`));
+  if (preset) push(autoTag(`预设:${tagFragment(preset, 24)}`));
 
   // T8 / T9 — context pressure, mutually exclusive.
   const ratio = finiteOr(input.peakContextRatio, 0);
-  if (ratio >= 0.6) push(autoTag('ctx.pressure'));
-  else if (ratio >= 0.3) push(autoTag('ctx.heavy'));
+  if (ratio >= 0.6) push(autoTag('上下文吃紧'));
+  else if (ratio >= 0.3) push(autoTag('上下文偏重'));
 
   // T10 — cost outlier against the cohort.
   const median = finiteOr(options.cohortMedianTokens, 0);
   const totalTokens = finiteOr(usage.totalTokens, 0);
-  if (median > 0 && totalTokens >= 3 * median && totalTokens >= 200_000) push(autoTag('cost.high'));
+  if (median > 0 && totalTokens >= 3 * median && totalTokens >= 200_000) push(autoTag('成本偏高'));
 
   // T11 — long mechanical session.
-  if (finiteOr(counters.steps, 0) >= 100) push(autoTag('scale.long'));
+  if (finiteOr(counters.steps, 0) >= 100) push(autoTag('长任务'));
 
   // T12 — the two most-used tools, when they carry real volume.
   const ranked = tools
@@ -528,7 +559,7 @@ export function deriveAutoTags(facts, options = {}) {
     .filter((tool) => tool.name && tool.calls >= 5)
     .sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name))
     .slice(0, 2);
-  for (const tool of ranked) push(autoTag(`tool.${tagFragment(tool.name, 20)}`));
+  for (const tool of ranked) push(autoTag(`常用工具:${tagFragment(tool.name, 20)}`));
 
   // T13 — dominant language of the human turns (mixed sessions get both).
   let cjk = 0;
@@ -540,8 +571,8 @@ export function deriveAutoTags(facts, options = {}) {
   }
   const letters = cjk + ascii;
   if (letters >= 20) {
-    if (cjk / letters >= 0.3) push(autoTag('lang.zh'));
-    if (ascii / letters >= 0.7) push(autoTag('lang.en'));
+    if (cjk / letters >= 0.3) push(autoTag('语言:中文'));
+    if (ascii / letters >= 0.7) push(autoTag('语言:英文'));
   }
 
   return out.slice(0, limit);
@@ -1179,7 +1210,7 @@ function normalizeStatus(value, fallback = 'archived') {
   return value === 'archived' || value === 'pinned' || value === 'trash' ? value : fallback;
 }
 
-/** Tags: lowercase, trimmed, deduped, `[a-z0-9._:-]`, <= 32 chars, <= 24. */
+/** Tags: lowercase, trimmed, deduped, `[a-z0-9._:-]` plus Han, <= 32 chars, <= 24. */
 /**
  * Owner-supplied tags: normalize case, then REJECT anything that is not a tag.
  *
@@ -1191,7 +1222,7 @@ function normalizeStatus(value, fallback = 'archived') {
  * @param {string[]|string} value
  * @returns {string[]}
  */
-function strictTags(value) {
+export function strictTags(value) {
   const raw = typeof value === 'string' ? [value] : value;
   const out = [];
   const seen = new Set();
@@ -1204,9 +1235,11 @@ function strictTags(value) {
     if (tag.length > MAX_TAG_CHARS) {
       throw Object.assign(new Error(`invalid tag ${JSON.stringify(item)}: longer than ${MAX_TAG_CHARS} characters`), { code: 'invalid-tag' });
     }
-    if (!/^[a-z0-9._:-]+$/.test(tag)) {
+    if (!TAG_VALID_RE.test(tag)) {
       throw Object.assign(
-        new Error(`invalid tag ${JSON.stringify(item)}: allowed characters are a-z 0-9 . _ : -`),
+        new Error(
+          `invalid tag ${JSON.stringify(item)}: allowed characters are a-z 0-9 . _ : - and Chinese (Han) characters; spaces and other punctuation are not allowed`,
+        ),
         { code: 'invalid-tag' },
       );
     }
@@ -1221,7 +1254,7 @@ function strictTags(value) {
 }
 
 /** Lossy normalization for machine-generated tag lists (search needles, index repair). */
-function normalizeTags(value) {
+export function normalizeTags(value) {
   const raw = Array.isArray(value)
     ? value
     : typeof value === 'string'
@@ -1234,7 +1267,7 @@ function normalizeTags(value) {
     const tag = item
       .toLowerCase()
       .trim()
-      .replace(/[^a-z0-9._:-]+/g, '-')
+      .replace(TAG_ILLEGAL_RE, '-')
       .replace(/^[-._:]+|[-._:]+$/g, '')
       .slice(0, MAX_TAG_CHARS);
     if (!tag || seen.has(tag)) continue;

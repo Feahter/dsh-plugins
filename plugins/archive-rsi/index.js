@@ -39,6 +39,8 @@ import {
   planRun,
   proposalsFor,
   revertProposal,
+  summarizeRun,
+  RUN_STALE_MS,
 } from './alchemy.js';
 import { SECTION_NAME, lessonsBlock, protocolText } from './protocol.js';
 import { annotate, filterByHarnessArchive, readHarnessArchive } from './workspace-archive.js';
@@ -306,14 +308,17 @@ async function selectCohort(store, cohort, now) {
  * caller must not have to guess about: without them `rsi_act` has nothing to
  * turn into proposals, and a silent empty act phase looks like "no problems".
  */
-function finishCheck(run, facts, baselineMetrics) {
-  const checked = executeCheck(run, facts, baselineMetrics);
+export function finishCheck(run, facts, baselineMetrics) {
+  const now = Date.now();
+  const checked = executeCheck(run, facts, baselineMetrics, { now });
   const present = checked.act && Array.isArray(checked.act.findings) ? checked.act.findings : [];
   // An empty array from executeCheck is not evidence that the corpus is clean;
   // derive from the metrics whenever it comes back empty.
   const findings = present.length ? present : deriveFindings(checked.check.metrics, facts, checked.cohort);
   checked.act = { findings, proposalIds: checked.act && Array.isArray(checked.act.proposalIds) ? checked.act.proposalIds : [] };
   checked.phase = checked.act.proposalIds.length ? 'closed' : 'act';
+  checked.status = 'checked';
+  checked.finishedAt = now;
   return checked;
 }
 
@@ -359,14 +364,42 @@ async function runOnce({ store, config, args, execute, ensureReady }) {
   await store1.sync({ refresh: false });
   const now = Date.now();
   const cohort = runCohort(args, config);
-  const runs = await store1.listRuns({ limit: 1 });
-  const baselineRunId = runs.length && runs[0].check ? runs[0].id : null;
+  const runs = await store1.listRuns({ limit: 20 });
+  // A crash between the running marker and the final write leaves a run that
+  // says "running" forever. That entry would sit at the head of the list, poison
+  // the baseline choice and defer the auto run by a whole cycle, so retire it.
+  const head = runs[0];
+  if (head && head.status === 'running' && now - (head.updatedAt || head.createdAt || 0) > RUN_STALE_MS) {
+    await store1.saveRun({ ...head, status: 'failed', updatedAt: now, finishedAt: head.updatedAt || head.createdAt || now });
+  }
+  const baselines = await store1.readBaselines();
+  // Prefer the newest run that actually checked something; fall back to the
+  // newest stored baseline, so a plan-only or retired run cannot silently drop
+  // the deltas of the next pass.
+  // "Finished" means the run reached check/act, not merely that a check block
+  // exists: a crashed marker can carry an empty check skeleton.
+  const isFinished = (run) => Boolean(run)
+    && (run.status === 'checked' || run.status === 'closed'
+      || (!run.status && run.check && Array.isArray(run.check.verdicts)));
+  const lastChecked = runs.find(isFinished);
+  let baselineRunId = lastChecked ? lastChecked.id : '';
+  if (!baselineRunId) {
+    const newest = Object.keys(baselines)
+      .map((id) => ({ id, ts: (baselines[id] && baselines[id].ts) || 0 }))
+      .sort((a, b) => b.ts - a.ts)[0];
+    baselineRunId = newest ? newest.id : null;
+  }
+  const baseline = baselineRunId && baselines[baselineRunId] ? baselines[baselineRunId].metrics : null;
   let run = planRun({ cohort, targets: asTargets(args.targets), baselineRunId }, { now });
   if (!execute) {
     await store1.saveRun(run);
     await store1.journal('run.plan', run.id, { cohort });
     return run;
   }
+  // Persist a running marker (same id, so no new run file) before the analysis
+  // starts, so a concurrent reader or a crash mid-run sees "running", not the
+  // last finished run.
+  await store1.saveRun({ ...run, status: 'running', updatedAt: Date.now() });
   const selection = await selectCohort(store1, cohort, now);
   const entries = selection.entries;
   run.cohort.source = selection.source;
@@ -377,8 +410,6 @@ async function runOnce({ store, config, args, execute, ensureReady }) {
   run.do.coverage.requested = entries.length;
   run.do.coverage.skipped = failures.length;
   run.do.coverage.failures = failures.slice(0, 10);
-  const baselines = await store1.readBaselines();
-  const baseline = baselineRunId ? (baselines[baselineRunId] && baselines[baselineRunId].metrics) || null : null;
   run = finishCheck(run, facts, baseline);
   await store1.saveRun(run);
   await store1.saveBaseline(run.id, run.check.metrics);
@@ -682,6 +713,7 @@ function buildTools({ store, config, paths, state, ensureReady }) {
         for (const proposal of proposals) await store1.saveProposal(proposal);
         run.act.proposalIds = proposals.map((proposal) => proposal.id);
         run.phase = 'closed';
+        run.status = 'closed';
         await store1.saveRun(run);
         await store1.journal('run.act', run.id, { proposals: run.act.proposalIds.length });
         return ok({ run, proposals });
@@ -747,10 +779,27 @@ function buildTools({ store, config, paths, state, ensureReady }) {
           ),
         };
         const run = args.runId ? await store1.getRun(requireId(args.runId)) : runs[0] || null;
+        const lastRunSummary = runs[0] ? summarizeRun(runs[0]) : null;
+        const statusEveryDays = config.autoRunEveryDays;
+        const statusAutoEnabled = statusEveryDays > 0;
+        const statusAutoDueAt = statusAutoEnabled && lastRunSummary
+          ? lastRunSummary.createdAt + statusEveryDays * 86_400_000
+          : null;
+        const statusAutoDue = statusAutoEnabled ? !lastRunSummary || Date.now() >= statusAutoDueAt : false;
         return ok({
           corpus,
           run,
           runs,
+          status: {
+            running: lastRunSummary ? lastRunSummary.running : false,
+            lastRun: lastRunSummary,
+            autoRun: {
+              enabled: statusAutoEnabled,
+              everyDays: statusEveryDays,
+              dueAt: statusAutoDueAt,
+              due: statusAutoDue,
+            },
+          },
           proposals: {
             proposed: proposals.filter((p) => p.status === 'proposed').slice(0, limit),
             adopted: adopted.slice(0, limit),
@@ -857,7 +906,7 @@ async function readJsonBody(req) {
  * and reuses its Host/Origin/browser-auth checks for every route, because a raw
  * `webServer` route is not authenticated by the carrier.
  */
-export function buildPanelHandler({ store, paths, state, ensureReady, getConnection }) {
+export function buildPanelHandler({ store, paths, state, config, ensureReady, getConnection }) {
   return async function handler(req, res) {
     const connection = typeof getConnection === 'function' ? getConnection() : undefined;
     if (!connection || typeof connection.requestRejection !== 'function') {
@@ -879,7 +928,7 @@ export function buildPanelHandler({ store, paths, state, ensureReady, getConnect
     try {
       const store1 = await ensureReady();
       const body = method === 'GET' || method === 'HEAD' ? {} : await readJsonBody(req);
-      const result = await route({ store: store1, paths, state, url, segments, method, body });
+      const result = await route({ store: store1, paths, state, config, url, segments, method, body, ensureReady });
       if (result === undefined) {
         sendJson(res, 404, { ok: false, error: { code: 'not-found', message: `${method} ${url.pathname} not found` } });
         return;
@@ -894,7 +943,7 @@ export function buildPanelHandler({ store, paths, state, ensureReady, getConnect
   };
 }
 
-async function route({ store, paths, url, segments, method, body }) {
+async function route({ store, paths, config, url, segments, method, body, ensureReady }) {
   const [first, second, third] = segments;
 
   if (!first) return undefined;
@@ -905,6 +954,11 @@ async function route({ store, paths, url, segments, method, body }) {
     const archiveState = await readHarnessArchive(dshHome());
     const runs = await store.listRuns({ limit: 5 });
     const proposals = await store.listProposals({ limit: 100 });
+    const lastRun = runs[0] ? summarizeRun(runs[0]) : null;
+    const autoEveryDays = config.autoRunEveryDays;
+    const autoEnabled = autoEveryDays > 0;
+    const autoDueAt = autoEnabled && lastRun ? lastRun.createdAt + autoEveryDays * 86_400_000 : null;
+    const autoDue = autoEnabled ? !lastRun || Date.now() >= autoDueAt : false;
     return {
       payload: {
         ok: true,
@@ -920,7 +974,13 @@ async function route({ store, paths, url, segments, method, body }) {
           harnessPinned: archiveState.pinned.size,
           harnessArchiveError: archiveState.error,
         },
-        lastRun: runs[0] || null,
+        lastRun,
+        autoRun: {
+          enabled: autoEnabled,
+          everyDays: autoEveryDays,
+          dueAt: autoDueAt,
+          due: autoDue,
+        },
         proposals: {
           proposed: proposals.filter((p) => p.status === 'proposed').length,
           adopted: proposals.filter((p) => p.status === 'adopted').length,
@@ -1013,35 +1073,9 @@ async function route({ store, paths, url, segments, method, body }) {
       return { payload: { ok: true, runs } };
     }
     if (method === 'POST') {
-      await store.sync({ refresh: false });
-      const now = Date.now();
-      const cohort = {
-        days: Number.isFinite(body.days) ? Math.max(0, Math.floor(body.days)) : 30,
-        workspace: typeof body.workspace === 'string' ? body.workspace : null,
-        tag: typeof body.tag === 'string' ? body.tag : null,
-        status: ['archived', 'pinned', 'trash', 'all'].includes(body.status) ? body.status : 'all',
-        limit: asLimit(body.limit, 40, 500),
-      };
-      const selection = await selectCohort(store, cohort, now);
-      const entries = selection.entries;
-      const { facts, failures } = await loadFacts(store, entries);
-      let run = planRun({ cohort, targets: undefined, baselineRunId: null }, { now });
-      run.cohort.source = selection.source;
-      run.cohort.harnessArchivedTotal = selection.archivedTotal;
-      run.cohort.archivedInWindow = selection.archivedInWindow;
-      run = executeDo(run, facts);
-      run.do.coverage.requested = entries.length;
-      run.do.coverage.skipped = failures.length;
-      run.do.coverage.failures = failures.slice(0, 10);
-      const baselines = await store.readBaselines();
-      const previous = Object.keys(baselines)
-        .map((id) => ({ id, ts: baselines[id].ts || 0 }))
-        .sort((a, b) => b.ts - a.ts)[0];
-      run.plan.baselineRunId = previous ? previous.id : null;
-      const baseline = previous ? baselines[previous.id].metrics : null;
-      run = finishCheck(run, facts, baseline);
-      await store.saveRun(run);
-      await store.saveBaseline(run.id, run.check.metrics);
+      // Reuse the shared `runOnce` pipeline so the panel-triggered run writes
+      // the journal and behaves exactly like `rsi_run` / the auto run.
+      const run = await runOnce({ store, config, args: body, execute: true, ensureReady });
       return { payload: { ok: true, run } };
     }
   }
@@ -1062,6 +1096,7 @@ async function route({ store, paths, url, segments, method, body }) {
     for (const proposal of proposals) await store.saveProposal(proposal);
     run.act.proposalIds = proposals.map((proposal) => proposal.id);
     run.phase = 'closed';
+    run.status = 'closed';
     await store.saveRun(run);
     return { payload: { ok: true, run, proposals } };
   }
@@ -1166,8 +1201,10 @@ export function apply(ctx, rawConfig) {
    */
   const autoRun = async () => {
     try {
-      const runs = await store.listRuns({ limit: 1 });
-      const last = runs[0];
+      const runs = await store.listRuns({ limit: 5 });
+      // A running marker or a retired (failed) run is not a completed pass, so it
+      // must not postpone the next attempt by a whole cycle.
+      const last = runs.find((run) => run && run.status !== 'running' && run.status !== 'failed') || null;
       const due = !last || Date.now() - (last.createdAt || 0) >= config.autoRunEveryDays * 86_400_000;
       if (!due) return;
       const run = await runOnce({ store, config, args: {}, execute: true, ensureReady: async () => store });
@@ -1176,10 +1213,13 @@ export function apply(ctx, rawConfig) {
         proposals = proposalsFor(run);
         for (const proposal of proposals) await store.saveProposal(proposal);
         run.act.proposalIds = proposals.map((proposal) => proposal.id);
-        run.phase = 'closed';
-        await store.saveRun(run);
         await store.journal('run.act', run.id, { proposals: run.act.proposalIds.length, auto: true });
       }
+      // Close the run regardless of autoPropose so the latest run always reads
+      // as finished, not as a stuck "running" heartbeat.
+      run.phase = 'closed';
+      run.status = 'closed';
+      await store.saveRun(run);
       if (config.autoAdopt) {
         const adoptable = proposals.find((proposal) => proposal.kind === 'prompt-section');
         if (adoptable) {
@@ -1235,6 +1275,7 @@ export function apply(ctx, rawConfig) {
       store,
       paths,
       state,
+      config,
       ensureReady,
       getConnection: () => ctx.get('connection'),
     });

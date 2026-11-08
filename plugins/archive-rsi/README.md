@@ -89,24 +89,31 @@ pnpm add link:/Users/fuzhuo/Documents/deepseek-harness/default-workspace/archive
 每次 sync（以及 `archive_autotag`）都会从 `SessionFacts` 派生一组 `auto:*` 标签。**不调用模型**：
 一条标签要么是日志里的事实，要么不写。规则见 [DESIGN §10](./DESIGN.md)：
 
-| 前缀 | 触发条件 | 例 |
+| 标签 | 触发条件 | 例 |
 |---|---|---|
-| `auto:err.<code>` | 某个错误码累计 ≥3 次（取众数） | `auto:err.fs_stale_version` |
-| `auto:gap.verify` | 有编辑、但最后一次编辑后没有任何检查命令 | — |
-| `auto:fail.turn` | 回合以 error / max-tokens / aborted / interrupted 结束 | — |
-| `auto:repeat` | 同工具同参数被重复调用 | — |
-| `auto:correction` | 用户纠正过（与 §5.1 同一套正则） | — |
-| `auto:origin.*` / `auto:preset.*` | 是谁跑的、跑在哪个预设下 | `auto:origin.subagent`、`auto:preset.router` |
-| `auto:ctx.pressure` / `auto:ctx.heavy` | 上下文峰值 ≥60% / 30–60% | — |
-| `auto:cost.high` | token 用量 ≥ 同批中位数 3 倍且 ≥20 万 | — |
-| `auto:scale.long` | ≥100 步 | — |
-| `auto:tool.<name>` | 调用次数最多的 2 个工具（各 ≥5 次） | `auto:tool.bash` |
-| `auto:lang.zh` / `auto:lang.en` | 人类消息里中日韩字符 ≥30% / 拉丁字母 ≥70% | — |
+| `auto:错误热点:<中文错误名>` | 某个错误码累计 ≥3 次（取众数），已知错误码映射为中文名 | `auto:错误热点:文件版本过期` |
+| `auto:验证缺口` | 有编辑、但最后一次编辑后没有任何检查命令 | — |
+| `auto:轮次异常` | 回合以 error / max-tokens / aborted / interrupted 结束 | — |
+| `auto:重复调用` | 同工具同参数被重复调用 | — |
+| `auto:用户纠正` | 用户纠正过（与 §5.1 同一套正则） | — |
+| `auto:来源:*` / `auto:预设:*` | 是谁跑的、跑在哪个预设下 | `auto:来源:子代理`、`auto:预设:router` |
+| `auto:上下文吃紧` / `auto:上下文偏重` | 上下文峰值 ≥60% / 30–60% | — |
+| `auto:成本偏高` | token 用量 ≥ 同批中位数 3 倍且 ≥20 万 | — |
+| `auto:长任务` | ≥100 步 | — |
+| `auto:常用工具:<name>` | 调用次数最多的 2 个工具（各 ≥5 次） | `auto:常用工具:bash` |
+| `auto:语言:中文` / `auto:语言:英文` | 人类消息里中日韩字符 ≥30% / 拉丁字母 ≥70% | — |
 
 生命周期是「手动优先、自动可重算」：重算时只删除**上次由插件自己写的**那批（记录在
 `entry.autoTags`），手动标签永远保留；`autoTag: false` 会关掉 sync 时的派生，已有标签不动。
-标签仍是 `[a-z0-9._:-]`、单条 ≤32 字符、每条会话合计 ≤24 个，采集按「问题类 → 身份类 →
-规模类 → 工具类 → 语言类」的优先级截断。
+标签字符集是「ASCII 小写 `a-z 0-9 . _ : -` + 汉字（U+3400–U+4DBF、U+4E00–U+9FFF、
+U+F900–U+FAFF）」、单条 ≤32 字符、每条会话合计 ≤24 个，仍禁止空格与其他标点；采集按
+「问题类 → 身份类 → 规模类 → 工具类 → 语言类」的优先级截断。
+
+面板顶部有一条「炼金状态」：运行中 / 空闲 / 上次运行中断 / 尚未运行，附最近运行的相对时间、
+用时、目标达标（passed/total）、待处理提案数与下次自动运行时间；运行列表与详情头也显示状态
+（仅计划 / 运行中 / 已检查·待生成提案 / 已完成 / 运行失败）、开始/结束、用时与目标达标。
+自动标签在面板展示时剥掉 `auto:` 前缀（title 保留完整值）。崩溃遗留的「运行中」记录会在下一次
+运行开始时被标记为「运行失败」，不会长期卡在列表头部或推迟下一次自动运行。
 
 ## 度量口径（都可复算）
 

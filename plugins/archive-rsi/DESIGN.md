@@ -159,7 +159,8 @@ proposal.revert, config.invalid`.
 - `status`: `archived` (default), `pinned`, `trash`. Delete without `purge` moves to
   `trash`; delete with `purge: true` removes the entry and its derived files
   (`sessions/<id>.json|.md`). **The DSH session file is never modified or removed.**
-- `tags` are lowercase, trimmed, deduped, `[a-z0-9._:-]`, max 32 chars, max 24 per entry.
+- `tags` are lowercase, trimmed, deduped, `[a-z0-9._:-]` plus Han (U+3400–U+4DBF, U+4E00–U+9FFF,
+  U+F900–U+FAFF), max 32 chars, max 24 per entry. Spaces and every other punctuation mark stay banned.
 - Tags in the `auto:` namespace are owned by the plugin (§10). Recomputing them removes the
   previous `autoTags` and never touches a manual tag; a manual tag that happens to start with
   `auto:` is still manual once it has been written through `update()`.
@@ -255,6 +256,10 @@ Never include reasoning blocks. Never include `request/header`.
   id,                        // 'run-<yyyymmdd-hhmmss>-<4rand>'
   createdAt, updatedAt,
   phase,                     // 'plan' | 'do' | 'check' | 'act' | 'closed'
+  status,                    // 'planned' | 'running' | 'checked' | 'closed' | 'failed'
+                             //   lifecycle; derived from phase when absent. 'failed' is written only when a
+                             //   crashed 'running' marker is retired (see §7.3 POST /runs)
+  startedAt, finishedAt,     // ms; startedAt = planRun time, finishedAt = check time (null until checked/closed/failed)
   cohort: {                  // what to analyze
     days,                    // number, default 30; 0 = all
     workspace,               // string | null  (substring match on cwd)
@@ -286,6 +291,14 @@ Never include reasoning blocks. Never include `request/header`.
   act: { findings: [Finding], proposalIds: [] }
 }
 ```
+
+`summarizeRun(run, { now?, staleMs? })` (alchemy.js) reduces a run to
+`{ id, status, phase, createdAt, updatedAt, startedAt, finishedAt, durationMs, running, stalled,
+targets:{total,passed,failed,flat,unknown}, findings, proposals }`. `running = status==='running' && !stalled`;
+`stalled = status==='running' && now-(updatedAt||createdAt) > staleMs` (default 10 min); `finishedAt` falls back
+to `updatedAt` when checked/closed/failed and missing; `durationMs = finishedAt-startedAt`, and stays null when the
+run carries no `startedAt` (runs written before that field existed report no duration instead of the 0 ms
+createdAt→updatedAt gap). `status==='failed'` reports `running:false, stalled:false`.
 
 Default plan targets (created by `rsi_plan` when the caller gives none):
 
@@ -501,6 +514,8 @@ files actually re-decoded, `imported` only files new to the index.
 
 ```js
 export const DEFAULT_TARGETS = [...];
+export const RUN_STATUSES = ['planned', 'running', 'checked', 'closed'];
+export const RUN_STALE_MS = 10 * 60 * 1000;                                  // a running run stalls after this
 export function deriveFindings(metrics, factsList, cohort) -> Finding[]     // pure, R1..R10
 export function cohortMetrics(factsList) -> CohortMetrics                   // pure
 export function median(xs) -> number          // === percentile(xs, 0.5): even-length lists take the LOWER middle element
@@ -508,6 +523,7 @@ export function percentile(xs, p) -> number                                  // 
 export function planRun({ cohort, targets, baselineRunId }) -> PdcaRun      // pure
 export function executeDo(run, factsList) -> PdcaRun                        // fills do (pure)
 export function executeCheck(run, factsList, baselineMetrics) -> PdcaRun    // fills check (pure)
+export function summarizeRun(run, { now?, staleMs? }) -> object             // pure; §5 summary shape
 export function proposalsFor(run) -> Proposal[]                             // pure; evidence ids kept
 export function evaluateAdoptions(proposals, factsList, { minSessions })
    -> Proposal[]                                                            // fills evaluation, pure
@@ -517,6 +533,12 @@ export function revertProposal(proposal, { rootDir, agentsFile, skillsRoot })
    -> Promise<Proposal>
 export function slugifySkill(name) -> string
 ```
+
+`RUN_STATUSES` / `RUN_STALE_MS` / `summarizeRun` implement the §5 lifecycle: `summarizeRun` never
+mutates and never reads the clock unless the caller injects `now`. `status` is derived from `phase`
+(`plan`→`planned`, `do`→`running`, `check`/`act`→`checked`, `closed`→`closed`) when a run carries none.
+`executeCheck` itself stamps `status:'checked'` and `finishedAt`, so callers that skip `finishCheck`
+cannot persist a run that says it is still running.
 
 **`executeCheck` also fills `run.act.findings = deriveFindings(run.check.metrics, factsList, run.cohort)`**
 and leaves `run.act.proposalIds = []` for `proposalsFor` to fill later. `run.phase` becomes `'act'`
@@ -565,7 +587,7 @@ a plain JSON-serializable object. All tool errors are returned as `{ ok: false, 
 | `rsi_plan` | `{ days?, workspace?, tag?, limit?, targets? }` | `{ ok, run }` |
 | `rsi_run` | `{ runId?, days?, workspace?, tag?, limit?, targets? }` | `{ ok, run }` — plan+do+check in one call; the cohort is the Harness-archived set unless `cohort.source` says `all` |
 | `rsi_act` | `{ runId }` | `{ ok, run, proposals }` |
-| `rsi_status` | `{ runId?, limit? }` | `{ ok, corpus, lastRun, openProposals, adopted }` |
+| `rsi_status` | `{ runId?, limit? }` | `{ ok, corpus, run, runs, status: { running, lastRun, autoRun: { enabled, everyDays, dueAt, due } }, proposals, openProposals, adopted }` — additive; `status.lastRun` is the §5 summary |
 | `rsi_adopt` | `{ proposalId, revert?: boolean, dryRun?: boolean }` | `{ ok, proposal }` |
 
 Plugin exports: `inject = ['tools', 'systemPrompt']` plus a deferred `ctx.inject(['webServer'], …)` child
@@ -578,7 +600,7 @@ body cap 256 KiB; `{ok:false,error:{code,message}}` on failure; status codes:
 
 | route | notes |
 |---|---|
-| `GET /overview` | corpus counts, tag/workspace vocabulary, last run, proposal counts, root path |
+| `GET /overview` | corpus counts, tag/workspace vocabulary, `lastRun` (§5 summary, not the full run), `autoRun:{enabled,everyDays,dueAt,due}`, proposal counts, root path |
 | `GET /sessions?query&tag&status&workspace&limit&offset&sort` | list |
 | `GET /sessions/:id?transcript=1&maxChars=` | entry + facts (+ transcript) |
 | `PATCH /sessions/:id` | `{title?,note?,tags?,status?}` |
@@ -586,7 +608,7 @@ body cap 256 KiB; `{ok:false,error:{code,message}}` on failure; status codes:
 | `POST /sync` | `{refresh?}` |
 | `POST /autotag` | `{id?,dryRun?,limit?}` — recompute §10 tags (panel button) |
 | `GET /runs?limit=` / `GET /runs/:id` | list / one |
-| `POST /runs` | plan+do+check from body `{days?,workspace?,tag?,status?,limit?}` |
+| `POST /runs` | plan+do+check from body `{days?,workspace?,tag?,status?,limit?}`; reuses `runOnce` (same `run.do`/`run.check` journal, same baseline choice and same cohort defaults as `rsi_run`: `days 30`, `limit 40`, retention `archived + pinned`), returns `{ok:true, run}` with `status`. Before planning it retires a head run left `running` for longer than `RUN_STALE_MS` as `failed`, and it takes its baseline from the newest *finished* run (falling back to the newest `baselines.json` entry), so a crashed or plan-only run can neither steal the baseline nor postpone the next auto run |
 | `POST /runs/:id/act` | generate proposals for that run (rsi_act semantics) |
 | `GET /proposals?status&runId&limit` | list |
 | `POST /proposals/:id/reject` | mark rejected |
@@ -657,8 +679,8 @@ Unknown keys → warning, ignored. Never throw on bad config; clamp numbers.
 4. `.verify-client.mjs`: loads `client.js` under a stub module loader with a stub
    `react`, asserts both slot registrations and that the page component renders
    (renderToString-level smoke, no DOM required).
-5. Automatic tags: the five checks in §10.3, plus "every derived tag matches
-   `/^auto:[a-z0-9.:_-]+$/` and is <= 32 characters" over the real corpus.
+5. Automatic tags: the §10.3 checks, plus "every derived tag matches
+   `/^auto:(?:[a-z0-9._:-]|[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])+$/` and is <= 32 characters" over the real corpus.
 
 ---
 
@@ -675,9 +697,11 @@ written, and every rule below is a predicate on numbers already in §3.
   24 total by dropping the *auto* tail first. Manual tags therefore survive every sync, and an
   auto tag whose predicate stopped holding disappears.
 - The plugin never writes auto tags through `update()`, so `strictTags` (§2.1) keeps rejecting
-  caller-supplied tags that are not `[a-z0-9._:-]`. Auto tags are built from already-safe
-  fragments: every fragment is lowercased and every character outside `[a-z0-9._:-]` becomes
-  `-`; the whole tag is truncated to 32 characters.
+  caller-supplied tags that are not `[a-z0-9._:-]` plus Han. Auto tags are built from already-safe
+  fragments: every fragment is lowercased and every character outside `[a-z0-9._:-]` and the Han
+  blocks (U+3400–U+4DBF, U+4E00–U+9FFF, U+F900–U+FAFF) becomes `-`; the whole tag is truncated to 32
+  characters. `strictTags` accepts Han and still rejects spaces/punctuation; `normalizeTags` keeps Han
+  (it is the lossy search needle).
 - `autoTagLimit` (default 8) caps the auto set; rules are applied in the priority order below
   and the list is truncated.
 
@@ -685,27 +709,27 @@ written, and every rule below is a predicate on numbers already in §3.
 
 | # | tag | predicate | notes |
 |---|---|---|---|
-| T1 | `auto:preset.<preset>` | `agentPreset` is a non-empty string | the preset the session ran under |
-| T2 | `auto:origin.<user\|subagent\|other>` | `origin` normalized; `origin === 'subagent'` or `delegationDepth > 0` → `subagent`; empty/unknown → `other` | `user` only when `origin === 'user'` |
-| T3 | `auto:err.<code>` | a single `tools[].errorCodes` entry with `count >= 3`, or the whole session's `toolErrorRate` **and** that code is the modal one; code lowercased with `.`/`_` kept | one tag only, the modal code |
-| T4 | `auto:gap.verify` | `edits.count > 0 && afterLastEditChecks === 0` | the R4 predicate |
-| T5 | `auto:fail.turn` | `turnEnds.error + turnEnds['max-tokens'] + turnEnds.aborted + turnEnds.interrupted > 0` | |
-| T6 | `auto:repeat` | `repeated.length > 0` | identical call re-issued |
-| T7 | `auto:correction` | `counters.corrections > 0` **or** at least one `humanTexts[]` entry matching the §5.1 correction pattern | |
-| T8 | `auto:ctx.pressure` | `peakContextRatio >= 0.6` | |
-| T9 | `auto:ctx.heavy` | `0.3 <= peakContextRatio < 0.6` | mutually exclusive with T8 |
-| T10 | `auto:cost.high` | `cohortMedianTokens > 0 && usage.totalTokens >= 3 * cohortMedianTokens && usage.totalTokens >= 200000` | needs the cohort median; when it is unavailable the rule is skipped |
-| T11 | `auto:scale.long` | `counters.steps >= 100` | |
-| T12 | `auto:tool.<name>` | for the top `min(2, …)` tools by `calls` with `calls >= 5` | the fragment is charset-safe per §10.1, so `mcp__x__y` stays `mcp__x__y` (`_` is allowed); only characters outside `[a-z0-9._:-]` become `-` |
-| T13 | `auto:lang.zh` / `auto:lang.en` | over `humanTexts[].text`: `zh` when CJK characters ≥ 30% of all letters, `en` when ASCII letters ≥ 70% of all letters; the two predicates are independent, so a genuinely mixed session gets **both**, a pure session gets exactly one | no human text, or < 20 letters → no tag |
+| T1 | `auto:预设:<preset>` | `agentPreset` is a non-empty string | the preset the session ran under |
+| T2 | `auto:来源:<直接对话\|子代理\|其他>` | `origin` normalized; `origin === 'subagent'` or `delegationDepth > 0` → `子代理`; `origin === 'user'` → `直接对话`; empty/unknown → `其他` | |
+| T3 | `auto:错误热点:<中文错误名>` | a single `tools[].errorCodes` entry with `count >= 3`, or the whole session's `toolErrorRate` **and** that code is the modal one | one tag only, the modal code; known codes map to Chinese names (`FS_STALE_VERSION`→文件版本过期, `FS_NOT_FOUND`→文件不存在, `FS_NOT_OBSERVED`→未先读取文件, `AUTO_REVIEW_FAILED`→自动审查失败, `TEAM_MEMBER_NOT_FOUND`→团队成员不存在, `INVALID_ARGS`→参数不合法, `SEARCH_FAILED`→搜索失败, `unknown`→未知错误); unlisted codes keep their lowercase code (`_` kept) |
+| T4 | `auto:验证缺口` | `edits.count > 0 && afterLastEditChecks === 0` | the R4 predicate |
+| T5 | `auto:轮次异常` | `turnEnds.error + turnEnds['max-tokens'] + turnEnds.aborted + turnEnds.interrupted > 0` | |
+| T6 | `auto:重复调用` | `repeated.length > 0` | identical call re-issued |
+| T7 | `auto:用户纠正` | `counters.corrections > 0` **or** at least one `humanTexts[]` entry matching the §5.1 correction pattern | |
+| T8 | `auto:上下文吃紧` | `peakContextRatio >= 0.6` | |
+| T9 | `auto:上下文偏重` | `0.3 <= peakContextRatio < 0.6` | mutually exclusive with T8 |
+| T10 | `auto:成本偏高` | `cohortMedianTokens > 0 && usage.totalTokens >= 3 * cohortMedianTokens && usage.totalTokens >= 200000` | needs the cohort median; when it is unavailable the rule is skipped |
+| T11 | `auto:长任务` | `counters.steps >= 100` | |
+| T12 | `auto:常用工具:<name>` | for the top `min(2, …)` tools by `calls` with `calls >= 5` | the fragment is charset-safe per §10.1, so `mcp__x__y` stays `mcp__x__y` (`_` is allowed); only characters outside the allowed set become `-` |
+| T13 | `auto:语言:中文` / `auto:语言:英文` | over `humanTexts[].text`: `中文` when CJK characters ≥ 30% of all letters, `英文` when ASCII letters ≥ 70% of all letters; the two predicates are independent, so a genuinely mixed session gets **both**, a pure session gets exactly one | no human text, or < 20 letters → no tag |
 
 Priority order for truncation: **T3, T4, T5, T6, T7, T2, T1, T8, T9, T10, T11, T12, T13.**
 
 ### 10.3 Acceptance checks (added to the harness)
 
 - A crafted facts object with a modal error code and no post-edit check yields both
-  `auto:err.<code>` and `auto:gap.verify`, in that order before any tool tag.
-- A clean session yields `auto:origin.*` plus at most one scale/lang tag and no health tag.
+  `auto:错误热点:<中文错误名>` and `auto:验证缺口`, in that order before any tool tag.
+- A clean session yields `auto:来源:*` plus at most one scale/lang tag and no health tag.
 - Recompute keeps a manual tag: `update({tags:['manual-x']})` then `autotag` → `manual-x` still
   present, stale auto tags gone.
 - `dryRun: true` writes nothing (the index file's sha is unchanged) but reports the tags.

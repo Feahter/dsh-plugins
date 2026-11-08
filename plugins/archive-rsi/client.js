@@ -14,6 +14,8 @@ window.__ModuleLoader__.load({
     const REQUEST_TIMEOUT_MS = 30000;
     const NOTICE_TTL_MS = 5000;
     const TAG_LIMIT = 24;
+    // Mirrors alchemy.js RUN_STALE_MS: a run stuck in `running` this long is shown as interrupted.
+    const RUN_STALE_MS = 10 * 60 * 1000;
     const EVIDENCE_CHIP_LIMIT = 6;
 
     // ------------------------------------------------------------------ locale
@@ -41,6 +43,29 @@ window.__ModuleLoader__.load({
       metricCatalogBytes: '工具目录字节',
       metricTokens: 'Token 总量',
       metricFromLatestRun: '来自最近一次 PDCA 运行的队列指标',
+
+      alchemyStatus: '炼金状态',
+      alchemyStatusAria: '炼金运行状态',
+      alchemyRunning: '运行中',
+      alchemyIdle: '空闲',
+      alchemyStalled: '上次运行中断',
+      alchemyNeverRun: '尚未运行',
+      lastRunLabel: '最近运行',
+      runDurationLabel: '用时',
+      runTargetsLabel: '目标达标 {passed}/{total}',
+      proposalsPendingLabel: '待处理提案',
+      nextAutoRunLabel: '下次自动运行',
+      nextAutoRunDue: '已到期',
+      runStatusPlanned: '仅计划',
+      runStatusRunning: '运行中',
+      runStatusChecked: '已检查·待生成提案',
+      runStatusClosed: '已完成',
+      runStatusStalled: '中断',
+      runStatusFailed: '运行失败',
+      runStatusUnknown: '未知',
+      runStartedLabel: '开始',
+      runFinishedLabel: '结束',
+      tagAutoHint: '自动生成标签',
 
       tabArchive: '归档 Archive',
       tabPdca: '炼金 PDCA',
@@ -306,6 +331,29 @@ window.__ModuleLoader__.load({
       metricCatalogBytes: 'Catalog bytes',
       metricTokens: 'Tokens',
       metricFromLatestRun: 'Cohort metric from the latest PDCA run',
+
+      alchemyStatus: 'Alchemy status',
+      alchemyStatusAria: 'Alchemy run status',
+      alchemyRunning: 'Running',
+      alchemyIdle: 'Idle',
+      alchemyStalled: 'Last run stalled',
+      alchemyNeverRun: 'Not run yet',
+      lastRunLabel: 'Last run',
+      runDurationLabel: 'Duration',
+      runTargetsLabel: 'Targets met {passed}/{total}',
+      proposalsPendingLabel: 'Pending proposals',
+      nextAutoRunLabel: 'Next auto run',
+      nextAutoRunDue: 'Due now',
+      runStatusPlanned: 'Planned only',
+      runStatusRunning: 'Running',
+      runStatusChecked: 'Checked',
+      runStatusClosed: 'Completed',
+      runStatusStalled: 'Stalled',
+      runStatusFailed: 'Failed',
+      runStatusUnknown: 'Unknown',
+      runStartedLabel: 'Started',
+      runFinishedLabel: 'Finished',
+      tagAutoHint: 'Auto-generated tag',
 
       tabArchive: 'Archive',
       tabPdca: 'Alchemy PDCA',
@@ -746,6 +794,38 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // Relative time is a nicety, not data: an old engine or an odd locale must
+    // fall back to the absolute date instead of throwing inside render.
+    function formatRelativeTime(value, localeId) {
+      const time = toTime(value);
+      if (time === null) return '';
+      const deltaMs = time - Date.now();
+      const absolute = Math.abs(deltaMs);
+      const minute = 60000;
+      const hour = 60 * minute;
+      const day = 24 * hour;
+      let amount;
+      let unit;
+      if (absolute < hour) {
+        amount = Math.round(deltaMs / minute);
+        unit = 'minute';
+      } else if (absolute < day) {
+        amount = Math.round(deltaMs / hour);
+        unit = 'hour';
+      } else {
+        amount = Math.round(deltaMs / day);
+        unit = 'day';
+      }
+      try {
+        const formatter = new Intl.RelativeTimeFormat(localeId || 'en', { numeric: 'auto' });
+        const formatted = formatter.format(amount, unit);
+        if (typeof formatted === 'string' && formatted) return formatted;
+      } catch (_error) {
+        // fall through to the absolute date
+      }
+      return formatDate(time, localeId);
+    }
+
     function shortPath(value) {
       const text = typeof value === 'string' ? value.trim() : '';
       if (!text) return '';
@@ -943,6 +1023,45 @@ window.__ModuleLoader__.load({
       };
     }
 
+    function asBool(value) {
+      return value === true || value === 1 || value === 'true' || value === 'yes';
+    }
+
+    // `lastRun` is the single run the alchemy strip talks about. Anything the
+    // route omits degrades to null so the strip can simply skip that field.
+    function normalizeLastRun(raw) {
+      if (!raw || typeof raw !== 'object') return null;
+      const targets = raw.targets && typeof raw.targets === 'object' ? raw.targets : {};
+      return {
+        id: textOf(pick(raw, ['id', 'runId', 'run_id'], '')),
+        status: textOf(raw.status),
+        phase: textOf(raw.phase),
+        createdAt: toTime(pick(raw, ['createdAt', 'created_at'], null)),
+        updatedAt: toTime(pick(raw, ['updatedAt', 'updated_at'], null)),
+        startedAt: toTime(pick(raw, ['startedAt', 'started_at'], null)),
+        finishedAt: toTime(pick(raw, ['finishedAt', 'finished_at'], null)),
+        durationMs: toNumber(pick(raw, ['durationMs', 'duration', 'elapsedMs'], null)),
+        running: asBool(raw.running),
+        stalled: asBool(raw.stalled),
+        targets: {
+          passed: toNumber(targets.passed),
+          total: toNumber(targets.total),
+        },
+        findings: toNumber(raw.findings),
+        proposals: toNumber(raw.proposals),
+      };
+    }
+
+    function normalizeAutoRun(raw) {
+      const source = raw && typeof raw === 'object' ? raw : {};
+      return {
+        enabled: asBool(source.enabled),
+        everyDays: toNumber(pick(source, ['everyDays', 'every_days'], null)),
+        dueAt: toTime(pick(source, ['dueAt', 'due_at'], null)),
+        due: asBool(source.due),
+      };
+    }
+
     function normalizeOverview(raw) {
       const source = raw && typeof raw === 'object' ? raw : {};
       const corpus = source.corpus && typeof source.corpus === 'object' ? source.corpus : {};
@@ -976,6 +1095,8 @@ window.__ModuleLoader__.load({
         },
         root: textOf(source.root),
         openProposals: toNumber(pick(source, ['openProposals'], null)),
+        lastRun: normalizeLastRun(source.lastRun),
+        autoRun: normalizeAutoRun(source.autoRun),
       };
     }
 
@@ -1108,6 +1229,24 @@ window.__ModuleLoader__.load({
       };
     }
 
+    // Target pass tally for one run. `/runs` has no `targets` object today, so
+    // fall back to the check verdicts (one per target once a run is checked).
+    function runTargets(source, check) {
+      const raw = source && source.targets && typeof source.targets === 'object' ? source.targets : null;
+      if (raw) {
+        const total = toNumber(raw.total);
+        return { passed: toNumber(raw.passed), total };
+      }
+      const verdicts = asArray(check && check.verdicts);
+      if (verdicts.length === 0) return { passed: null, total: null };
+      let passed = 0;
+      for (const verdict of verdicts) {
+        const value = textOf(verdict && verdict.verdict);
+        if (value === 'pass') passed += 1;
+      }
+      return { passed, total: verdicts.length };
+    }
+
     function normalizeRun(raw) {
       const source = raw && typeof raw === 'object' ? raw : {};
       const cohort = source.cohort && typeof source.cohort === 'object' ? source.cohort : {};
@@ -1122,11 +1261,44 @@ window.__ModuleLoader__.load({
         const value = toNumber(metrics[key]);
         normalizedMetrics[key] = value === null ? metrics[key] : value;
       }
+      // `/runs` sends the stored run, which carries the timestamps but not the
+      // derived duration, so the list can still show 用时 without a new field.
+      const createdAt = toTime(source.createdAt);
+      const finishedAt = toTime(source.finishedAt);
+      const updatedAt = toTime(source.updatedAt);
+      // Rows come from `/runs`, which stores the raw run: derive the lifecycle
+      // status the same way alchemy.summarizeRun does, and age a `running` marker
+      // into `stalled` so the row badge cannot contradict the status strip.
+      const rawStatus = textOf(source.status);
+      const phase = textOf(source.phase);
+      const phaseStatus = rawStatus || (phase === 'closed'
+        ? 'closed'
+        : phase === 'act' || phase === 'check'
+          ? 'checked'
+          : phase === 'do'
+            ? 'running'
+            : 'planned');
+      const stale = phaseStatus === 'running' && updatedAt !== null && Date.now() - updatedAt > RUN_STALE_MS;
+      const rowStatus = stale ? 'stalled' : phaseStatus;
+      const declaredDuration = toNumber(source.durationMs);
+      const durationMs = declaredDuration !== null
+        ? declaredDuration
+        : finishedAt !== null && createdAt !== null
+          ? Math.max(0, finishedAt - createdAt)
+          : null;
       return {
         id: textOf(pick(source, ['id', 'runId', 'run_id'], '')),
-        createdAt: toTime(source.createdAt),
-        updatedAt: toTime(source.updatedAt),
+        status: rowStatus,
+        createdAt,
+        updatedAt,
+        startedAt: toTime(source.startedAt),
+        finishedAt,
+        durationMs,
         phase: textOf(source.phase) || 'plan',
+        // A run's own target tally is not on the wire yet: prefer it when the
+        // route sends one, otherwise derive it from the check verdicts, which
+        // are one per target after a checked run.
+        targets: runTargets(source, check),
         cohort: {
           days: toNumber(cohort.days),
           workspace: textOf(cohort.workspace),
@@ -1300,6 +1472,20 @@ window.__ModuleLoader__.load({
       return 'phaseUnknown';
     }
 
+    function runStatusKey(status) {
+      if (status === 'planned') return 'runStatusPlanned';
+      if (status === 'running') return 'runStatusRunning';
+      if (status === 'checked') return 'runStatusChecked';
+      if (status === 'closed') return 'runStatusClosed';
+      if (status === 'failed') return 'runStatusFailed';
+      if (status === 'stalled') return 'runStatusStalled';
+      return 'runStatusUnknown';
+    }
+
+    function runStatusLabel(status, t) {
+      return t(runStatusKey(status));
+    }
+
     function PhaseBadge(props) {
       return h('span', {
         className: 'dsh-archive-rsi-phaseBadge',
@@ -1355,6 +1541,30 @@ window.__ModuleLoader__.load({
       if (kind === 'interrupted') return 'turnEndInterrupted';
       if (kind === 'forked') return 'turnEndForked';
       return '';
+    }
+
+    // -------------------------------------------------------------- tag chip
+
+    // Automatic tags keep their `auto:` prefix on the wire and in the editor;
+    // only the chip strips it, so the tooltip still shows the stored value and
+    // auto/manual tags stay tellable apart.
+    const AUTO_TAG_PREFIX = 'auto:';
+
+    function tagDisplay(tag) {
+      const text = textOf(tag);
+      if (!text || text.indexOf(AUTO_TAG_PREFIX) !== 0) return { text, auto: false };
+      const stripped = text.slice(AUTO_TAG_PREFIX.length).trim();
+      return { text: stripped || text, auto: true };
+    }
+
+    function TagChip(props) {
+      const tag = textOf(props.tag);
+      const view = tagDisplay(tag);
+      return h('span', {
+        className: 'dsh-archive-rsi-tag',
+        'data-auto': view.auto ? 'true' : 'false',
+        title: view.auto ? tag + ' · ' + props.t('tagAutoHint') : tag,
+      }, view.text);
     }
 
     // -------------------------------------------------------------- metrics bar
@@ -1458,6 +1668,89 @@ window.__ModuleLoader__.load({
       { key: 'totalTokens', labelKey: 'colTokens', metric: 'totalTokens', numeric: true },
       { key: 'peakContextRatio', labelKey: 'colContext', metric: 'peakContextRatio', numeric: true },
     ];
+
+    // ---------------------------------------------------------- alchemy status
+
+    // One line above the tab content and visible on every tab: the run state the
+    // backend reports, what the last run produced, and when an auto run is due.
+    function alchemyStateOf(lastRun, busy) {
+      if (busy === 'run') return 'running';
+      if (lastRun && lastRun.running) return 'running';
+      if (lastRun && (lastRun.stalled || lastRun.status === 'failed')) return 'stalled';
+      if (!lastRun) return 'never';
+      return 'idle';
+    }
+
+    function alchemyStateLabel(state, t) {
+      if (state === 'running') return t('alchemyRunning');
+      if (state === 'stalled') return t('alchemyStalled');
+      if (state === 'never') return t('alchemyNeverRun');
+      return t('alchemyIdle');
+    }
+
+    function AlchemyStatus(props) {
+      const t = props.t;
+      const lastRun = props.lastRun && typeof props.lastRun === 'object' ? props.lastRun : null;
+      const autoRun = props.autoRun && typeof props.autoRun === 'object' ? props.autoRun : {};
+      const proposals = props.proposals && typeof props.proposals === 'object' ? props.proposals : {};
+      const state = alchemyStateOf(lastRun, props.busy);
+      const items = [];
+      const push = (key, label, value, hint) => {
+        if (!value) return;
+        items.push(h('span', {
+          key,
+          className: 'dsh-archive-rsi-alchemyItem',
+          title: hint || label || value,
+        },
+          label
+            ? h('span', { className: 'dsh-archive-rsi-alchemyItemLabel' }, label)
+            : null,
+          h('span', { className: 'dsh-archive-rsi-alchemyValue' }, value)));
+      };
+      if (lastRun) {
+        const lastAt = lastRun.finishedAt || lastRun.createdAt;
+        const absolute = formatDate(lastAt, props.localeId);
+        const relative = formatRelativeTime(lastAt, props.localeId);
+        push('lastRun', t('lastRunLabel'), relative || absolute, absolute || relative);
+        if (lastRun.durationMs !== null) {
+          push('duration', t('runDurationLabel'), formatDuration(lastRun.durationMs));
+        }
+        const targets = lastRun.targets || {};
+        if (asCount(targets.total) > 0) {
+          const met = t('runTargetsLabel', {
+            passed: formatInt(targets.passed, props.localeId),
+            total: formatInt(targets.total, props.localeId),
+          });
+          push('targets', '', met);
+        }
+      }
+      if (proposals.proposed !== null && proposals.proposed !== undefined) {
+        push('proposals', t('proposalsPendingLabel'),
+          formatInt(proposals.proposed, props.localeId));
+      }
+      if (autoRun.enabled === true) {
+        const next = autoRun.due === true
+          ? t('nextAutoRunDue')
+          : formatDateShort(autoRun.dueAt, props.localeId);
+        push('autoRun', t('nextAutoRunLabel'), next,
+          autoRun.dueAt ? formatDate(autoRun.dueAt, props.localeId) : '');
+      }
+      return h('div', {
+        className: 'dsh-archive-rsi-alchemyStatus',
+        role: 'group',
+        'aria-label': t('alchemyStatusAria'),
+        'data-status': state,
+      },
+        h('span', { className: 'dsh-archive-rsi-alchemyState', title: t('alchemyStatus') },
+          h('span', {
+            className: 'dsh-archive-rsi-statusDot',
+            'data-status': state,
+            'aria-hidden': true,
+          }),
+          h('span', { className: 'dsh-archive-rsi-alchemyItemLabel' }, t('alchemyStatus')),
+          h('span', { className: 'dsh-archive-rsi-alchemyValue' }, alchemyStateLabel(state, t))),
+        items);
+    }
 
     function findColumn(key) {
       for (const column of SORT_COLUMNS) {
@@ -1748,7 +2041,7 @@ window.__ModuleLoader__.load({
             h('h2', { className: 'dsh-archive-rsi-detailTitle' }, entry.title || t('untitledSession')),
             h(StatusChip, { status: entry.status, t }),
             entry.tags.slice(0, 6).map((tag) =>
-              h('span', { key: 'tag-' + tag, className: 'dsh-archive-rsi-tag' }, tag))),
+              h(TagChip, { key: 'tag-' + tag, tag, t }))),
           h(DetailMeta, { entry, t, localeId: props.localeId }),
           props.draft
             ? h(EditForm, {
@@ -1787,6 +2080,8 @@ window.__ModuleLoader__.load({
       const run = props.run;
       const t = props.t;
       const localeId = props.localeId;
+      const duration = toNumber(run.durationMs);
+      const statusText = runStatusLabel(run.status, t);
       return h('button', {
         type: 'button',
         className: 'dsh-archive-rsi-runRow',
@@ -1796,9 +2091,17 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'dsh-archive-rsi-runTop' },
           h(PhaseBadge, { phase: run.phase, t }),
+          h('span', {
+            className: 'dsh-archive-rsi-runStatus',
+            'data-status': runStatusKey(run.status),
+            title: statusText,
+          }, statusText),
           h('span', { className: 'dsh-archive-rsi-runId dsh-archive-rsi-mono' }, shortId(run.id) || t('unset'))),
         h('div', { className: 'dsh-archive-rsi-runMeta' },
           h('span', null, formatDateShort(run.createdAt, localeId) || t('unset')),
+          duration === null
+            ? null
+            : h('span', { title: t('runDurationLabel') }, formatDuration(duration)),
           run.do.coverage.analyzed === null
             ? null
             : h('span', null, t('sessionsTotal', { count: formatInt(run.do.coverage.analyzed, localeId) }))));
@@ -2118,15 +2421,44 @@ window.__ModuleLoader__.load({
         });
       }
       const run = props.run;
+      const targets = run.targets || {};
+      const statusText = runStatusLabel(run.status, t);
       return h('div', { className: 'dsh-archive-rsi-runDetail' },
         h('div', { className: 'dsh-archive-rsi-runDetailHead' },
           h('span', { className: 'dsh-archive-rsi-mono' }, run.id || t('unset')),
           h('span', { className: 'dsh-archive-rsi-metItem' },
             h('span', { className: 'dsh-archive-rsi-metLabel' }, t('phaseLabel')),
             h(PhaseBadge, { phase: run.phase, t })),
+          h('span', {
+            className: 'dsh-archive-rsi-runStatus',
+            'data-status': runStatusKey(run.status),
+            title: statusText,
+          }, statusText),
           run.updatedAt
             ? h('span', { className: 'dsh-archive-rsi-metItem' },
               formatDate(run.updatedAt, props.localeId))
+            : null,
+          run.startedAt
+            ? h('span', { className: 'dsh-archive-rsi-metItem' },
+              h('span', { className: 'dsh-archive-rsi-metLabel' }, t('runStartedLabel')),
+              formatDate(run.startedAt, props.localeId))
+            : null,
+          run.finishedAt
+            ? h('span', { className: 'dsh-archive-rsi-metItem' },
+              h('span', { className: 'dsh-archive-rsi-metLabel' }, t('runFinishedLabel')),
+              formatDate(run.finishedAt, props.localeId))
+            : null,
+          toNumber(run.durationMs) !== null
+            ? h('span', { className: 'dsh-archive-rsi-metItem' },
+              h('span', { className: 'dsh-archive-rsi-metLabel' }, t('runDurationLabel')),
+              formatDuration(run.durationMs))
+            : null,
+          asCount(targets.total) > 0
+            ? h('span', { className: 'dsh-archive-rsi-metItem' },
+              t('runTargetsLabel', {
+                passed: formatInt(targets.passed, props.localeId),
+                total: formatInt(targets.total, props.localeId),
+              }))
             : null),
         h('div', { className: 'dsh-archive-rsi-panels' },
           h(PlanPanel, { run, t, localeId: props.localeId }),
@@ -3056,6 +3388,14 @@ window.__ModuleLoader__.load({
             retryLabel: t('retry'),
           })
           : null,
+        h(AlchemyStatus, {
+          lastRun: overview ? overview.lastRun : null,
+          autoRun: overview ? overview.autoRun : null,
+          proposals: overview ? overview.proposals : null,
+          busy,
+          t,
+          localeId,
+        }),
         h(MetricsStrip, { metrics, t, localeId }),
         tabBar,
         h(Notice, { notice }),
@@ -3244,6 +3584,23 @@ window.__ModuleLoader__.load({
       '.dsh-archive-rsi-proposalMeta{display:flex;align-items:center;gap:5px 12px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
       '.dsh-archive-rsi-proposalBody{margin:0;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;cursor:text;color:var(--dsw-alias-label-primary);max-height:320px;overflow:auto}',
       '.dsh-archive-rsi-proposalActions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}',
+      '.dsh-archive-rsi-alchemyStatus{display:flex;align-items:center;gap:5px 14px;flex-wrap:wrap;flex:none;min-width:0;border:0.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:5px 10px 6px;font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
+      '.dsh-archive-rsi-alchemyState{display:inline-flex;align-items:center;gap:6px;min-width:0;color:var(--dsw-alias-label-primary)}',
+      '.dsh-archive-rsi-alchemyItem{display:inline-flex;align-items:baseline;gap:4px;min-width:0;white-space:nowrap}',
+      '.dsh-archive-rsi-alchemyItemLabel{font-size:10px;letter-spacing:.02em;text-transform:uppercase;color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+      '.dsh-archive-rsi-alchemyValue{font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}',
+      '.dsh-archive-rsi-alchemyStatus .dsh-archive-rsi-statusDot[data-status="running"]{background:var(--dsw-alias-brand-primary)}',
+      '.dsh-archive-rsi-alchemyStatus .dsh-archive-rsi-statusDot[data-status="idle"]{background:var(--dsw-alias-state-success-primary)}',
+      '.dsh-archive-rsi-alchemyStatus .dsh-archive-rsi-statusDot[data-status="stalled"]{background:var(--dsw-alias-state-error-primary)}',
+      '.dsh-archive-rsi-alchemyStatus .dsh-archive-rsi-statusDot[data-status="never"]{background:var(--dsw-alias-border-l2)}',
+      '.dsh-archive-rsi-runStatus{display:inline-flex;align-items:center;border:0.5px solid var(--dsw-alias-border-l1);border-radius:999px;padding:0 6px;font-size:9.5px;line-height:15px;white-space:nowrap;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}',
+      '.dsh-archive-rsi-runStatus[data-status="planned"]{border-style:dashed}',
+      '.dsh-archive-rsi-runStatus[data-status="running"]{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary)}',
+      '.dsh-archive-rsi-runStatus[data-status="checked"]{border-color:var(--dsw-alias-label-secondary);color:var(--dsw-alias-label-primary)}',
+      '.dsh-archive-rsi-runStatus[data-status="closed"]{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
+      '.dsh-archive-rsi-runStatus[data-status="stalled"]{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}',
+      '.dsh-archive-rsi-runStatus[data-status="unknown"]{border-style:dashed}',
+      '.dsh-archive-rsi-tag[data-auto="true"]{border-style:dashed}',
       '.dsh-archive-rsi-page button:focus-visible,.dsh-archive-rsi-page input:focus-visible,.dsh-archive-rsi-page select:focus-visible,.dsh-archive-rsi-page textarea:focus-visible,.dsh-archive-rsi-page a:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '@media (max-width:1080px){.dsh-archive-rsi-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}',
       '@media (max-width:980px){.dsh-archive-rsi-archive{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-pdca{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-panels{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-listPane,.dsh-archive-rsi-runList{max-height:300px}}',

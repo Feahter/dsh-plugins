@@ -58,6 +58,11 @@ const EPSILON_FLOOR = 0.001;
 const DEFAULT_COHORT = { days: 30, workspace: null, tag: null, status: 'all', limit: 40 };
 const DEFAULT_MIN_SESSIONS = 3;
 
+/** Lifecycle statuses a PDCA run may carry; `summarizeRun` derives one when absent. */
+export const RUN_STATUSES = ['planned', 'running', 'checked', 'closed', 'failed'];
+/** A running run is "stalled" once its heartbeat is older than this. */
+export const RUN_STALE_MS = 10 * 60 * 1000;
+
 // DESIGN §5.1: a human message counts as a correction when it matches either
 // the Latin or the CJK form; the per-session contribution is capped at 3.
 const CORRECTION_PATTERN =
@@ -1019,6 +1024,91 @@ function cloneRun(run) {
 }
 
 /**
+ * Reduce a `PdcaRun` to the fields a client needs to answer "is it running,
+ * did it finish, how did it do". Pure: never mutates `run`, never reads the
+ * clock unless the caller injects `now` via `options`.
+ *
+ * @param {object} run PdcaRun (possibly from an older plugin version).
+ * @param {{now?: number, staleMs?: number}} [options]
+ * @returns {object} run summary
+ */
+export function summarizeRun(run, options = {}) {
+  const source = asObject(run);
+  const opts = asObject(options);
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const staleMs = Number.isFinite(opts.staleMs) ? opts.staleMs : RUN_STALE_MS;
+  const createdAt = toNumber(source.createdAt, NaN);
+  const updatedAt = toNumber(source.updatedAt, NaN);
+
+  let status = RUN_STATUSES.includes(source.status) ? source.status : '';
+  if (!status) {
+    switch (source.phase) {
+      case 'plan':
+        status = 'planned';
+        break;
+      case 'do':
+        status = 'running';
+        break;
+      case 'check':
+      case 'act':
+        status = 'checked';
+        break;
+      case 'closed':
+        status = 'closed';
+        break;
+      default:
+        status = 'planned';
+    }
+  }
+
+  let finishedAt = toNumber(source.finishedAt, NaN);
+  if (!Number.isFinite(finishedAt) && (status === 'checked' || status === 'closed' || status === 'failed')) {
+    finishedAt = updatedAt;
+  }
+  const finished = Number.isFinite(finishedAt) ? finishedAt : null;
+  // A duration needs a recorded start. Runs written before `startedAt` existed
+  // carry createdAt === updatedAt, so measuring from createdAt would print a
+  // bogus "8 ms" for a run that took seconds — report no duration instead.
+  const startRaw = toNumber(source.startedAt, NaN);
+  const startedAt = Number.isFinite(startRaw) ? startRaw : null;
+  const durationMs = startedAt !== null && Number.isFinite(finishedAt)
+    ? Math.max(0, finishedAt - startedAt)
+    : null;
+
+  const anchored = updatedAt || createdAt || 0;
+  const stalled = status === 'running' && now - anchored > staleMs;
+  const running = status === 'running' && !stalled;
+
+  const verdicts = asArray(asObject(source.check).verdicts);
+  const targets = { total: verdicts.length, passed: 0, failed: 0, flat: 0, unknown: 0 };
+  for (const item of verdicts) {
+    const verdict = item && item.verdict;
+    if (verdict === 'pass') targets.passed += 1;
+    else if (verdict === 'fail') targets.failed += 1;
+    else if (verdict === 'flat') targets.flat += 1;
+    else if (verdict === 'unknown') targets.unknown += 1;
+  }
+
+  const act = asObject(source.act);
+
+  return {
+    id: typeof source.id === 'string' ? source.id : '',
+    status,
+    phase: source.phase,
+    createdAt: Number.isFinite(createdAt) ? createdAt : 0,
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0,
+    startedAt,
+    finishedAt: finished,
+    durationMs,
+    running,
+    stalled,
+    targets,
+    findings: asArray(act.findings).length,
+    proposals: asArray(act.proposalIds).length,
+  };
+}
+
+/**
  * Create a run in the `plan` phase. Pure except for the id's random suffix;
  * `now` is injectable so the timestamps and hypothesis ids are deterministic.
  *
@@ -1037,6 +1127,9 @@ export function planRun(input = {}, options = {}) {
     createdAt: now,
     updatedAt: now,
     phase: 'plan',
+    status: 'planned',
+    startedAt: now,
+    finishedAt: null,
     cohort,
     plan: {
       baselineRunId,
@@ -1099,6 +1192,7 @@ export function executeDo(run, factsList, options = {}) {
   return {
     ...base,
     phase: 'do',
+    status: 'running',
     updatedAt: now,
     do: {
       sessionIds,
@@ -1227,6 +1321,8 @@ export function executeCheck(run, factsList, baselineMetrics = null, options = {
   return {
     ...base,
     phase: 'act',
+    status: 'checked',
+    finishedAt: now,
     updatedAt: now,
     check: { metrics, perSession, verdicts, deltas },
     act: { findings, proposalIds: [] },

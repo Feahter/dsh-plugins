@@ -36,7 +36,7 @@ const archiveModule = await import(pathToFileURL(path.join(HERE, 'archive.js')).
 const alchemyModule = await import(pathToFileURL(path.join(HERE, 'alchemy.js')).href);
 const workspaceArchiveModule = await import(pathToFileURL(path.join(HERE, 'workspace-archive.js')).href);
 
-const { readConfig } = indexModule;
+const { readConfig, finishCheck } = indexModule;
 const {
   ArchiveStore,
   scanZstdFrames,
@@ -46,6 +46,8 @@ const {
   renderTranscript,
   deriveAutoTags,
   mergeTags,
+  strictTags,
+  normalizeTags,
   DEFAULT_EDIT_TOOLS,
   DEFAULT_CHECK_TOOLS,
 } = archiveModule;
@@ -62,6 +64,9 @@ const {
   revertProposal,
   slugifySkill,
   DEFAULT_TARGETS,
+  RUN_STATUSES,
+  RUN_STALE_MS,
+  summarizeRun,
 } = alchemyModule;
 
 // =============================================================== result plumbing
@@ -1378,9 +1383,12 @@ async function phaseRules() {
 async function phaseAutotags() {
   console.log('\n# 6b. automatic tags (DESIGN §10)');
 
-  const CHARSET = /^auto:[a-z0-9.:_-]+$/;
-  const VERIFY_GAP = 'auto:gap.verify';
-  const ORIGIN_USER = 'auto:origin.user';
+  // DESIGN §2.1: lowercase ASCII `a-z 0-9 . _ : -` plus Han characters from the
+  // CJK Extension A (U+3400-U+4DBF), Unified (U+4E00-U+9FFF) and Compatibility
+  // (U+F900-U+FAFF) blocks. Spaces and every other punctuation mark stay banned.
+  const CHARSET = /^auto:(?:[a-z0-9._:-]|[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])+$/;
+  const VERIFY_GAP = 'auto:验证缺口';
+  const ORIGIN_USER = 'auto:来源:直接对话';
 
   // T1-T7 in one crafted facts object: every health tag plus origin/preset.
   const healthFacts = makeFacts({
@@ -1398,23 +1406,23 @@ async function phaseAutotags() {
 
   await check('TAG.1', 'T1-T7 fire together and the health tags precede origin/preset in priority order', () => {
     const expected = [
-      'auto:err.einval',
+      'auto:错误热点:einval',
       VERIFY_GAP,
-      'auto:fail.turn',
-      'auto:repeat',
-      'auto:correction',
+      'auto:轮次异常',
+      'auto:重复调用',
+      'auto:用户纠正',
       ORIGIN_USER,
-      'auto:preset.router',
+      'auto:预设:router',
     ];
     const tags = deriveAutoTags(healthFacts, { limit: 20 });
     assertArray(tags, 'deriveAutoTags(...)');
     if (JSON.stringify(tags) !== JSON.stringify(expected)) {
       throw new Error(`tags: expected ${JSON.stringify(expected)}, got ${JSON.stringify(tags)}`);
     }
-    const healthPrefixes = ['auto:err.', 'auto:gap.', 'auto:fail.', 'auto:repeat', 'auto:correction'];
+    const healthPrefixes = ['auto:错误热点:', 'auto:验证缺口', 'auto:轮次异常', 'auto:重复调用', 'auto:用户纠正'];
     const lastHealth = Math.max(...healthPrefixes.map((prefix) => tags.findIndex((tag) => tag === prefix || tag.startsWith(prefix))));
-    const firstOrigin = tags.findIndex((tag) => tag.startsWith('auto:origin.'));
-    const firstPreset = tags.findIndex((tag) => tag.startsWith('auto:preset.'));
+    const firstOrigin = tags.findIndex((tag) => tag.startsWith('auto:来源:'));
+    const firstPreset = tags.findIndex((tag) => tag.startsWith('auto:预设:'));
     if (!(lastHealth < firstOrigin && lastHealth < firstPreset)) {
       throw new Error(`priority: health index ${lastHealth} must precede origin ${firstOrigin} and preset ${firstPreset} (${JSON.stringify(tags)})`);
     }
@@ -1428,12 +1436,12 @@ async function phaseAutotags() {
     const cost = deriveAutoTags(costFacts, { cohortMedianTokens: 200000 });
     const noMedian = deriveAutoTags(costFacts, { cohortMedianTokens: 0 });
     const mismatches = [];
-    if (!pressure.includes('auto:ctx.pressure')) mismatches.push(`0.65: missing auto:ctx.pressure (${JSON.stringify(pressure)})`);
-    if (pressure.includes('auto:ctx.heavy')) mismatches.push(`0.65: auto:ctx.heavy must not fire (${JSON.stringify(pressure)})`);
-    if (!heavy.includes('auto:ctx.heavy')) mismatches.push(`0.45: missing auto:ctx.heavy (${JSON.stringify(heavy)})`);
-    if (heavy.includes('auto:ctx.pressure')) mismatches.push(`0.45: auto:ctx.pressure must not fire (${JSON.stringify(heavy)})`);
-    if (!cost.includes('auto:cost.high')) mismatches.push(`900k vs median 200k: missing auto:cost.high (${JSON.stringify(cost)})`);
-    if (noMedian.includes('auto:cost.high')) mismatches.push(`median 0: auto:cost.high must be skipped (${JSON.stringify(noMedian)})`);
+    if (!pressure.includes('auto:上下文吃紧')) mismatches.push(`0.65: missing auto:上下文吃紧 (${JSON.stringify(pressure)})`);
+    if (pressure.includes('auto:上下文偏重')) mismatches.push(`0.65: auto:上下文偏重 must not fire (${JSON.stringify(pressure)})`);
+    if (!heavy.includes('auto:上下文偏重')) mismatches.push(`0.45: missing auto:上下文偏重 (${JSON.stringify(heavy)})`);
+    if (heavy.includes('auto:上下文吃紧')) mismatches.push(`0.45: auto:上下文吃紧 must not fire (${JSON.stringify(heavy)})`);
+    if (!cost.includes('auto:成本偏高')) mismatches.push(`900k vs median 200k: missing auto:成本偏高 (${JSON.stringify(cost)})`);
+    if (noMedian.includes('auto:成本偏高')) mismatches.push(`median 0: auto:成本偏高 must be skipped (${JSON.stringify(noMedian)})`);
     if (mismatches.length) throw new Error(mismatches.join('; '));
     return 'pressure/heavy exclusive; cost.high gated on the median';
   });
@@ -1457,19 +1465,19 @@ async function phaseAutotags() {
     }));
     const none = deriveAutoTags(makeFacts({ sessionId: 'tag-none', origin: 'user', humanTexts: [] }));
     const mismatches = [];
-    if (!tagSet.includes('auto:tool.mcp__a__b')) mismatches.push(`missing the mcp tool tag (${JSON.stringify(tagSet)})`);
-    if (!tagSet.includes('auto:tool.bash')) mismatches.push(`missing auto:tool.bash (${JSON.stringify(tagSet)})`);
-    if (tagSet.includes('auto:tool.read')) mismatches.push(`auto:tool.read is outside the top two tools (${JSON.stringify(tagSet)})`);
+    if (!tagSet.includes('auto:常用工具:mcp__a__b')) mismatches.push(`missing the mcp tool tag (${JSON.stringify(tagSet)})`);
+    if (!tagSet.includes('auto:常用工具:bash')) mismatches.push(`missing auto:常用工具:bash (${JSON.stringify(tagSet)})`);
+    if (tagSet.includes('auto:常用工具:read')) mismatches.push(`auto:常用工具:read is outside the top two tools (${JSON.stringify(tagSet)})`);
     const mcpTag = tagSet.find((tag) => tag.includes('mcp'));
     if (!mcpTag) mismatches.push('no mcp tool tag to charset-check');
     else if (!CHARSET.test(mcpTag)) mismatches.push(`mcp tool tag ${JSON.stringify(mcpTag)} is not charset-safe`);
-    if (!zh.includes('auto:lang.zh')) mismatches.push(`Chinese-only text: missing auto:lang.zh (${JSON.stringify(zh)})`);
-    if (zh.includes('auto:lang.en')) mismatches.push(`Chinese-only text: auto:lang.en must not fire (${JSON.stringify(zh)})`);
-    if (!en.includes('auto:lang.en')) mismatches.push(`ASCII-only text: missing auto:lang.en (${JSON.stringify(en)})`);
-    if (en.includes('auto:lang.zh')) mismatches.push(`ASCII-only text: auto:lang.zh must not fire (${JSON.stringify(en)})`);
-    if (none.some((tag) => tag.startsWith('auto:lang.'))) mismatches.push(`empty humanTexts: a lang tag fired (${JSON.stringify(none)})`);
+    if (!zh.includes('auto:语言:中文')) mismatches.push(`Chinese-only text: missing auto:语言:中文 (${JSON.stringify(zh)})`);
+    if (zh.includes('auto:语言:英文')) mismatches.push(`Chinese-only text: auto:语言:英文 must not fire (${JSON.stringify(zh)})`);
+    if (!en.includes('auto:语言:英文')) mismatches.push(`ASCII-only text: missing auto:语言:英文 (${JSON.stringify(en)})`);
+    if (en.includes('auto:语言:中文')) mismatches.push(`ASCII-only text: auto:语言:中文 must not fire (${JSON.stringify(en)})`);
+    if (none.some((tag) => tag.startsWith('auto:语言:'))) mismatches.push(`empty humanTexts: a lang tag fired (${JSON.stringify(none)})`);
     if (mismatches.length) throw new Error(mismatches.join('; '));
-    return `tools ${tagSet.filter((tag) => tag.startsWith('auto:tool.')).join(',')}; lang zh/en/none`;
+    return `tools ${tagSet.filter((tag) => tag.startsWith('auto:常用工具:')).join(',')}; lang zh/en/none`;
   });
 
   await check('TAG.4', 'limit is honoured (3/0) and every tag matches the charset and the 32-char cap', () => {
@@ -1491,7 +1499,7 @@ async function phaseAutotags() {
       if (!CHARSET.test(tag)) mismatches.push(`tag ${JSON.stringify(tag)} does not match ${CHARSET}`);
       if (tag.length > 32) mismatches.push(`tag ${JSON.stringify(tag)} is ${tag.length} chars (> 32)`);
     }
-    const longTag = longPreset.find((tag) => tag.startsWith('auto:preset.'));
+    const longTag = longPreset.find((tag) => tag.startsWith('auto:预设:'));
     if (!longTag) mismatches.push('a long preset produced no preset tag to truncate');
     else if (longTag.length > 32) mismatches.push(`truncated preset tag is ${longTag.length} chars (> 32)`);
     if (mismatches.length) throw new Error(mismatches.join('; '));
@@ -1623,6 +1631,41 @@ async function phaseAutotags() {
     if (mismatches.length) throw new Error(mismatches.join('; '));
     return `autoTag:false -> ${entry.tags.length} manual tag(s); mergeTags cap 24`;
   });
+
+  await check('TAG.9', 'strictTags accepts Han and rejects spaces/punctuation; normalizeTags preserves Han', () => {
+    const accepted = strictTags(['验证缺口', 'auto:错误热点:文件版本过期', 'mcp__a__b', 'a.b-c_d:e']);
+    const mismatches = [];
+    if (JSON.stringify(accepted) !== JSON.stringify(['验证缺口', 'auto:错误热点:文件版本过期', 'mcp__a__b', 'a.b-c_d:e'])) {
+      mismatches.push(`strictTags accepted set: expected the four tags verbatim, got ${JSON.stringify(accepted)}`);
+    }
+    for (const bad of ['not a tag', 'bad,tag', 'bad!tag', 'space tag', '中文 空格']) {
+      try {
+        strictTags([bad]);
+        mismatches.push(`strictTags must reject ${JSON.stringify(bad)}`);
+      } catch (error) {
+        if (!error || error.code !== 'invalid-tag') mismatches.push(`strictTags(${JSON.stringify(bad)}): expected invalid-tag code, got ${JSON.stringify(error && error.code)}`);
+      }
+    }
+    const normalized = normalizeTags(['  MCP__A__B  ', '验证缺口', 'A,B!C', 'SPACE TAG']);
+    const expectedNormalized = ['mcp__a__b', '验证缺口', 'a-b-c', 'space-tag'];
+    if (JSON.stringify(normalized) !== JSON.stringify(expectedNormalized)) {
+      mismatches.push(`normalizeTags: expected ${JSON.stringify(expectedNormalized)}, got ${JSON.stringify(normalized)}`);
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `strictTags accepts Han; normalizeTags -> ${normalized.join(', ')}`;
+  });
+
+  await check('TAG.10', 'known error codes map to Chinese labels; unlisted codes keep their lowercase code', () => {
+    const known = deriveAutoTags(makeFacts({ sessionId: 'tag-err-known', origin: 'user', tools: [toolRow('bash', 2, 3, { FS_STALE_VERSION: 3 })] }));
+    const unlisted = deriveAutoTags(makeFacts({ sessionId: 'tag-err-unlisted', origin: 'user', tools: [toolRow('bash', 2, 3, { EINVAL: 3 })] }));
+    const unknown = deriveAutoTags(makeFacts({ sessionId: 'tag-err-unknown', origin: 'user', tools: [toolRow('bash', 2, 3, { UNKNOWN: 3 })] }));
+    const mismatches = [];
+    if (!known.includes('auto:错误热点:文件版本过期')) mismatches.push(`FS_STALE_VERSION: missing 文件版本过期 (${JSON.stringify(known)})`);
+    if (!unlisted.includes('auto:错误热点:einval')) mismatches.push(`EINVAL: missing lowercase einval (${JSON.stringify(unlisted)})`);
+    if (!unknown.includes('auto:错误热点:未知错误')) mismatches.push(`unknown: missing 未知错误 (${JSON.stringify(unknown)})`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return 'FS_STALE_VERSION->文件版本过期, EINVAL->einval, unknown->未知错误';
+  });
 }
 
 async function phasePdca() {
@@ -1724,6 +1767,54 @@ async function phasePdca() {
     }
     if (problems.length) throw new Error(`${problems.length} problem(s): ${problems.slice(0, 6).join('; ')}`);
     return `${proposals.length} proposals, kinds ${[...new Set(proposals.map((proposal) => proposal.kind))].join('/')}`;
+  });
+
+  await check('PDC.3', 'planRun/executeDo/finishCheck/summarizeRun expose the status + timing lifecycle', () => {
+    const planned = planRun({ cohort: { days: 0, limit: 5 } });
+    const mismatches = [];
+    if (planned.status !== 'planned') mismatches.push(`planRun.status: expected planned, got ${JSON.stringify(planned.status)}`);
+    if (typeof planned.startedAt !== 'number' || !Number.isFinite(planned.startedAt)) mismatches.push(`planRun.startedAt: expected a finite number, got ${JSON.stringify(planned.startedAt)}`);
+    if (planned.finishedAt !== null) mismatches.push(`planRun.finishedAt: expected null, got ${JSON.stringify(planned.finishedAt)}`);
+    const done = executeDo(planned, facts);
+    if (done.status !== 'running') mismatches.push(`executeDo.status: expected running, got ${JSON.stringify(done.status)}`);
+    const checked = finishCheck(done, facts, null);
+    if (checked.status !== 'checked') mismatches.push(`finishCheck.status: expected checked, got ${JSON.stringify(checked.status)}`);
+    if (typeof checked.finishedAt !== 'number' || !Number.isFinite(checked.finishedAt)) mismatches.push(`finishCheck.finishedAt: expected a finite number, got ${JSON.stringify(checked.finishedAt)}`);
+    const summary = summarizeRun(checked, { now: checked.finishedAt + 1 });
+    if (summary.status !== 'checked') mismatches.push(`summary.status: expected checked, got ${JSON.stringify(summary.status)}`);
+    if (typeof summary.durationMs !== 'number' || !(summary.durationMs >= 0)) mismatches.push(`summary.durationMs: expected a non-negative number, got ${JSON.stringify(summary.durationMs)}`);
+    if (summary.running !== false) mismatches.push(`summary.running: expected false for a checked run, got ${JSON.stringify(summary.running)}`);
+    if (summary.stalled !== false) mismatches.push(`summary.stalled: expected false for a checked run, got ${JSON.stringify(summary.stalled)}`);
+    if (!summary.targets || typeof summary.targets !== 'object') mismatches.push('summary.targets is missing');
+    else if (summary.targets.total !== checked.check.verdicts.length) mismatches.push(`summary.targets.total: expected ${checked.check.verdicts.length}, got ${JSON.stringify(summary.targets.total)}`);
+    if (typeof summary.findings !== 'number' || typeof summary.proposals !== 'number') mismatches.push('summary.findings/proposals are not numbers');
+    // stalled/running semantics on a run with no finishedAt.
+    const staleMs = 600_000;
+    const runningRun = { id: 'run-x', status: 'running', phase: 'do', createdAt: 1000, updatedAt: 2000, finishedAt: null };
+    const fresh = summarizeRun(runningRun, { now: 2001, staleMs });
+    if (fresh.running !== true || fresh.stalled !== false) mismatches.push(`fresh running run: expected running=true/stalled=false, got running=${JSON.stringify(fresh.running)} stalled=${JSON.stringify(fresh.stalled)}`);
+    const stale = summarizeRun(runningRun, { now: 2000 + staleMs + 1, staleMs });
+    if (stale.running !== false || stale.stalled !== true) mismatches.push(`stale running run: expected running=false/stalled=true, got running=${JSON.stringify(stale.running)} stalled=${JSON.stringify(stale.stalled)}`);
+    // status derivation from phase when status is absent.
+    const legacy = summarizeRun({ phase: 'check', createdAt: 1000, updatedAt: 2000 }, { now: 3000 });
+    if (legacy.status !== 'checked') mismatches.push(`legacy phase=check: expected checked, got ${JSON.stringify(legacy.status)}`);
+    if (legacy.finishedAt !== 2000) mismatches.push(`legacy finishedAt: expected 2000 (updatedAt fallback), got ${JSON.stringify(legacy.finishedAt)}`);
+    // A duration needs a recorded start: pre-`startedAt` runs report none rather
+    // than the createdAt->updatedAt gap, which is 0 for a single-write run.
+    if (legacy.startedAt !== null) mismatches.push(`legacy startedAt: expected null, got ${JSON.stringify(legacy.startedAt)}`);
+    if (legacy.durationMs !== null) mismatches.push(`legacy durationMs: expected null without startedAt, got ${JSON.stringify(legacy.durationMs)}`);
+    const measured = summarizeRun({ phase: 'check', startedAt: 1000, createdAt: 900, updatedAt: 3000, finishedAt: 3000 }, { now: 4000 });
+    if (measured.durationMs !== 2000) mismatches.push(`startedAt-measured durationMs: expected 2000, got ${JSON.stringify(measured.durationMs)}`);
+    // A crashed marker is retired as "failed", which is neither running nor stalled.
+    const failed = summarizeRun({ status: 'failed', phase: 'plan', createdAt: 1000, updatedAt: 2000 }, { now: 3000 });
+    if (failed.running !== false || failed.stalled !== false) mismatches.push(`failed run: expected running=false/stalled=false, got running=${JSON.stringify(failed.running)} stalled=${JSON.stringify(failed.stalled)}`);
+    if (failed.status !== 'failed') mismatches.push(`failed run: status should stay failed, got ${JSON.stringify(failed.status)}`);
+    // executeCheck is an exported API: it must not hand back a "running" status.
+    const checkedDirect = executeCheck(done, facts, null);
+    if (checkedDirect.status !== 'checked') mismatches.push(`executeCheck.status: expected checked, got ${JSON.stringify(checkedDirect.status)}`);
+    if (!Number.isFinite(checkedDirect.finishedAt)) mismatches.push(`executeCheck.finishedAt: expected a finite number, got ${JSON.stringify(checkedDirect.finishedAt)}`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `planned->running->checked; durationMs=${summary.durationMs}; targets=${summary.targets.total}`;
   });
 }
 
@@ -2108,7 +2199,7 @@ async function phaseRoutes() {
 
   const real = await realSessionFiles();
   if (real.length < 2) {
-    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6', 'WEB.7']) {
+    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6', 'WEB.7', 'WEB.8', 'WEB.9']) {
       printSkip(id, 'web route behaviour', 'need 2 real session files, found ' + real.length);
     }
     return;
@@ -2122,7 +2213,7 @@ async function phaseRoutes() {
   });
   const handler = stub.state.routes[0] && stub.state.routes[0].handler;
   if (!handler) {
-    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6', 'WEB.7']) printFail(id, 'web route behaviour', 'no route handler registered');
+    for (const id of ['WEB.1', 'WEB.2', 'WEB.3', 'WEB.4', 'WEB.5', 'WEB.6', 'WEB.7', 'WEB.8', 'WEB.9']) printFail(id, 'web route behaviour', 'no route handler registered');
     return;
   }
 
@@ -2222,6 +2313,98 @@ async function phaseRoutes() {
     if (!(response.json.updated >= 1)) throw new Error(`body.updated: expected >= 1, got ${JSON.stringify(response.json.updated)}`);
     return `updated=${response.json.updated}`;
   });
+
+  await check('WEB.8', 'POST /api/archive-rsi/runs returns a checked run and journals run.do/run.check', async () => {
+    const response = await httpCall(handler, {
+      method: 'POST',
+      url: '/api/archive-rsi/runs',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ days: 0, limit: 5 }),
+    });
+    assertEqual(response.status, 200, `status (body ${JSON.stringify(response.json).slice(0, 200)})`);
+    assert(response.json && response.json.ok === true, `body.ok: ${JSON.stringify(response.json).slice(0, 200)}`);
+    const run = response.json.run;
+    assert(run && typeof run.id === 'string', 'run.id missing');
+    assertEqual(run.status, 'checked', 'run.status');
+    const journalText = await readText(path.join(base, 'root', 'journal.jsonl'));
+    if (!journalText) throw new Error('journal.jsonl is missing after POST /runs');
+    const actions = journalText.split('\n').filter(Boolean).map((line) => { try { return JSON.parse(line).action; } catch { return ''; } });
+    if (!actions.includes('run.do')) throw new Error(`journal has no run.do action (actions: ${JSON.stringify(actions)})`);
+    if (!actions.includes('run.check')) throw new Error(`journal has no run.check action (actions: ${JSON.stringify(actions)})`);
+    return `${run.id} status=${run.status}; journal actions ${[...new Set(actions)].join('/')}`;
+  });
+
+  await check('WEB.9', 'GET /overview lastRun is a summary and autoRun is complete', async () => {
+    const response = await httpCall(handler, { url: '/api/archive-rsi/overview' });
+    assertEqual(response.status, 200, 'status');
+    const body = response.json;
+    assert(body && body.ok === true, `body.ok: ${JSON.stringify(body).slice(0, 200)}`);
+    const mismatches = [];
+    if (!body.lastRun || typeof body.lastRun !== 'object') mismatches.push('lastRun: expected a summary object');
+    else {
+      for (const key of ['status', 'targets', 'durationMs', 'running', 'stalled']) {
+        if (!Object.hasOwn(body.lastRun, key)) mismatches.push(`lastRun.${key}: missing`);
+      }
+      if (body.lastRun.check !== undefined || body.lastRun.do !== undefined || body.lastRun.plan !== undefined) {
+        mismatches.push('lastRun must be a summary, not the full run (check/do/plan leaked)');
+      }
+      if (!body.lastRun.targets || typeof body.lastRun.targets.total !== 'number') mismatches.push('lastRun.targets.total: expected a number');
+      if (typeof body.lastRun.running !== 'boolean' || typeof body.lastRun.stalled !== 'boolean') mismatches.push('lastRun.running/stalled: expected booleans');
+    }
+    if (!body.autoRun || typeof body.autoRun !== 'object') mismatches.push('autoRun: expected an object');
+    else {
+      for (const key of ['enabled', 'everyDays', 'dueAt', 'due']) {
+        if (!Object.hasOwn(body.autoRun, key)) mismatches.push(`autoRun.${key}: missing`);
+      }
+      if (typeof body.autoRun.enabled !== 'boolean' || typeof body.autoRun.due !== 'boolean') mismatches.push('autoRun.enabled/due: expected booleans');
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `lastRun status=${body.lastRun.status} targets=${body.lastRun.targets.total} autoRun.enabled=${body.autoRun.enabled}`;
+  });
+
+  await check('WEB.10', 'a crashed running marker is retired to failed and loses the baseline race', async () => {
+    const runsDir = path.join(base, 'root', 'runs');
+    const names = await fs.readdir(runsDir).catch(() => []);
+    const finished = [];
+    for (const name of names) {
+      const run = await readJson(path.join(runsDir, name)).catch(() => null);
+      if (run && (run.status === 'checked' || run.status === 'closed')) finished.push(run);
+    }
+    if (finished.length === 0) throw new Error('prerequisite: no finished run from WEB.8 to use as a baseline');
+    const newest = finished.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    const zombieId = 'run-20200101-000000-zzzz';
+    const zombie = {
+      id: zombieId,
+      createdAt: Date.now() + 60_000,
+      updatedAt: Date.now() - 3_600_000,
+      phase: 'plan',
+      status: 'running',
+      startedAt: Date.now() - 3_600_000,
+      finishedAt: null,
+      cohort: {},
+      plan: { baselineRunId: null, targets: [], hypotheses: [] },
+      do: { sessionIds: [], analyzedAt: null, coverage: { requested: 0, analyzed: 0, skipped: 0, failures: [] } },
+      check: { metrics: {}, perSession: [], verdicts: [], deltas: [] },
+      act: { findings: [], proposalIds: [] },
+    };
+    await fs.writeFile(path.join(runsDir, `${zombieId}.json`), `${JSON.stringify(zombie, null, 2)}\n`);
+
+    const response = await httpCall(handler, {
+      method: 'POST',
+      url: '/api/archive-rsi/runs',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ days: 0, limit: 3 }),
+    });
+    assertEqual(response.status, 200, `status (body ${JSON.stringify(response.json).slice(0, 200)})`);
+    const retired = await readJson(path.join(runsDir, `${zombieId}.json`));
+    if (retired.status !== 'failed') throw new Error(`crashed marker status: expected failed, got ${JSON.stringify(retired.status)}`);
+    if (!Number.isFinite(retired.finishedAt)) throw new Error(`crashed marker finishedAt: expected a number, got ${JSON.stringify(retired.finishedAt)}`);
+    const baselineRunId = response.json.run && response.json.run.plan && response.json.run.plan.baselineRunId;
+    if (baselineRunId !== newest.id) {
+      throw new Error(`baselineRunId: expected the newest finished run ${JSON.stringify(newest.id)}, got ${JSON.stringify(baselineRunId)}`);
+    }
+    return `crashed ${zombieId} -> failed; baseline=${baselineRunId}`;
+  });
 }
 
 async function phaseE2E() {
@@ -2229,7 +2412,7 @@ async function phaseE2E() {
 
   const real = await realSessionFiles();
   if (real.length === 0) {
-    for (const id of ['E2E.1', 'E2E.2', 'E2E.3', 'E2E.4']) printSkip(id, 'real-corpus end-to-end', 'no real sessions found');
+    for (const id of ['E2E.1', 'E2E.2', 'E2E.3', 'E2E.4', 'E2E.5']) printSkip(id, 'real-corpus end-to-end', 'no real sessions found');
     return;
   }
 
@@ -2286,6 +2469,8 @@ async function phaseE2E() {
     const stored = await readJson(file);
     assertEqual(stored.id, runId, 'persisted run id');
     assertArray(stored.check && stored.check.verdicts, 'persisted check.verdicts');
+    assertEqual(stored.status, 'checked', 'persisted run status');
+    assertNumber(stored.finishedAt, 'persisted run finishedAt');
     return `${runId} (cohort ${result.run.cohort && result.run.cohort.source}, sessions ${result.run.check && result.run.check.metrics && result.run.check.metrics.sessions})`;
   });
 
@@ -2310,6 +2495,21 @@ async function phaseE2E() {
     const after = await fileState(workspaceFile);
     if (!sameSha(after, workspaceBefore)) throw new Error('~/.dsh/storages/workspace.json changed during the read-only smoke');
     return `${result.entries.length} archived entries of ${synced} imported`;
+  });
+
+  await check('E2E.5', 'rsi_status reports the run status summary and the autoRun schedule', async () => {
+    const result = await callTool(stub, 'rsi_status', {});
+    assert(result && result.ok === true, `rsi_status failed: ${JSON.stringify(result && result.error)}`);
+    const mismatches = [];
+    if (!result.status || typeof result.status !== 'object') mismatches.push('status: expected an object');
+    else {
+      if (typeof result.status.running !== 'boolean') mismatches.push('status.running: expected a boolean');
+      if (!result.status.lastRun || typeof result.status.lastRun !== 'object') mismatches.push('status.lastRun: expected a summary object');
+      if (!result.status.autoRun || typeof result.status.autoRun !== 'object') mismatches.push('status.autoRun: expected an object');
+      else if (typeof result.status.autoRun.enabled !== 'boolean') mismatches.push('status.autoRun.enabled: expected a boolean');
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `running=${result.status.running} lastRun.status=${result.status.lastRun && result.status.lastRun.status}`;
   });
 }
 
