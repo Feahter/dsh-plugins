@@ -272,7 +272,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "afa2cda6666a8cc79563a09f52ea07306faea681",
+            "commit": "e7717597c2a372e5cb82da3f8ba34db3c1b235fa",
             "path": "plugins/skills-360"
           },
           "engines": {
