@@ -153,8 +153,8 @@
         "zh": "归档会话与 PDCA 炼金"
       },
       "description": {
-        "en": "CRUD over the Harness session archive plus a PDCA loop that mines historical sessions into measurable findings and adoptable context patches: tool-error rate, correction rate, verification gaps, context pressure and tool-catalog cost, each with session-level evidence and re-measured after adoption. Every session also gets deterministic auto:* tags (error hotspot, verification gap, turn failure, repeat, correction, context pressure, cost outlier, scale, top tools, language). Tool-layer recursive self-improvement with a sidebar panel.",
-        "zh": "会话归档 CRUD + PDCA 数据炼金：从历史会话里算出工具错误率、纠正率、编辑后未验证缺口、上下文压力与工具目录成本，给出带会话级证据的 finding 与可采纳的上下文补丁，采纳后再用后续会话重估；每条会话另有按事实派生的 auto:* 标签（错误热点、验证缺口、回合失败、重复调用、纠正、上下文压力、成本离群、规模、常用工具、语言）。带侧边栏面板的工具层递归自我改进。"
+        "en": "CRUD over the Harness session archive plus a PDCA loop that mines historical sessions into measurable findings and adoptable context patches: tool-error rate, correction rate, verification gaps, context pressure and tool-catalog cost, each with session-level evidence and re-measured after adoption. Every session also gets deterministic auto:* tags (error hotspot, verification gap, turn failure, repeat, correction, context pressure, cost outlier, scale, top tools, language). Auto tags are written in Chinese; proposals are deduplicated by content fingerprint and the act step is idempotent; a status strip shows whether a run is in flight, what the last run produced and when the next auto run is due. Tool-layer recursive self-improvement with a sidebar panel.",
+        "zh": "会话归档 CRUD + PDCA 数据炼金：从历史会话里算出工具错误率、纠正率、编辑后未验证缺口、上下文压力与工具目录成本，给出带会话级证据的 finding 与可采纳的上下文补丁，采纳后再用后续会话重估；每条会话另有按事实派生的 auto:* 标签（错误热点、验证缺口、回合失败、重复调用、纠正、上下文压力、成本离群、规模、常用工具、语言）。标签用中文；提案按内容指纹去重、行动步骤幂等；面板顶部显示炼金是否在跑、上次结果与下次自动运行时间。带侧边栏面板的工具层递归自我改进。"
       },
       "icon": "plugins/archive-rsi/icon.svg",
       "author": "Feahter",
@@ -181,7 +181,7 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794142559
+          "updated": 1794190942
         }
       },
       "versions": [
@@ -205,6 +205,19 @@
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "989ff3177268d5483ca1ea4adedc8d43bbf36473",
+            "path": "plugins/archive-rsi"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "0.3.0",
+          "publishTimestamp": 1794190942,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "57c49af1d2da9beff5135342059e00e00190df8a",
             "path": "plugins/archive-rsi"
           },
           "engines": {
