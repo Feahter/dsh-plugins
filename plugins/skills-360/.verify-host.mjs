@@ -623,6 +623,10 @@ console.log('PASS 7 errors: unknown action -> 400, missing name -> 404, traversa
     { type: 'tool/result', data: { message: { isError: true, content: 'checklist step failed' } }, time: now - 3 * 60_000 },
     { type: 'tool/call', data: { name: 'skill', arguments: JSON.stringify({ name: 'good' }) }, time: now - 2 * 60_000 },
     { type: 'turn/end', data: { reason: { kind: 'interrupted' } }, time: now - 1 * 60_000 },
+    // Negative control: an error 181 minutes after loading `medium` is an
+    // unrelated later task, so it must not be attributed to medium.
+    { type: 'tool/call', data: { name: 'skill', arguments: JSON.stringify({ name: 'medium' }) }, time: now - 6 * 60 * 60_000 },
+    { type: 'tool/result', data: { message: { isError: true, content: 'unrelated late failure' } }, time: now - 6 * 60 * 60_000 + 181 * 60_000 },
   ].map((row) => JSON.stringify(row));
   await writeFile(join(evoDir, 'session.jsonl'), evoRows.join('\n') + '\n', 'utf8');
 }
@@ -634,8 +638,12 @@ assert.equal(goodEvo.evolution.pending.hasUnclosed, true, 'pending evolution sig
 const summaryGoodEvo = (await scanTool.execute({})).skills.find((entry) => entry.name === 'good');
 assert.ok(summaryGoodEvo && typeof summaryGoodEvo.evolution === 'object', 'scan summary carries evolution');
 assert.equal(summaryGoodEvo.evolution.hasUnclosed, true, 'scan summary reflects pending signal');
+const mediumEvo = fresh.skills.find((report) => report.name === 'medium');
+assert.equal(mediumEvo.evolution.signals.postLoadErrors, 0, 'out-of-window error is not attributed');
+assert.equal(mediumEvo.evolution.pending.hasUnclosed, false, 'out-of-window error does not open a proposal');
 console.log('PASS 9a evolution scan: good hasUnclosed =', goodEvo.evolution.pending.hasUnclosed,
-  '| pendingScore', goodEvo.evolution.pending.score);
+  '| pendingScore', goodEvo.evolution.pending.score,
+  '| medium late-error excluded =', mediumEvo.evolution.signals.postLoadErrors === 0);
 
 // --- POST /evolve dryRun (no write)
 const goodBeforeHash2 = sha256(await readSkillFile('good'));

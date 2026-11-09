@@ -269,7 +269,7 @@ export async function collectUsage({ sessionsDir, windowDays, now })
 //      prompts: { [name]: [{ at, sessionId, text }] },
 //      sessionsScanned, spanDays, available }
 // signals/prompts 的解析规则见 EVOLUTION-SPEC.md §2；失败不抛。
-// 读 sessionsDir 下 **/session*.jsonl.zstd 与 *.jsonl，按 mtime 过滤窗口；
+// 读 sessionsDir 下 **/*.jsonl.zstd 与 *.jsonl，按 mtime 过滤窗口；
 // 统计 type==='tool/call' && data.name==='skill' 的 arguments.name。
 // zstd 解压：优先 node:zlib 的 zstdDecompressSync；多帧时按 magic 28 B5 2F FD 分帧；
 // 失败不抛，available=false 或跳过该文件（在返回里记 skipped 数）。

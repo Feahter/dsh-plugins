@@ -547,10 +547,10 @@ export function scoreSkill(metrics, context) {
   let closureScore = 0;
   if (closureApplicable) {
     if (evLessonsCount > 0) {
-      // Compare at the same day granularity as parseLessons (see evolution.js):
-      // a lesson dated today covers signals from today.
-      const lessonDayEnd = evLatestAt != null ? evLatestAt + DAY_MS - 1 : null;
-      closureScore = (evLastSignalAt != null && lessonDayEnd != null && evLastSignalAt > lessonDayEnd) ? 1 : 2;
+      // `pending.hasUnclosed` already compares at the same day granularity as
+      // parseLessons; reuse it so the item can never say "covered" while the
+      // portfolio still lists the skill as unclosed.
+      closureScore = evHasUnclosed ? 1 : 2;
     } else {
       closureScore = 0;
     }
@@ -562,7 +562,7 @@ export function scoreSkill(metrics, context) {
     2,
     closureApplicable
       ? (evLessonsCount > 0
-        ? (closureScore === 2 ? '最新经验已覆盖最近信号。' : '最近信号晚于最新经验，尚未沉淀。')
+        ? (closureScore === 2 ? '最新经验已覆盖最近信号。' : '存在未闭环信号（晚于最新经验），尚未沉淀。')
         : '有信号但无经验，尚未闭环。')
       : '无信号且无经验，本项不评分。',
     { applicable: closureApplicable },

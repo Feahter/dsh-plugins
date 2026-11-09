@@ -670,3 +670,26 @@ test('portfolio: a closed evolution signal is not listed as pending', () => {
   assert.deepEqual(portfolio.issues.pendingEvolution, []);
   assert.equal(portfolio.totals.evolution.pendingSkills, 0);
 });
+
+test('score: an unclosed signal with no timestamp never reads as covered', async () => {
+  const { report } = await analyzeFixture({
+    name: 'no-time',
+    description: 'Use when testing. 触发：测试。',
+    body: GOOD_BODY,
+    refs: ['details.md'],
+    usage: { count: 1, sufficient: true },
+    evolution: {
+      signals: {
+        loads: 1, sessions: 1, reloads: 0, postLoadErrors: 0, corrections: 1, asks: 0, turnFailures: 0,
+        lastLoadAt: NOW - 1000, lastSignalAt: null,
+        samples: [{ kind: 'correction', at: null, sessionId: 's1', excerpt: '不对' }],
+      },
+      lessonsRaw: '- [2026-11-09] 触发：不对 → 做法：先复述需求再动手',
+    },
+  });
+  const evolutionDim = report.score.dimensions.find((dim) => dim.id === 'evolution');
+  const closure = evolutionDim.items.find((item) => item.id === 'evolution.closure');
+  assert.equal(report.evolution.pending.hasUnclosed, true);
+  assert.equal(closure.score, 1, 'unclosed must not read as covered');
+  assert.equal(closure.detail.includes('已覆盖'), false);
+});

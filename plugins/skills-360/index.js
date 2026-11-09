@@ -1187,7 +1187,7 @@ function normalizeLesson(value) {
     });
   }
   const strip = (text) => String(text == null ? '' : text)
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200D\uFEFF]/g, '')
     .replace(/[\r\n]+/g, ' ')
     .replace(/[ \t]+/g, ' ')
     .trim();

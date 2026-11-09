@@ -24,7 +24,7 @@ function oneLine(text, max) {
   const cleaned = String(text ?? '')
     // Control characters (including NUL) would survive into a Markdown file
     // and confuse every reader/parser downstream.
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200D\uFEFF]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (cleaned.length <= max) return cleaned;

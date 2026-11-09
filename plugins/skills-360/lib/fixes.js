@@ -95,7 +95,7 @@ const LESSON_HEADING_RE = /^##\s*(?:参考资源|References|参考)\s*$/m;
 
 function oneLine(value, max) {
   const cleaned = String(value ?? '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200D\uFEFF]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (cleaned.length <= max) return cleaned;
