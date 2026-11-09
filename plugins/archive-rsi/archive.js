@@ -40,7 +40,7 @@ export const DEFAULT_EDIT_TOOLS = ['write', 'edit'];
 export const DEFAULT_CHECK_TOOLS = ['bash', 'pwsh', 'bash_persistent'];
 
 const INDEX_VERSION = 1;
-const DEFAULT_MAX_TRANSCRIPT_BYTES = 262144;
+const DEFAULT_MAX_TRANSCRIPT_BYTES = 1048576;
 const MAX_TRANSCRIPT_TITLE_CHARS = 80;
 const MAX_HUMAN_TEXTS = 40;
 const MAX_HUMAN_TEXT_CHARS = 400;
@@ -52,7 +52,7 @@ const MAX_NOTE_CHARS = 10_000;
 const MAX_TITLE_CHARS = 200;
 const MAX_CALL_PREVIEW = 200;
 const TRANSCRIPT_CALL_PREVIEW = 120;
-const TRANSCRIPT_BLOCK_CHARS = 4000;
+const TRANSCRIPT_BLOCK_CHARS = 12000;
 const MARKER_RESERVE = 128;
 const SESSION_FILE_RE = /^session(?:\.v(\d+))?\.jsonl(?:\.zstd)?$/;
 
@@ -1651,10 +1651,50 @@ export class ArchiveStore {
     return { entry, facts };
   }
 
-  /** The rendered Markdown transcript, or `null` when it does not exist. */
+  /**
+   * The rendered Markdown transcript, or `null` when it does not exist.
+   *
+   * Reads the on-disk cache verbatim when it is present; when it is missing
+   * (an early import, a deleted cache, or a session that predates the
+   * transcript feature) the transcript is re-rendered from the raw session
+   * file and written back through the same serial queue `sync()` uses, so the
+   * two never interleave a write to the same `<id>.md`. An unknown id or a
+   * failed render degrades to `null` — never throws.
+   */
   async transcript(id) {
+    let safe;
     try {
-      return await readText(this.#sessionMdPath(id), null);
+      safe = this.#safeId(id);
+    } catch {
+      return null;
+    }
+    try {
+      const mdPath = this.#file('sessions', `${safe}.md`);
+      const cached = await readText(mdPath, null);
+      if (cached !== null) return cached;
+      const index = await this.#loadIndex();
+      const entry = index.entries[safe];
+      if (!entry) return null;
+      const file = typeof entry.file === 'string' && entry.file ? entry.file : null;
+      if (!file) return null;
+      return await this.#enqueue(async () => {
+        // A concurrent writer may have filled the cache since the read above.
+        const again = await readText(mdPath, null);
+        if (again !== null) return again;
+        const bytes = await fs.readFile(file);
+        const { header, events } = decodeBytes(bytes, file);
+        const facts = computeFacts({
+          header,
+          events,
+          file,
+          slug: entry.slug,
+          editTools: this.#editTools,
+          checkTools: this.#checkTools,
+        });
+        const rendered = renderTranscript(facts, events, { maxBytes: this.#maxTranscriptBytes });
+        await atomicWriteText(mdPath, rendered);
+        return rendered;
+      });
     } catch {
       return null;
     }

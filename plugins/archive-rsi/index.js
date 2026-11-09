@@ -208,6 +208,29 @@ function asLimit(value, fallback, max = 500) {
   return Math.min(max, Math.max(1, Math.floor(number)));
 }
 
+/**
+ * Transcript page size: default 24000, clamped to [1000, 400000]. A missing or
+ * non-numeric value falls back to the default rather than collapsing to 1000.
+ */
+function asMaxChars(value, fallback = 24_000) {
+  const base = Number.isFinite(fallback) && fallback > 0 ? fallback : 24_000;
+  if (value === null || value === undefined || value === '') return base;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return base;
+  return Math.min(400_000, Math.max(1000, Math.floor(number)));
+}
+
+/**
+ * Transcript page offset: default 0, clamped to [0, total]. An offset past the
+ * end is treated as `total`, so the returned slice is empty instead of an error.
+ */
+function asOffset(value, total) {
+  if (value === null || value === undefined || value === '') return 0;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return 0;
+  return Math.min(Math.floor(number), total);
+}
+
 function asTags(value) {
   if (value === undefined) return undefined;
   // Do not filter: a dropped entry looks like a successful write, and the store
@@ -545,13 +568,14 @@ function buildTools({ store, config, paths, state, ensureReady }) {
   tools.push(
     defineTool(
       'archive_get',
-      'Read one archived session: curated metadata, the derived facts (turns, per-tool call/error counts, context pressure, edits vs checks, repeated calls) and optionally the rendered transcript.',
+      'Read one archived session: curated metadata, the derived facts (turns, per-tool call/error counts, context pressure, edits vs checks, repeated calls) and optionally a page of the rendered transcript.',
       {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Session id from archive_list.' },
-          transcript: { type: 'boolean', description: 'Include the rendered Markdown transcript.' },
-          maxChars: { type: 'number', description: 'Cap the transcript length, default 12000.' },
+          transcript: { type: 'boolean', description: 'Include a slice of the rendered Markdown transcript (paged, see offset).' },
+          maxChars: { type: 'number', description: 'Slice length in characters, default 12000, clamped to [1000, 400000].' },
+          offset: { type: 'number', description: 'Start offset into the transcript, default 0. Page by re-calling with offset = transcriptOffset + transcript.length until transcriptTruncated is false.' },
         },
         required: ['id'],
         additionalProperties: false,
@@ -565,9 +589,14 @@ function buildTools({ store, config, paths, state, ensureReady }) {
         const payload = { entry: annotate(record.entry, archiveState), facts: record.facts };
         if (asBoolean(args.transcript, false)) {
           const text = await store1.transcript(id);
-          const cap = asLimit(args.maxChars, 12_000, 200_000);
-          payload.transcript = text ? text.slice(0, cap) : null;
-          payload.transcriptTruncated = Boolean(text && text.length > cap);
+          const total = text ? text.length : 0;
+          const maxChars = asMaxChars(args.maxChars, 12_000);
+          const offset = asOffset(args.offset, total);
+          const slice = text ? text.slice(offset, offset + maxChars) : '';
+          payload.transcript = text ? slice : null;
+          payload.transcriptOffset = offset;
+          payload.transcriptTotal = total;
+          payload.transcriptTruncated = offset + slice.length < total;
         }
         return ok(payload);
       },
@@ -1070,9 +1099,14 @@ async function route({ store, paths, config, url, segments, method, body, ensure
       const payload = { ok: true, entry: annotate(record.entry, archiveState), facts: record.facts };
       if (url.searchParams.get('transcript')) {
         const text = await store.transcript(second);
-        const cap = asLimit(Number(url.searchParams.get('maxChars')), 24_000, 200_000);
-        payload.transcript = text ? text.slice(0, cap) : null;
-        payload.transcriptTruncated = Boolean(text && text.length > cap);
+        const total = text ? text.length : 0;
+        const maxChars = asMaxChars(url.searchParams.get('maxChars'));
+        const offset = asOffset(url.searchParams.get('offset'), total);
+        const slice = text ? text.slice(offset, offset + maxChars) : '';
+        payload.transcript = text ? slice : null;
+        payload.transcriptOffset = offset;
+        payload.transcriptTotal = total;
+        payload.transcriptTruncated = offset + slice.length < total;
       }
       return { payload };
     }

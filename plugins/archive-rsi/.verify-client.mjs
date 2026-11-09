@@ -66,6 +66,17 @@ function lineOf(offset) {
   return SOURCE.slice(0, offset).split('\n').length;
 }
 
+// Recursively search a stub-react element tree for a text needle. The stub's
+// `createElement` keeps children as a nested array/string/null mix, so walking
+// it this way is the only reliable way to assert a label survived rendering.
+function hasText(node, needle) {
+  if (node === null || node === undefined) return false;
+  if (typeof node === 'string' || typeof node === 'number') return String(node).indexOf(needle) !== -1;
+  if (Array.isArray(node)) return node.some((child) => hasText(child, needle));
+  if (typeof node === 'object' && node.children) return hasText(node.children, needle);
+  return false;
+}
+
 // ------------------------------------------------------------------ stub react
 
 /**
@@ -405,6 +416,131 @@ check('CLI.8', 'the PDCA layout keeps its scroll contract and both locales carry
   }
   if (missing.length) throw new Error(missing.join('; '));
   return `stylesheet ${sheet.length} chars; scroll contract + act labels present in zh/en`;
+});
+
+check('CLI.9', 'the transcript viewer grows to a real reading window and keeps its toolbar', () => {
+  // Re-apply with a recording DOM stub so the stylesheet is captured, the same
+  // way CLI.8 reads the PDCA scroll contract.
+  const loaded = loadClient({ withDocument: true });
+  assert(loaded.registrations.length === 1, 'the with-document load did not register the module');
+  const exported = loaded.registrations[0].factory(requireOnlyReact(makeReact(), []));
+  const ctx = {
+    document: loaded.sandbox.document,
+    effect(fn) { const disposer = fn(); return () => { if (typeof disposer === 'function') disposer(); }; },
+    slots: { inject(_name, callback) { callback(); }, register() { return () => {}; } },
+    locale: { register() {} },
+  };
+  exported.apply(ctx);
+  const styles = (loaded.sandbox.document && loaded.sandbox.document.__styles) || [];
+  const sheet = styles.map((style) => style.textContent || '').join('\n');
+
+  const transcriptStart = sheet.indexOf('.dsh-archive-rsi-transcript{');
+  assert(transcriptStart !== -1, '.dsh-archive-rsi-transcript rule missing');
+  const transcriptEnd = sheet.indexOf('}', transcriptStart);
+  const block = sheet.slice(transcriptStart, transcriptEnd === -1 ? sheet.length : transcriptEnd);
+  assert(!/max-height:260px/.test(block), 'the transcript rule still caps height at max-height:260px');
+  assert(/min-height:240px/.test(block), 'the transcript rule lacks the min-height:240px floor');
+  assert(/height:min\(58vh,640px\)/.test(block), 'the transcript rule lacks height:min(58vh,640px)');
+  assert(/white-space:pre-wrap/.test(block), 'the transcript rule lost white-space:pre-wrap');
+  assert(/user-select:text/.test(block), 'the transcript rule lost user-select:text');
+  assert(sheet.indexOf('.dsh-archive-rsi-transcriptToolbar{') !== -1, '.dsh-archive-rsi-transcriptToolbar rule missing');
+  return 'height:min(58vh,640px) with a 240px floor; toolbar present';
+});
+
+check('CLI.10', 'the new transcript-viewer keys exist in inline zh/en and in zh/en.json', () => {
+  assert(applied, 'prerequisite: CLI.5 failed');
+  const NEW_KEYS = ['transcriptLoadMore', 'transcriptLoading', 'transcriptProgress', 'transcriptAllLoaded', 'transcriptLoadFailed'];
+  const dict = applied.locales[0] && applied.locales[0].dictionaries;
+  assert(dict && dict.zh && dict.en, 'no inline locale dictionaries');
+  for (const language of ['zh', 'en']) {
+    const inline = dict[language];
+    for (const key of NEW_KEYS) {
+      assert(typeof inline[key] === 'string' && inline[key].length > 0, `inline ${language}.${key} is missing or empty`);
+    }
+    let file;
+    try {
+      file = JSON.parse(readFileSync(path.join(HERE, 'locale', language + '.json'), 'utf8'));
+    } catch (error) {
+      throw new Error(`cannot parse locale/${language}.json: ${(error && error.message) || error}`);
+    }
+    for (const key of NEW_KEYS) {
+      assert(typeof file[key] === 'string' && file[key].length > 0, `${language}.json.${key} is missing or empty`);
+    }
+    const inlineSet = NEW_KEYS.filter((key) => inline[key] !== undefined).sort().join('|');
+    const fileSet = NEW_KEYS.filter((key) => file[key] !== undefined).sort().join('|');
+    assert(inlineSet === fileSet, `${language} transcript key set differs between inline and ${language}.json`);
+  }
+  return '5 transcript keys consistent across all four dictionaries';
+});
+
+check('CLI.11', 'a truncated transcript renders a load-more button that requests an offset', () => {
+  // Load in a sandbox that records `fetch` so clicking the real viewer's button
+  // can be asserted against the exact URL the chunk loader sends.
+  const react = makeReact();
+  const registrations = [];
+  const requests = [];
+  const sandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    queueMicrotask,
+    URL,
+    TextEncoder,
+    TextDecoder,
+    fetch(url, options) {
+      requests.push({ url: String(url), options });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: { transcript: 'more', transcriptOffset: 24000, transcriptTotal: 100000, transcriptTruncated: false },
+        }),
+      });
+    },
+    window: {
+      __ModuleLoader__: {
+        load(registration) { registrations.push(registration); },
+      },
+    },
+  };
+  vm.createContext(sandbox);
+  new vm.Script(SOURCE, { filename: 'client.js' }).runInContext(sandbox);
+  assert(registrations.length === 1, 'the fetch-enabled load did not register the module');
+  const exported = registrations[0].factory(requireOnlyReact(react, []));
+  assert(exported && exported.__verify, 'no __verify test surface on the factory return');
+  assert(typeof exported.__verify.TranscriptCard === 'function', '__verify.TranscriptCard is not a function');
+  assert(typeof exported.__verify.fetchTranscriptChunk === 'function', '__verify.fetchTranscriptChunk is not a function');
+
+  // Render the real viewer in a truncated state and walk the recorded tree.
+  react.created.length = 0;
+  let clicked = false;
+  exported.__verify.TranscriptCard({
+    t: (key) => key,
+    localeId: 'en',
+    transcript: 'x'.repeat(24000),
+    transcriptOffset: 0,
+    transcriptTotal: 100000,
+    transcriptTruncated: true,
+    transcriptLoading: false,
+    transcriptError: '',
+    onLoadMore: () => {
+      clicked = true;
+      return exported.__verify.fetchTranscriptChunk('session-abc', 24000, 200000);
+    },
+  });
+  const button = react.created.find((element) =>
+    element && element.type === 'button' && hasText(element.children, 'transcriptLoadMore'));
+  assert(button, 'no load-more button rendered for a truncated transcript');
+  assert(typeof button.props.onClick === 'function', 'the load-more button has no onClick');
+  button.props.onClick();
+  assert(clicked, 'the load-more button is not wired to onLoadMore');
+  assert(requests.length === 1, `expected 1 request after clicking load-more, got ${requests.length}`);
+  const url = requests[0].url;
+  assert(url.indexOf('offset=24000') !== -1, `load-more request is missing the offset parameter: ${url}`);
+  assert(url.indexOf('maxChars=200000') !== -1, `load-more request is missing the maxChars parameter: ${url}`);
+  return 'load-more button renders; click requests offset=24000&maxChars=200000';
 });
 
 // --------------------------------------------------------------------- summary

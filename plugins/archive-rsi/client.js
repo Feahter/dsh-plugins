@@ -17,6 +17,11 @@ window.__ModuleLoader__.load({
     // Mirrors alchemy.js RUN_STALE_MS: a run stuck in `running` this long is shown as interrupted.
     const RUN_STALE_MS = 10 * 60 * 1000;
     const EVIDENCE_CHIP_LIMIT = 6;
+    // Transcript paging: the first paint pulls a small slice so a large transcript
+    // does not stall the detail pane; "load more" then fetches a big window by
+    // offset and appends it. The host clamps maxChars to [1000, 400000].
+    const TRANSCRIPT_INITIAL_MAX = 24000;
+    const TRANSCRIPT_MORE_MAX = 200000;
 
     // ------------------------------------------------------------------ locale
 
@@ -166,6 +171,11 @@ window.__ModuleLoader__.load({
       transcriptHint: '仅用于阅读，转录不会被改写。',
       transcriptTruncated: '转录已截断',
       transcriptEmpty: '没有可显示的转录。',
+      transcriptLoadMore: '加载更多',
+      transcriptLoading: '加载中…',
+      transcriptProgress: '已显示 {shown} / {total} 字符',
+      transcriptAllLoaded: '已全部加载',
+      transcriptLoadFailed: '加载更多失败：{message}',
 
       editTitle: '标题',
       editNote: '备注',
@@ -456,6 +466,11 @@ window.__ModuleLoader__.load({
       transcriptHint: 'Read-only excerpt; the transcript is never rewritten.',
       transcriptTruncated: 'Transcript truncated',
       transcriptEmpty: 'No transcript available.',
+      transcriptLoadMore: 'Load more',
+      transcriptLoading: 'Loading…',
+      transcriptProgress: 'Showing {shown} / {total} characters',
+      transcriptAllLoaded: 'All loaded',
+      transcriptLoadFailed: 'Failed to load more: {message}',
 
       editTitle: 'Title',
       editNote: 'Note',
@@ -886,6 +901,14 @@ window.__ModuleLoader__.load({
           window.clearTimeout(timer);
         }
       }
+    }
+
+    // Load one transcript window. `offset` is the number of characters already
+    // shown; the server returns the next slice so the viewer can append it.
+    async function fetchTranscriptChunk(sessionId, offset, maxChars) {
+      return api('/sessions/' + encodeURIComponent(sessionId)
+        + '?transcript=1&maxChars=' + String(maxChars)
+        + '&offset=' + String(offset));
     }
 
     // ------------------------------------------------------------------- icons
@@ -1921,17 +1944,44 @@ window.__ModuleLoader__.load({
 
     function TranscriptCard(props) {
       const t = props.t;
-      const transcript = props.transcript;
-      const hint = props.truncated
-        ? t('transcriptHint') + ' · ' + t('transcriptTruncated')
-        : t('transcriptHint');
-      return h(Card, { title: t('factsTranscript'), icon: h(ProposalIcon, { size: 14 }) },
-        transcript
-          ? [
-            h('p', { key: 'hint', className: 'dsh-archive-rsi-transcriptHint' }, hint),
-            h('pre', { key: 'body', className: 'dsh-archive-rsi-transcript' }, transcript),
-          ]
-          : h('div', { className: 'dsh-archive-rsi-emptyInline' }, t('transcriptEmpty')));
+      const localeId = props.localeId;
+      const transcript = typeof props.transcript === 'string' ? props.transcript : '';
+      const truncated = Boolean(props.transcriptTruncated);
+      const loading = Boolean(props.transcriptLoading);
+      const error = props.transcriptError || '';
+      const shown = transcript.length;
+      const total = toNumber(props.transcriptTotal);
+      const progress = t('transcriptProgress', {
+        shown: formatInt(shown, localeId),
+        total: total === null ? formatInt(shown, localeId) : formatInt(total, localeId),
+      });
+      if (!transcript) {
+        return h(Card, { title: t('factsTranscript'), icon: h(ProposalIcon, { size: 14 }) },
+          h('div', { className: 'dsh-archive-rsi-emptyInline' }, t('transcriptEmpty')));
+      }
+      const children = [
+        h('p', { key: 'hint', className: 'dsh-archive-rsi-transcriptHint' }, t('transcriptHint')),
+        h('div', { key: 'toolbar', className: 'dsh-archive-rsi-transcriptToolbar' },
+          h('span', { className: 'dsh-archive-rsi-transcriptProgress' }, progress),
+          truncated
+            ? h('button', {
+              type: 'button',
+              className: 'dsh-archive-rsi-btn',
+              disabled: loading,
+              onClick: props.onLoadMore,
+            }, loading ? h(Spinner) : null,
+            loading ? t('transcriptLoading') : (error ? t('retry') : t('transcriptLoadMore')))
+            : h('span', { className: 'dsh-archive-rsi-transcriptDone' }, t('transcriptAllLoaded'))),
+      ];
+      if (error) {
+        children.push(h('div', {
+          key: 'error',
+          className: 'dsh-archive-rsi-transcriptError',
+          role: 'alert',
+        }, t('transcriptLoadFailed', { message: error })));
+      }
+      children.push(h('pre', { key: 'body', className: 'dsh-archive-rsi-transcript' }, transcript));
+      return h(Card, { title: t('factsTranscript'), icon: h(ProposalIcon, { size: 14 }) }, children);
     }
 
     function DetailMeta(props) {
@@ -2072,7 +2122,13 @@ window.__ModuleLoader__.load({
               h(TranscriptCard, {
                 key: 'transcript',
                 transcript: detail.transcript,
-                truncated: detail.transcriptTruncated,
+                transcriptOffset: detail.transcriptOffset,
+                transcriptTotal: detail.transcriptTotal,
+                transcriptTruncated: detail.transcriptTruncated,
+                transcriptLoading: props.transcriptLoading,
+                transcriptError: props.transcriptError,
+                onLoadMore: props.onLoadMore,
+                localeId: props.localeId,
                 t,
               }),
             ]
@@ -2605,6 +2661,8 @@ window.__ModuleLoader__.load({
       const [detail, setDetail] = React.useState(null);
       const [detailLoading, setDetailLoading] = React.useState(false);
       const [detailError, setDetailError] = React.useState('');
+      const [transcriptLoading, setTranscriptLoading] = React.useState(false);
+      const [transcriptError, setTranscriptError] = React.useState('');
       const [detailKey, setDetailKey] = React.useState(0);
       const [draft, setDraft] = React.useState(null);
       const [busy, setBusy] = React.useState('');
@@ -2686,7 +2744,9 @@ window.__ModuleLoader__.load({
         let alive = true;
         setDetailLoading(true);
         setDetailError('');
-        api('/sessions/' + encodeURIComponent(selectedId) + '?transcript=1').then((result) => {
+        setTranscriptLoading(false);
+        setTranscriptError('');
+        api('/sessions/' + encodeURIComponent(selectedId) + '?transcript=1&maxChars=' + String(TRANSCRIPT_INITIAL_MAX)).then((result) => {
           if (!alive) return;
           setDetailLoading(false);
           if (!result.ok) {
@@ -2698,10 +2758,15 @@ window.__ModuleLoader__.load({
           const data = result.data && typeof result.data === 'object' ? result.data : {};
           const entry = normalizeEntry(data.entry || data.session || {});
           if (!entry.id) entry.id = selectedId;
+          const transcript = typeof data.transcript === 'string' ? data.transcript : '';
+          const transcriptOffset = toNumber(data.transcriptOffset);
+          const transcriptTotal = toNumber(data.transcriptTotal);
           setDetail({
             entry,
             facts: normalizeFacts(data.facts),
-            transcript: typeof data.transcript === 'string' ? data.transcript : '',
+            transcript,
+            transcriptOffset: transcriptOffset !== null ? transcriptOffset : 0,
+            transcriptTotal: transcriptTotal !== null ? transcriptTotal : transcript.length,
             transcriptTruncated: Boolean(data.transcriptTruncated),
           });
           setDraft({
@@ -2892,6 +2957,38 @@ window.__ModuleLoader__.load({
           }
           return { key, dir: column.numeric ? 'desc' : 'asc' };
         });
+      }
+
+      async function loadTranscriptMore() {
+        if (!detail || !detail.entry || !detail.entry.id) return;
+        if (transcriptLoading || !detail.transcriptTruncated) return;
+        const entryId = detail.entry.id;
+        const offset = typeof detail.transcript === 'string' ? detail.transcript.length : 0;
+        setTranscriptLoading(true);
+        setTranscriptError('');
+        try {
+          const result = await fetchTranscriptChunk(entryId, offset, TRANSCRIPT_MORE_MAX);
+          if (!result.ok) {
+            setTranscriptError(result.message);
+            return;
+          }
+          const data = result.data && typeof result.data === 'object' ? result.data : {};
+          const chunk = typeof data.transcript === 'string' ? data.transcript : '';
+          const offsetRaw = toNumber(data.transcriptOffset);
+          const totalRaw = toNumber(data.transcriptTotal);
+          setDetail((previous) => {
+            if (!previous) return previous;
+            return {
+              ...previous,
+              transcript: (previous.transcript || '') + chunk,
+              transcriptOffset: offsetRaw !== null ? offsetRaw : offset,
+              transcriptTotal: totalRaw !== null ? totalRaw : previous.transcriptTotal,
+              transcriptTruncated: Boolean(data.transcriptTruncated),
+            };
+          });
+        } finally {
+          setTranscriptLoading(false);
+        }
       }
 
       async function syncSessions() {
@@ -3299,6 +3396,9 @@ window.__ModuleLoader__.load({
           deleting: busy === 'delete',
           confirmDelete,
           dirty: draftDirty,
+          transcriptLoading,
+          transcriptError,
+          onLoadMore: loadTranscriptMore,
           onRetry: () => setDetailKey((value) => value + 1),
           onDraftChange: (patch) => setDraft((previous) => (previous ? { ...previous, ...patch } : previous)),
           onSave: saveSession,
@@ -3574,7 +3674,11 @@ window.__ModuleLoader__.load({
       '.dsh-archive-rsi-table th.dsh-archive-rsi-cellNum,.dsh-archive-rsi-table td.dsh-archive-rsi-cellNum{text-align:right}',
       '.dsh-archive-rsi-errorCodes{display:block;font-size:9.5px;color:var(--dsw-alias-state-error-primary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}',
       '.dsh-archive-rsi-transcriptHint{margin:0;font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
-      '.dsh-archive-rsi-transcript{margin:0;max-height:260px;overflow:auto;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;cursor:text;color:var(--dsw-alias-label-primary)}',
+      '.dsh-archive-rsi-transcriptToolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}',
+      '.dsh-archive-rsi-transcriptProgress{font-size:10.5px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.dsh-archive-rsi-transcriptDone{font-size:10.5px;color:var(--dsw-alias-state-success-primary)}',
+      '.dsh-archive-rsi-transcriptError{font-size:11px;color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}',
+      '.dsh-archive-rsi-transcript{margin:0;height:min(58vh,640px);min-height:240px;overflow:auto;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;cursor:text;color:var(--dsw-alias-label-primary)}',
       '.dsh-archive-rsi-emptyInline{padding:1px 0;font-size:11px;color:var(--dsw-alias-label-secondary)}',
       '.dsh-archive-rsi-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:150px;padding:26px 18px;text-align:center;color:var(--dsw-alias-label-secondary)}',
       '.dsh-archive-rsi-emptyIcon{display:inline-flex;opacity:.7}',
@@ -3692,6 +3796,13 @@ window.__ModuleLoader__.load({
       }, ArchiveRsiPage));
     }
 
-    return { inject: ['slots', 'locale'], apply };
+    return {
+      inject: ['slots', 'locale'],
+      apply,
+      // Exposed only for `.verify-client.mjs`: render the real transcript viewer
+      // and call the chunk loader to assert the offset request without a live
+      // backend. The runtime loader ignores this extra field.
+      __verify: { TranscriptCard, fetchTranscriptChunk },
+    };
   },
 });

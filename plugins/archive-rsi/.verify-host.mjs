@@ -2259,6 +2259,8 @@ async function phaseRoutes() {
   }
 
   let entryId = '';
+  let pageId = '';
+  let pageFull = '';
   await callTool(stub, 'archive_sync', { refresh: true });
 
   await check('WEB.1', 'GET /api/archive-rsi/overview returns 200 with {ok:true} when the connection allows it', async () => {
@@ -2590,6 +2592,93 @@ async function phaseRoutes() {
     }
     return `run A created ${createdIds.length}, run B reused ${second.json.reused}, files stayed ${filesAfterFirst}`;
   });
+
+  await check('WEB.14', 'GET /sessions/:id?transcript=1 paginates: offset slices concatenate to the original and transcriptTotal equals the full length', async () => {
+    const listing = await httpCall(handler, { url: '/api/archive-rsi/sessions?limit=1' });
+    assertEqual(listing.status, 200, 'sessions status');
+    const entry = listing.json && Array.isArray(listing.json.entries) ? listing.json.entries[0] : null;
+    assert(entry && typeof entry.id === 'string', 'no session to inspect');
+    pageId = entry.id;
+    const mdPath = path.join(base, 'root', 'sessions', `${pageId}.md`);
+    pageFull = await readText(mdPath);
+    if (!pageFull || pageFull.length <= 2000) {
+      throw new Error(`fixture transcript too short for pagination: ${pageFull ? pageFull.length : 0} chars`);
+    }
+    const p1 = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(pageId)}?transcript=1&maxChars=1000&offset=0` });
+    const p2 = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(pageId)}?transcript=1&maxChars=1000&offset=1000` });
+    assertEqual(p1.status, 200, 'first page status');
+    assertEqual(p2.status, 200, 'second page status');
+    const mismatches = [];
+    if (p1.json.transcriptOffset !== 0) mismatches.push(`first transcriptOffset: expected 0, got ${JSON.stringify(p1.json.transcriptOffset)}`);
+    if (p2.json.transcriptOffset !== 1000) mismatches.push(`second transcriptOffset: expected 1000, got ${JSON.stringify(p2.json.transcriptOffset)}`);
+    if (p1.json.transcript !== pageFull.slice(0, 1000)) mismatches.push('first slice is not the original [0,1000) fragment');
+    const joined = (p1.json.transcript || '') + (p2.json.transcript || '');
+    if (joined !== pageFull.slice(0, 2000)) mismatches.push('concatenated slices are not the original [0,2000) fragment');
+    if (p1.json.transcriptTotal !== pageFull.length) {
+      mismatches.push(`transcriptTotal: expected ${pageFull.length}, got ${JSON.stringify(p1.json.transcriptTotal)}`);
+    }
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `total=${p1.json.transcriptTotal}, slices ${p1.json.transcript.length}+${p2.json.transcript.length}`;
+  });
+
+  await check('WEB.15', 'transcriptTruncated is true mid-stream and false when the final slice reaches the end', async () => {
+    assert(pageId && pageFull, 'prerequisite: WEB.14 failed');
+    const total = pageFull.length;
+    const first = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(pageId)}?transcript=1&maxChars=1000&offset=0` });
+    assertEqual(first.status, 200, 'first status');
+    if (first.json.transcriptTruncated !== true) {
+      throw new Error(`first slice (offset=0): expected transcriptTruncated=true, got ${JSON.stringify(first.json.transcriptTruncated)}`);
+    }
+    const tailOffset = total - 100;
+    const tail = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(pageId)}?transcript=1&maxChars=1000&offset=${tailOffset}` });
+    assertEqual(tail.status, 200, 'tail status');
+    if (tail.json.transcript.length !== 100) throw new Error(`tail slice: expected 100 chars, got ${tail.json.transcript.length}`);
+    if (tail.json.transcript !== pageFull.slice(tailOffset)) throw new Error('tail slice does not match the original tail');
+    if (tail.json.transcriptTruncated !== false) {
+      throw new Error(`tail slice: expected transcriptTruncated=false, got ${JSON.stringify(tail.json.transcriptTruncated)}`);
+    }
+    return `first.truncated=true, tail(offset=${tailOffset}).truncated=false`;
+  });
+
+  await check('WEB.16', 'offset beyond the total clamps to total: empty transcript, no error, transcriptTruncated=false', async () => {
+    assert(pageId && pageFull, 'prerequisite: WEB.14 failed');
+    const total = pageFull.length;
+    const response = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(pageId)}?transcript=1&maxChars=1000&offset=${total + 500}` });
+    assertEqual(response.status, 200, 'status');
+    const mismatches = [];
+    if (response.json.transcript !== '') mismatches.push(`transcript: expected "", got ${JSON.stringify(response.json.transcript).slice(0, 80)}`);
+    if (response.json.transcriptOffset !== total) mismatches.push(`transcriptOffset: expected ${total}, got ${JSON.stringify(response.json.transcriptOffset)}`);
+    if (response.json.transcriptTruncated !== false) mismatches.push(`transcriptTruncated: expected false, got ${JSON.stringify(response.json.transcriptTruncated)}`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `offset=${total + 500} -> empty slice, transcriptOffset=${response.json.transcriptOffset}`;
+  });
+
+  await check('WEB.17', 'deleting a session transcript cache re-renders it on demand and rewrites the file', async () => {
+    const listing = await httpCall(handler, { url: '/api/archive-rsi/sessions?limit=1' });
+    assertEqual(listing.status, 200, 'sessions status');
+    const entry = listing.json && Array.isArray(listing.json.entries) ? listing.json.entries[0] : null;
+    assert(entry && typeof entry.id === 'string', 'no session to inspect');
+    const id = entry.id;
+    const mdPath = path.join(base, 'root', 'sessions', `${id}.md`);
+    await fs.rm(mdPath, { force: true });
+    if (await exists(mdPath)) throw new Error('failed to delete the transcript cache');
+    const response = await httpCall(handler, { url: `/api/archive-rsi/sessions/${encodeURIComponent(id)}?transcript=1` });
+    assertEqual(response.status, 200, 'status');
+    if (!(typeof response.json.transcript === 'string' && response.json.transcript.length > 0)) {
+      throw new Error(`transcript is empty after cache deletion (got ${JSON.stringify(response.json.transcript === null ? 'null' : response.json.transcript && response.json.transcript.length)})`);
+    }
+    if (!(await exists(mdPath))) throw new Error('transcript cache was not re-written after on-demand render');
+    const rewritten = await readText(mdPath);
+    if (!rewritten || rewritten.length === 0) throw new Error('rewritten cache is empty');
+    if (rewritten.length !== response.json.transcriptTotal) {
+      throw new Error(`rewritten length ${rewritten.length} != transcriptTotal ${JSON.stringify(response.json.transcriptTotal)}`);
+    }
+    const returned = response.json.transcript;
+    if (returned !== rewritten.slice(0, returned.length)) {
+      throw new Error('returned transcript is not the prefix of the rewritten cache');
+    }
+    return `${id}: cache re-rendered (${rewritten.length} chars)`;
+  });
 }
 
 async function phaseE2E() {
@@ -2700,6 +2789,140 @@ async function phaseE2E() {
 
 // ======================================================================== main
 
+async function phaseTranscriptContract() {
+  console.log('\n# 13. transcript contract (block cap + maxChars clamp)');
+
+  await check('TXT.1', 'an assistant text of 6000 chars survives renderTranscript intact (no 4000-char hard cut)', () => {
+    const longText = 'x'.repeat(6000);
+    const t0 = 1_700_000_000_000;
+    const header = { type: 'session', version: 4, id: 'long-assistant', createdAt: t0, cwd: '/tmp', origin: 'user', isSeeded: false };
+    const events = [
+      { type: 'turn/start', seq: 1, time: t0 + 1000, data: { turn: 1 } },
+      { type: 'user/message', seq: 2, time: t0 + 1100, data: { content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } } },
+      { type: 'assistant/message', seq: 3, time: t0 + 1200, data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: longText }] }, stream: false } },
+      { type: 'turn/end', seq: 4, time: t0 + 1300, data: { turn: 1, reason: { kind: 'completed' } } },
+    ];
+    const facts = computeFacts({ header, events, file: '/tmp/x/session.v4.jsonl.zstd', slug: 'x' });
+    const rendered = renderTranscript(facts, events, { maxBytes: 1_000_000 });
+    if (!rendered.includes(longText)) {
+      throw new Error('the 6000-char assistant text was cut from the transcript (block cap still active?)');
+    }
+    return `6000-char assistant text fully present (rendered ${rendered.length} chars)`;
+  });
+
+  await check('TXT.2', 'maxChars is clamped to [1000, 400000]', async () => {
+    const base = await makeBase('clamp');
+    const root = path.join(base, 'root');
+    const sessionsRoot = path.join(base, 'sessions');
+    const t0 = 1_700_000_000_000;
+    const header = { type: 'session', version: 4, id: 'clamp-fixture', createdAt: t0, cwd: '/tmp', origin: 'user', isSeeded: false };
+    const events = [{ type: 'turn/start', seq: 1, time: t0 + 1000, data: { turn: 1 } }];
+    const longText = 'y'.repeat(12000);
+    // 40 blocks * 12002 chars ≈ 480k chars: above the old 200k ceiling and above
+    // the new 400k ceiling, so both ends of the clamp are observable.
+    for (let index = 0; index < 40; index += 1) {
+      events.push({
+        type: 'assistant/message',
+        seq: 2 + index,
+        time: t0 + 2000 + index,
+        data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: longText }] }, stream: false },
+      });
+    }
+    events.push({ type: 'turn/end', seq: 999, time: t0 + 99000, data: { turn: 1, reason: { kind: 'completed' } } });
+    await writeSessionFixture(sessionsRoot, 'clamp-slug', { header, events });
+    const stub = await applyPlugin({
+      connection: { requestRejection() { return undefined; } },
+      config: { rootDir: root, sessionsDir: sessionsRoot, syncOnBoot: false, maxTranscriptBytes: 1048576 },
+    });
+    const handler = stub.state.routes[0] && stub.state.routes[0].handler;
+    if (!handler) throw new Error('no route handler registered');
+    await callTool(stub, 'archive_sync', { refresh: true });
+
+    // Floor: maxChars=10 must rise to 1000, not stay at 10.
+    const small = await httpCall(handler, { url: '/api/archive-rsi/sessions/clamp-fixture?transcript=1&maxChars=10' });
+    assertEqual(small.status, 200, 'maxChars=10 status');
+    if (small.json.transcript.length !== 1000) {
+      throw new Error(`maxChars=10: expected 1000 chars, got ${small.json.transcript.length}`);
+    }
+    if (small.json.transcriptTruncated !== true) {
+      throw new Error(`maxChars=10: expected transcriptTruncated=true, got ${JSON.stringify(small.json.transcriptTruncated)}`);
+    }
+
+    // Ceiling: a ~480k-char transcript must be cut at 400k, not 200k.
+    const big = await httpCall(handler, { url: '/api/archive-rsi/sessions/clamp-fixture?transcript=1&maxChars=999999' });
+    assertEqual(big.status, 200, 'maxChars=999999 status');
+    const total = big.json.transcriptTotal;
+    if (!(total > 400000)) throw new Error(`fixture transcript too short (${total}): cannot observe the 400000 ceiling`);
+    if (big.json.transcript.length !== 400000) {
+      throw new Error(`maxChars=999999: expected exactly 400000 chars, got ${big.json.transcript.length}`);
+    }
+    if (big.json.transcriptTruncated !== true) {
+      throw new Error(`maxChars=999999: expected transcriptTruncated=true, got ${JSON.stringify(big.json.transcriptTruncated)}`);
+    }
+    if (big.json.transcriptOffset !== 0) throw new Error(`maxChars=999999: expected transcriptOffset=0, got ${JSON.stringify(big.json.transcriptOffset)}`);
+    return `maxChars=10 -> 1000; maxChars=999999 -> 400000 of ${total}`;
+  });
+
+  // The model-facing `archive_get` must page exactly like the panel route: a
+  // 1 MiB transcript cannot be read through a single 200k slice, and a slice
+  // that silently stops early looks like the end of the conversation.
+  await check('TXT.3', 'archive_get pages the transcript by offset and reports transcriptOffset/Total/Truncated', async () => {
+    const base = await makeBase('tool-page');
+    const root = path.join(base, 'root');
+    const sessionsRoot = path.join(base, 'sessions');
+    const t0 = 1_700_000_000_000;
+    const header = { type: 'session', version: 4, id: 'page-fixture', createdAt: t0, cwd: '/tmp', origin: 'user', isSeeded: false };
+    const events = [{ type: 'turn/start', seq: 1, time: t0 + 1000, data: { turn: 1 } }];
+    // 4 blocks x ~4000 chars => total well above the 12000 default, so the
+    // default page is observably shorter than the transcript.
+    for (let index = 0; index < 4; index += 1) {
+      events.push({
+        type: 'assistant/message',
+        seq: 2 + index,
+        time: t0 + 2000 + index,
+        data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: `BLOCK${index}:` + 'q'.repeat(3993) }] }, stream: false },
+      });
+    }
+    events.push({ type: 'turn/end', seq: 99, time: t0 + 9000, data: { turn: 1, reason: { kind: 'completed' } } });
+    await writeSessionFixture(sessionsRoot, 'page-slug', { header, events });
+    const stub = await applyPlugin({
+      connection: { requestRejection() { return undefined; } },
+      config: { rootDir: root, sessionsDir: sessionsRoot, syncOnBoot: false, maxTranscriptBytes: 1048576 },
+    });
+    await callTool(stub, 'archive_sync', { refresh: true });
+
+    const full = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 400000 });
+    assert(full && full.ok === true, `archive_get failed: ${JSON.stringify(full).slice(0, 200)}`);
+    assert(typeof full.transcript === 'string' && full.transcript.length > 16_000, `transcript too short: ${full.transcript && full.transcript.length}`);
+    assertEqual(full.transcriptTruncated, false, 'full read transcriptTruncated');
+    assertEqual(full.transcriptTotal, full.transcript.length, 'transcriptTotal');
+    assertEqual(full.transcriptOffset, 0, 'transcriptOffset of the first page');
+
+    const total = full.transcriptTotal;
+    const a = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 2000, offset: 0 });
+    const b = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 2000, offset: 2000 });
+    assertEqual(a.transcript.length, 2000, 'first page length');
+    assertEqual(b.transcriptOffset, 2000, 'second page offset');
+    assertEqual(a.transcript + b.transcript, full.transcript.slice(0, 4000), 'two pages concatenated');
+    assertEqual(a.transcriptTruncated, true, 'first page transcriptTruncated');
+
+    // Default page size stays 12000 for the tool, and the floor still clamps.
+    const dflt = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true });
+    assertEqual(dflt.transcript.length, 12_000, 'default maxChars');
+    assertEqual(dflt.transcriptTruncated, true, 'default page transcriptTruncated');
+    const floored = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 10 });
+    assertEqual(floored.transcript.length, 1000, 'maxChars floor');
+
+    // Reading past the end is an empty page, not an error or a silent restart.
+    const past = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 1000, offset: total + 5000 });
+    assertEqual(past.transcript, '', 'slice past the end');
+    assertEqual(past.transcriptOffset, total, 'offset clamped to total');
+    assertEqual(past.transcriptTruncated, false, 'truncated past the end');
+
+    return `total=${total}; 2x2000 pages reassemble; default 12000; floor 1000; past-end empty`;
+  });
+}
+
 async function main() {
   console.log('dsh-archive-rsi host verification — stub context (DESIGN.md is the only contract)');
   console.log(`plugin: ${path.join(HERE, 'index.js')}`);
@@ -2721,6 +2944,7 @@ async function main() {
     ['wiring', phaseWiring],
     ['bad args', phaseBadArgs],
     ['routes', phaseRoutes],
+    ['transcript', phaseTranscriptContract],
   ];
   if (!process.argv.includes('--skip-e2e')) phases.push(['e2e', phaseE2E]);
 
