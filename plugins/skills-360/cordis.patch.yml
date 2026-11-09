@@ -1,0 +1,12 @@
+# skills-360 bundle patch
+#
+# 作为 Loader bundle 层挂载：`dsh plugin --profile desktop add <此目录>` 或
+# 在 profile 的 package.json dependencies 里 `link:` 本目录、并把 `skills-360`
+# 加进 dsh.profile.bundles。
+- insert:
+    - id: skills-360
+      name: 'skills-360'
+      config:
+        windowDays: 30
+        catalogDescriptionMaxLength: 500
+        evolution: true

@@ -1,0 +1,45 @@
+{
+  "name": "skills-360",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Skills 360 — DeepSeek Harness 技能体检：按需加载 / 渐进披露 / 可执行性 / 边界 / 卫生 / 持续进化六维评分，出报告，支持一键按建议优化与撤销，并把真实调用中的纠错沉淀成按需读取的经验。",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "RUBRIC.md",
+    "INTERFACE.md",
+    "EVOLUTION-SPEC.md"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node test/run-all.mjs",
+    "verify": "node test/run-all.mjs"
+  }
+}
