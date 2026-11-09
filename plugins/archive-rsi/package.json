@@ -1,6 +1,6 @@
 {
   "name": "dsh-archive-rsi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Session archive for the DeepSeek Harness: CRUD over historical sessions, plus a PDCA alchemy loop that mines them into measurable context and tool-layer patches (tool-layer recursive self-improvement), with a management panel.",
   "license": "MIT",
