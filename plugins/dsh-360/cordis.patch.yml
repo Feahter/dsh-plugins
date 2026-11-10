@@ -1,0 +1,21 @@
+# dsh-360 bundle patch
+#
+# 合并版：一个面板两个 tab —— 「技能」（原 skills-360）与「Agents」（原 agents-360）
+# 装在同一个插件里，共用一套宿主、一套 18 档等级制、一份备份/报告目录
+# (~/.dsh/dsh-360/)。不要与 skills-360 / agents-360 同时启用，否则同一批文件
+# 会被两套宿主重复扫描与写入。
+#
+# 挂载方式（二选一，不要同时装两份）：
+#   1) plugin_manager install_bundle target = link:<repo>/plugins/dsh-360
+#      （自动写 profile package.json 依赖 + dsh.profile.bundles）
+#   2) 手工在 profile 的 cordis.patch.yml 顶层追加下面这一行 insert。
+- insert:
+    - id: dsh-360
+      name: 'dsh-360'
+      config:
+        windowDays: 30         # 会话证据窗口（天）
+        roots: []              # 空 = [cwd, ~/.agents, ~/.deepseek]；core 还会补扫 ~/.claude 与 ~/.dsh/agents
+        maxDepth: 6            # 扫盘深度上限
+        evolution: true        # 挖会话信号并给出经验提案（false 时 evolution 维度不评分）
+        backupsKeep: 20        # 备份保留份数
+        catalogDescriptionMaxLength: 500  # skills surface 的 catalog 描述上限
