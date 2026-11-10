@@ -225,6 +225,60 @@
           }
         }
       ]
+    },
+    {
+      "name": "dsh-360",
+      "title": {
+        "en": "dsh-360 — two health checks in one",
+        "zh": "dsh-360 两面体检"
+      },
+      "description": {
+        "en": "One plugin, two surfaces of health checks, one sidebar panel with two tabs and one shared 18-bucket S~E grade scale (S+/S/S-/A+/A/A-/B+/…/E-). The skills surface grades the on-demand loading path of every skill in the catalog: catalog selectability, whether it was actually loaded on demand, trigger uniqueness, progressive disclosure (entry size, deferred references, a reference index), actionability, boundary/governance, maintenance hygiene, and whether post-load corrections and tool errors were distilled into references/lessons.md and linked back into the entry. The agents surface grades anything that gets injected: instruction files (AGENTS.md / CLAUDE.md), subagent definitions and agent presets — inject hit rate, resident token cost, layering/slimness, imperative rules with verification commands, scope and cross-file conflicts, hygiene, and evolution. Four dsh360_* tools (a surface parameter selects skills, agents or both), routes under /api/dsh-360/skills and /api/dsh-360/agents, every write backed up and undoable, read-only subjects never touched.",
+        "zh": "一个插件、两面体检、一个侧栏面板双 tab、一套共用的 S~E × ± 18 档等级制（S+/S/S-/A+/A/A-/B+/…/E-）。技能面评的是 catalog 里每个技能的按需加载路径：目录可选中性、真实会话里是否被按需加载、触发唯一性、渐进披露（入口体积、细节外置、按需索引）、可执行性、边界与治理、维护卫生，以及加载后的纠错与报错有没有沉淀成 references/lessons.md 并接回入口。Agents 面评一切会被注入的内容：常驻说明书（AGENTS.md / CLAUDE.md）、子代理定义与 agent 预设——注入命中率、常驻 token 成本、分层与精简、带验收命令的祈使规则、作用域与跨文件冲突、卫生与持续进化。四个 dsh360_* 工具（surface 参数选 skills / agents / both），路由在 /api/dsh-360/skills 与 /api/dsh-360/agents，所有写入有备份可撤销，只读对象永不改动。"
+      },
+      "icon": "plugins/dsh-360/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/dsh-360",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/dsh-360"
+      },
+      "metadata": {
+        "category": "context-engineering",
+        "keywords": [
+          "skills",
+          "agents",
+          "subagent",
+          "instruction-files",
+          "audit",
+          "rubric",
+          "grading",
+          "evolution",
+          "panel",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794319039
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794319039,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "53b5f971eb9d121ec47fc0d73887d0701581d884",
+            "path": "plugins/dsh-360"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
     }
   ]
 }
