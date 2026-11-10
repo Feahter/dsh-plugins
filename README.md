@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Four plugins live side by side under [`plugins/`](./plugins).
+Five plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -42,6 +42,13 @@ A six-dimension health check for every skill in the Harness catalog, with a side
 - Requirements: DSH `>= 0.2.1-rc.4`; Node's bundled `zlib` zstd support (Node `>= 22.15`) to read session logs.
 - Data lives in `~/.dsh/skills-360/` (backups, reports, scan state); original session files are never modified.
 
+### [dsh-360](./plugins/dsh-360)
+
+One plugin, two surfaces of health checks, one sidebar panel with two tabs and one shared **18-bucket S~E grade scale** (S+/S/S−/A+/A/A−/…/E−). The `skills` surface scores each catalog entry's on-demand loading path (catalog selectability, real load evidence, trigger uniqueness, progressive disclosure, actionability, boundary, hygiene, evolution); the `agents` surface scores everything that gets injected — instruction files (`AGENTS.md` / `CLAUDE.md`), subagent definitions and agent presets (inject hit rate, resident token cost, layering, imperative rules with verification commands, scope and cross-file conflicts, hygiene, evolution). Four `dsh360_*` tools take a `surface` parameter (`skills` / `agents` / `both`); the panel shows both tabs; every write is backed up and undoable, and read-only subjects are never touched.
+
+- Requirements: DSH `>= 0.2.1-rc.4` and Node `>= 22.15` (shared session-log evidence is read from concatenated-zstd logs).
+- Supersedes `skills-360` + `agents-360` — do not enable them side by side; data lives in `~/.dsh/dsh-360/`.
+
 ## Install manually
 
 The market index pins an exact commit for every version. The equivalent manual installs:
@@ -51,6 +58,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/github-manager"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/archive-rsi"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/skills-360"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/dsh-360"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.
