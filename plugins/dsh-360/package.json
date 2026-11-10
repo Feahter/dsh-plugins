@@ -1,0 +1,67 @@
+{
+  "name": "dsh-360",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One plugin, two surfaces of health checks — DeepSeek Harness skills, plus agent configuration (instruction files, subagent definitions, agent presets), scored on one shared S~E 18-bucket grade scale, with a single sidebar panel, four dsh360_* tools, backups and undo. 一个插件两面体检：技能 + agent 说明书/子代理/预设，统一 S~E 18 档等级制，单面板双 tab，写入有备份可撤销。",
+  "license": "MIT",
+  "author": "Feahter",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "RUBRIC.md",
+    "INTERFACE.md",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4",
+    "node": ">=22.15"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node test/run-all.mjs",
+    "verify": "node test/run-all.mjs"
+  },
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/dsh-360",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/dsh-360"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "skills",
+    "agents",
+    "subagent",
+    "instruction-files",
+    "audit",
+    "rubric",
+    "grading",
+    "evolution",
+    "panel",
+    "context-engineering",
+    "中文"
+  ]
+}

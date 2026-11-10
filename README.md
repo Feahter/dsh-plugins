@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Three plugins live side by side under [`plugins/`](./plugins).
+Four plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -35,6 +35,13 @@ Two layers over the Harness's own session history. `archive_*` tools add curatio
 - Requirements: DSH `>= 0.2.1-rc.4` and Node `>= 22.15` (session logs are concatenated-zstd containers decoded through `node:zlib`).
 - Data lives in `~/.dsh/archive-rsi/`; original session files are never modified, moved or deleted.
 
+### [dsh-360](./plugins/dsh-360)
+
+One plugin, two surfaces of health checks, one sidebar panel with two tabs and one shared **18-bucket S~E grade scale** (S+/S/S−/A+/A/A−/…/E−). The `skills` surface scores each catalog entry's on-demand loading path (catalog selectability, real load evidence, trigger uniqueness, progressive disclosure, actionability, boundary, hygiene, evolution); the `agents` surface scores everything that gets injected — instruction files (`AGENTS.md` / `CLAUDE.md`), subagent definitions and agent presets (inject hit rate, resident token cost, layering, imperative rules with verification commands, scope and cross-file conflicts, hygiene, evolution). Four `dsh360_*` tools take a `surface` parameter (`skills` / `agents` / `both`); the panel shows both tabs; every write is backed up and undoable, and read-only subjects are never touched.
+
+- Requirements: DSH `>= 0.2.1-rc.4` and Node `>= 22.15` (shared session-log evidence is read from concatenated-zstd logs).
+- Supersedes `skills-360` + `agents-360` — do not enable them side by side; data lives in `~/.dsh/dsh-360/`.
+
 ## Install manually
 
 The market index pins an exact commit for every version. The equivalent manual installs:
@@ -43,6 +50,7 @@ The market index pins an exact commit for every version. The equivalent manual i
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/realtime-voice"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/github-manager"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/archive-rsi"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/dsh-360"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.
