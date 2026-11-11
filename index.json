@@ -27,6 +27,12 @@
           "en": "Context engineering",
           "zh": "上下文工程"
         }
+      },
+      "creative": {
+        "title": {
+          "en": "Creative",
+          "zh": "创作"
+        }
       }
     },
     "labels": {
@@ -290,6 +296,56 @@
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "53b5f971eb9d121ec47fc0d73887d0701581d884",
             "path": "plugins/dsh-360"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-mind-canvas",
+      "title": {
+        "en": "Mind canvas",
+        "zh": "脑图创意画布"
+      },
+      "description": {
+        "en": "A mind map on an infinite canvas: press Tab to grow a branch, tidy the tree with d3-hierarchy, import inspirations from Media desk, or let the assistant branch a node with AI. Five theme presets plus a custom palette, and export to Markdown / OPML / FreeMind / JSON / PNG.",
+        "zh": "无限画布上的选题脑图：Tab 往右长、d3-hierarchy 一键整理成树、从自媒体工作台导入灵感、让助手 AI 发散一个节点。5 套预设主题 + 自定义配色，可导出 Markdown / OPML / FreeMind / JSON / PNG。"
+      },
+      "icon": "plugins/mind-canvas/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/mind-canvas",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/mind-canvas"
+      },
+      "metadata": {
+        "category": "creative",
+        "keywords": [
+          "mindmap",
+          "canvas",
+          "brainstorm",
+          "mind-map",
+          "react-flow",
+          "opml",
+          "freemind",
+          "theme",
+          "panel"
+        ],
+        "sortKeys": {
+          "updated": 1794386561
+        }
+      },
+      "versions": [
+        {
+          "version": "0.2.0",
+          "publishTimestamp": 1794386561,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "2c98cc79a06d3890334a78954d606fa5f764b8d4",
+            "path": "plugins/mind-canvas"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.4"

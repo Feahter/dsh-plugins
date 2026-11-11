@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Four plugins live side by side under [`plugins/`](./plugins).
+Five plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -42,6 +42,15 @@ One plugin, two surfaces of health checks, one sidebar panel with two tabs and o
 - Requirements: DSH `>= 0.2.1-rc.4` and Node `>= 22.15` (shared session-log evidence is read from concatenated-zstd logs).
 - Supersedes `skills-360` + `agents-360` — do not enable them side by side; data lives in `~/.dsh/dsh-360/`.
 
+### [Mind canvas](./plugins/mind-canvas)
+
+A mind map on an infinite canvas inside the sidebar. Jot a thought and press Enter for the first node; `Tab` grows a child and drops straight into editing, `⌘Z` undoes, deleting a node takes its whole subtree. `Tidy up` runs a d3-hierarchy tidy tree so siblings never overlap (grow right or down), and any node can collapse its subtree. **From inspirations** imports entries from the Media desk plugin as roots, and **AI branch** asks the host's default model for 3–6 concrete child ideas (it fails loudly instead of inventing content when no model is configured).
+
+- Styling: five theme presets (paper / midnight / forest / sunset / indigo) plus a custom palette of 13 colour slots; the default `Follow app` inherits the host's light and dark tokens.
+- Export: Markdown outline, OPML (XMind / MindNode), FreeMind `.mm`, raw JSON, and PNG. Markdown has exactly one implementation, shared by the UI export and the `mind_canvas_read` tool.
+- Agent tools: `mind_canvas_read` (outline + stats) and `mind_canvas_add` (branch a node by text match).
+- Requirements: DSH `>= 0.2.1-rc.4`. Data lives in `~/.dsh/mind-canvas/state.json`; the host half has zero runtime dependencies.
+
 ## Install manually
 
 The market index pins an exact commit for every version. The equivalent manual installs:
@@ -51,6 +60,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/github-manager"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/archive-rsi"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/dsh-360"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/mind-canvas"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.
