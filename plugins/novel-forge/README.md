@@ -17,7 +17,11 @@
 
 然后重载 DSH（或重启桌面端）。侧栏出现「墨炉」。
 
-> 开发期改客户端代码后跑 `node build.mjs` 重新打包 `client.js`；宿主代码改动重载即可。
+> 开发期改客户端代码后跑 `node build.mjs` 重新打包 `client.js`；宿主代码改动要重启桌面端才会生效（unmanaged bundle 不做热替换）。
+
+![书架](docs/screens/shelf.png)
+
+![工作台](docs/screens/workbench.png)
 
 ## 用
 

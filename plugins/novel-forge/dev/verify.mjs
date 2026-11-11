@@ -458,6 +458,23 @@ async function api(req, res, url) {
     return sendJSON(res, 200, { available: true, provider: 'fake', model: 'deepseek-chat' })
   }
 
+  if (req.method === 'POST' && pathname === '/estimate') {
+    const body = await readBody(req)
+    const chapters = Number(body.params?.chapters) || 24
+    const words = Number(body.params?.wordsPerChapter) || 3000
+    const auto = body.params?.autoReview !== false
+    const calls = 6 + chapters * (auto ? 6 : 3)
+    return sendJSON(res, 200, {
+      estimate: {
+        chapters,
+        calls,
+        estTokensIn: Math.round(chapters * words * 2.2),
+        estTokensOut: Math.round(chapters * words * 0.8),
+        note: `约 ${calls} 次模型调用；${chapters} 章 × ${words} 字`,
+      },
+    })
+  }
+
   if (parts[0] !== 'projects') return sendError(res, 404, '没有这个接口', 'not_found')
 
   if (parts.length === 1 && req.method === 'GET') {

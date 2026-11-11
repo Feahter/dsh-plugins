@@ -941,6 +941,14 @@ export class ForgeEngine {
 
   // ------------------------------------------------------------------ 预估
 
+  /** 不依赖项目、按 recipe 的参数估算——新建向导用。 */
+  estimateFor(recipeId, params = {}) {
+    const id = recipeId || this.recipes.keys().next().value
+    const recipe = this.#recipe(id)
+    if (typeof recipe.estimate !== 'function') return {}
+    return recipe.estimate(params) || {}
+  }
+
   async estimate(idOrPrefix, params) {
     const project = await this.getProject(idOrPrefix)
     const recipe = this.#recipe(project.recipe)

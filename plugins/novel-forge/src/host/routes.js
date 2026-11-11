@@ -69,6 +69,11 @@ export async function handle({ engine, modelInfo }, request) {
     return { status: 200, body: { model: modelInfo() } }
   }
 
+  if (parts.length === 1 && parts[0] === 'estimate' && method === 'POST') {
+    const estimate = engine.estimateFor(body?.recipeId, body?.params ?? {})
+    return { status: 200, body: { estimate } }
+  }
+
   if (parts[0] !== 'projects') {
     throw httpError(404, 'NOT_FOUND', '接口不存在')
   }

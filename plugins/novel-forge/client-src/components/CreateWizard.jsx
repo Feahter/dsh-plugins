@@ -20,12 +20,16 @@ const DEFAULT = {
 const CHAPTER_PRESETS = [6, 12, 24, 48]
 const WORD_PRESETS = [2000, 3000, 4500, 6000]
 
-/** 本地预估，不调模型：调用数 ≈ 章数×4+8，token ≈ 章数×每章字数×3.2。 */
-export function estimateFor(chapters, wordsPerChapter) {
+/** 本地预估，不调模型；公式与 recipe.estimate 保持一致，服务端可达时以服务端为准。 */
+export function estimateFor(chapters, wordsPerChapter, autoReview = true) {
   const chapterCount = Math.max(0, Number(chapters) || 0)
   const words = Math.max(0, Number(wordsPerChapter) || 0)
-  const calls = chapterCount * 4 + 8
-  const tokens = Math.round(chapterCount * words * 3.2)
+  const calls = 6 + chapterCount * (autoReview ? 6 : 3)
+  const perChar = 1 / 1.6 // 中文约 1.6 字/token
+  const fixed = Math.ceil((5 * 4000 + 3000) * perChar) + Math.ceil((5 * 1200 + 600) * perChar)
+  const perIn = (4000 + 14500 + (words + 1000) + (autoReview ? (words + 6000) + (words + 8000) : 0)) * perChar
+  const perOut = (1200 + words + 450 + (autoReview ? (800 + words + 450) : 0)) * perChar
+  const tokens = Math.round(fixed + chapterCount * (perIn + perOut))
   // 一次调用大致 2 分钟（含写正文的长调用），只给一个量级。
   const minutes = calls * 2
   return { chapters: chapterCount, calls, tokens, minutes }
@@ -65,7 +69,33 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
   const [form, setForm] = React.useState(DEFAULT)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
-  const estimate = React.useMemo(() => estimateFor(form.chapters, form.wordsPerChapter), [form.chapters, form.wordsPerChapter])
+  const localEstimate = React.useMemo(
+    () => estimateFor(form.chapters, form.wordsPerChapter, form.autoReview !== false),
+    [form.chapters, form.wordsPerChapter, form.autoReview],
+  )
+  // 后端按 recipe.estimate 算（含审校/修订的真实调用数）；拿不到就退回本地公式。
+  const [serverEstimate, setServerEstimate] = React.useState(null)
+  React.useEffect(() => {
+    let live = true
+    const timer = setTimeout(() => {
+      api.estimateNew({ ...form }).then(value => {
+        if (live && value && Number.isFinite(value.calls)) setServerEstimate(value)
+      }).catch(() => {})
+    }, 300)
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [form.chapters, form.wordsPerChapter, form.genre, form.autoReview])
+  const estimate = serverEstimate
+    ? {
+        chapters: serverEstimate.chapters ?? localEstimate.chapters,
+        calls: serverEstimate.calls,
+        tokens: (serverEstimate.estTokensIn ?? 0) + (serverEstimate.estTokensOut ?? 0),
+        minutes: serverEstimate.calls * 2,
+        note: serverEstimate.note,
+      }
+    : localEstimate
 
   const set = (key, value) => setForm(previous => ({ ...previous, [key]: value }))
 
@@ -230,7 +260,7 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
             React.createElement('span', { className: 'nf-progress' },
               React.createElement('i', { style: { width: form.reviewGate ? '55%' : '100%', opacity: form.reviewGate ? .6 : 1 } }))),
           React.createElement('p', { className: 'nf-est-note' },
-            '预估是本地公式，不进模型：调用数 = 章数×4+8，token ≈ 章数×每章字数×3.2。',
+            estimate.note || '预估不调模型，按当前参数与审校开关折算；公式与 recipe 一致。',
             form.reviewGate ? ' 审稿门打开后，中途停下的时间不算在内。' : '',
           ),
         ),

@@ -64,6 +64,7 @@ function makeFakeEngine(overrides = {}) {
     getRun: async id => runs.find(run => run.id === id) ?? null,
     listRuns: async () => runs,
     estimate: async () => ({ calls: 30, estTokensIn: 90000, estTokensOut: 40000, chapters: 6 }),
+    estimateFor: (recipeId, params) => ({ calls: 150, chapters: params?.chapters ?? 24, estTokensIn: 500000, estTokensOut: 150000 }),
     exportProject: async (id, format) => ({ filename: `book.${format === 'epub' ? 'epub' : 'md'}`, path: '/tmp/book.md', mime: 'text/markdown', bytes: 100 }),
     ...overrides,
   }
@@ -79,6 +80,14 @@ test('stripPrefix 只认自己的前缀', () => {
   assert.equal(stripPrefix(ROUTE_PREFIX), '/')
   assert.equal(stripPrefix('/mind-canvas/state'), null)
   assert.equal(stripPrefix('/novel-forge-x'), null)
+})
+
+test('POST /estimate 不需要项目，透传参数给 recipe', async () => {
+  const engine = makeFakeEngine()
+  const result = await call(engine, 'POST', '/estimate', { body: { recipeId: 'novel', params: { chapters: 12, wordsPerChapter: 2000 } } })
+  assert.equal(result.status, 200)
+  assert.equal(result.body.estimate.calls, 150)
+  assert.equal(result.body.estimate.chapters, 12)
 })
 
 test('GET /projects 返回列表', async () => {

@@ -60,6 +60,9 @@ export const deleteProject = projectId => request(`/projects/${id(projectId)}`, 
 
 export const estimateProject = projectId => request(`/projects/${id(projectId)}/estimate`).then(data => data.estimate)
 
+export const estimateNew = (params, recipeId = 'novel') =>
+  request('/estimate', { method: 'POST', body: { recipeId, params } }).then(data => data.estimate)
+
 // ------------------------------------------------------------------ 产物
 export const getArtifact = (projectId, key) =>
   request(`/projects/${id(projectId)}/artifact?key=${encodeURIComponent(key)}`).then(data => data.artifact)
