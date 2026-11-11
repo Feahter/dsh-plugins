@@ -334,17 +334,17 @@
           "panel"
         ],
         "sortKeys": {
-          "updated": 1794386561
+          "updated": 1794396811
         }
       },
       "versions": [
         {
-          "version": "0.2.0",
-          "publishTimestamp": 1794386561,
+          "version": "0.2.1",
+          "publishTimestamp": 1794396811,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "2c98cc79a06d3890334a78954d606fa5f764b8d4",
+            "commit": "42bf4d63cb12bd45ba05b133d5a81914be788eb7",
             "path": "plugins/mind-canvas"
           },
           "engines": {
