@@ -617,7 +617,17 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       skip: (project) => (project?.params?.autoReview === false ? '未开启自动审校' : false),
       async run(ctx) {
         const item = ctx.item ?? {}
-        const data = await callJson(ctx, 'review', prompts.review, reviewSchema)
+        let degraded = false
+        let data
+        try {
+          data = await callJson(ctx, 'review', prompts.review, reviewSchema)
+        } catch (err) {
+          // 审校是增值环节：模型空返回/JSON 不合法时，不应让整炉失败；
+          // 退回确定性检查（AI 腔、对话比、钩子兑现等），并在 note 里标明降级。
+          if (err?.code !== 'LLM_EMPTY' && err?.code !== 'LLM_PARSE') throw err
+          degraded = true
+          data = { findings: [], ledgerPatch: null, verdict: 'pass' }
+        }
         const draftText = textOf(ctx, `draft/${item.id}`)
         const beats = jsonOr(ctx, `beats/${item.id}`, null)
         const deterministic = craft.checkDraft({
@@ -649,7 +659,9 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         }
         return {
           artifacts,
-          note: `审校 ${item.id}：block ${counts.block} / warn ${counts.warn} / note ${counts.note} → ${verdict}`,
+          note: `审校 ${item.id}：block ${counts.block} / warn ${counts.warn} / note ${counts.note} → ${verdict}${
+            degraded ? '（模型未返回可用审校结果，仅保留确定性检查）' : ''
+          }`,
         }
       },
     },
@@ -719,11 +731,15 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         // 在这里解析回结构化字段，写盘仍是 json。
         const raw = await callText(ctx, 'blurb', prompts.blurb, { phase: 'blurb' })
         const parsed = parseBlurbMarkdown(raw)
-        const title = String(ctx.params?.title ?? '').trim() || parsed.title
+        const title = String(ctx.params?.title ?? '').trim() || parsed.title || '未命名'
+        const plain = stripFence(raw)
+          .replace(/^#{1,6}\s*/gm, '')
+          .trim()
         const content = {
           title,
           tagline: parsed.tagline,
-          blurb: parsed.blurb,
+          // 模型没按约定给「## 简介」时，退一步把整段干净文本当简介，别丢产出。
+          blurb: parsed.blurb || plain,
           tags: parsed.tags,
         }
         const checked = blurbSchema.safeParse(content)

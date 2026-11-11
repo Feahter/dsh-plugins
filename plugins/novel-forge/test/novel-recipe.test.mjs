@@ -697,6 +697,48 @@ test('review stage：LLM findings 与 craft 合并、排序、算 verdict、写�
   assert.ok(ledger.timeline.some((entry) => entry.event === '沈砚听见敲击声'))
 })
 
+test('review stage：LLM 空返回时降级为确定性检查，不让整炉失败', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items: [{ id: 'ch01', title: '起' }],
+    item: { id: 'ch01', title: '起' },
+    artifacts: {
+      'draft/ch01': {
+        kind: 'md',
+        content: '## 第1章 起\n\n他仿佛看见了什么。似乎有人。不禁后退。',
+      },
+    },
+    outputs: [
+      () => {
+        const error = new Error('模型返回了空文本')
+        error.code = 'LLM_EMPTY'
+        throw error
+      },
+    ],
+  })
+  const out = await stageOf(recipe, 'review').run(ctx)
+  const review = out.artifacts['review/ch01'].content
+  assert.ok(review.findings.some((finding) => finding.kind === 'ai-cliche'))
+  assert.equal(review.verdict, 'revise')
+  assert.ok(out.note.includes('仅保留确定性检查'))
+})
+
+test('blurb stage：缺「## 简介」时退回整段干净文本', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS, title: '纸页之下' },
+    outputs: [textOut('# 《纸页之下》\n\n一句话卖点：每本书都写着下一个借书人的死期。\n\n旧书店的女孩开始整理遗物。')],
+  })
+  const out = await stageOf(recipe, 'blurb').run(ctx)
+  const blurb = out.artifacts.blurb.content
+  assert.equal(blurb.title, '纸页之下')
+  assert.ok(blurb.blurb.includes('旧书店的女孩'))
+  assert.ok(blurb.blurb.includes('死期'))
+})
+
 test('review stage：无 ledgerPatch 时不写 ledger，全 note 时 verdict=pass', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
