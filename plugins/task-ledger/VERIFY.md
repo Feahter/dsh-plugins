@@ -2,8 +2,8 @@
 
 **Verdict: PASS — safe to keep installed.** All 52 gating host checks and all 7 client
 contract checks pass against the current source. Six defects were found **outside** the
-required check list; none block installation, but P1 (task-creation atomicity) should be
-fixed soon. Details in [Known defects](#known-defects-non-gating).
+required check list and all six are fixed in 1.0.1. Details in
+[Known defects](#known-defects-non-gating) and [Post-fix re-verification](#post-fix-re-verification-v101).
 
 Verification is a stub-context harness: it imports `index.js`/`ledger.js` directly and
 builds a fake Cordis context (tools / systemPrompt / webServer / commands / connection).
@@ -99,7 +99,7 @@ All required checks 1–14 from the task specification are implemented and pass.
 | 4.1 | `run_id` shape, `lease.run_id`, `session-a`, future `expires_at`; brief has goal + `status: open` | — |
 | 4.2 | `state.json.lease` persisted; `last_run_id`; `active.json` pinned | — |
 | 4.3 | second resume (session-b) returns object `ok:false`, `error.code:'task-leased'`; first lease untouched | no throw |
-| 4.4 | simulated expired lease (`expires_at` past) can be taken over by another run; new session id | *(extra, answers the lead's lease-TTL question)* |
+| 4.4 | simulated expired lease (`expires_at` past) can be taken over by another run; new session id | *(extra: takeover after lease TTL)* |
 | 5.1 | checkpoint: version bumped, phase `evidence`, next_actions, claims 2 / decisions 2 (explicit+note) / evidence 1, gate fails | — |
 | 5.2 | stored evidence file exists; file sha256 equals record sha256; content-addressed name prefix; `evidence/index.jsonl` record | — |
 | 5.3 | `claim-source.evidence_name` resolved to `sha256:<64 hex>` == stored snapshot hash | — |
@@ -230,7 +230,7 @@ fixed soon because it can silently destroy a charter.
 ## Install-time / residual risks
 
 These cannot be fully decided by a stub harness; the runtime test that decides each is
-listed. (The lead has already installed the bundle, so these are post-install checks.)
+listed; they are post-install checks.
 
 | Risk | Runtime test |
 | --- | --- |
@@ -280,10 +280,10 @@ RESULT: PASS
 
 ---
 
-## Post-fix re-verification (v1.0.1, lead)
+## Post-fix re-verification (v1.0.1)
 
-The lead fixed all six known defects after the report above, bumped the bundle to
-`1.0.1`, and re-ran both suites plus the defect probes. Per-defect changes:
+All six known defects were fixed after the report above; the bundle was bumped to
+`1.0.1`, and both suites plus the defect probes were re-run. Per-defect changes:
 
 | Defect | Fix |
 | --- | --- |

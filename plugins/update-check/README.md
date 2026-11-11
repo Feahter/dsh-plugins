@@ -77,10 +77,4 @@ DSH 插件管理器按「本地目录」安装（`plugin_manager install_bundle`
 node test/run-all.mjs
 ```
 
-16 项检查，无框架、无外网依赖：semver 比较、`app-update.yml` 解析与 manifest URL 推导、YAML/JSON manifest 解析、真实安装版本读取（含 asar 回退）、真实 HTTP server 上的鉴权/成功/已最新/feed 404/缓存/强制刷新、以及 client 半的 loader 注册、slot 绑定、状态映射、渲染出来的文案与「点一下就调用 `updates.open()`」。另有 5 组回归用例守着一次对抗审查挖出来的坑：原生 `error` 阶段不能谎报「已是最新」、原生 `available` 要带出版本号、慢探针不能覆盖强制刷新的缓存、非法 `feedUrl` 只能变成结构化错误（不能 500 / reject）、非 semver 的 plist 版本要落到下一条来源、`javascript:`/`data:` 下载链接必须丢弃、双击只交接一次。
-
-## 这个安装里的实际情况（2026-11-10）
-
-- 当前安装：`0.2.1-rc.4`（`Info.plist` 与 `dsh/desktop-runtime.json` 一致）。
-- 应用自己的更新源 `https://download.deepseek.com/dsh-desk/feeds/mac-x64/nightly/latest-mac.yml` 今天返回 **404**（`latest-mac.yml`、`latest-mac.yml` 的父级、`mac-arm64` 变体都试过），所以面板会显示「更新源不可达」，桌面端菜单里的「检查更新…」也同样会失败。
-- 上游 `@deepseek-ai/dsh` 在 npm 上的 `latest` 是 **0.2.2-rc.1**，比安装的 `0.2.1-rc.4` 新；但那是 npm 包的分发版本，不等于桌面端更新源上有可安装的构建。
+16 项检查，无框架、无外网依赖：semver 比较、`app-update.yml` 解析与 manifest URL 推导、YAML/JSON manifest 解析、真实安装版本读取（含 asar 回退）、真实 HTTP server 上的鉴权/成功/已最新/feed 404/缓存/强制刷新、以及 client 半的 loader 注册、slot 绑定、状态映射、渲染出来的文案与「点一下就调用 `updates.open()`」。另一组回归用例守着几个容易踩的坑：原生 `error` 阶段不能谎报「已是最新」、原生 `available` 要带出版本号、慢探针不能覆盖强制刷新的缓存、非法 `feedUrl` 只能变成结构化错误（不能 500 / reject）、非 semver 的 plist 版本要落到下一条来源、`javascript:`/`data:` 下载链接必须丢弃、双击只交接一次。

@@ -1,6 +1,6 @@
 {
   "name": "dsh-update-check",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH Desktop 版本更新检查：侧边栏面板显示已安装版本与更新源的最新版本，发现问题时一键交给应用内更新器（下载 → 校验 → 确认重启）。",
   "license": "MIT",
   "type": "module",
@@ -17,7 +17,8 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "test"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.4"
@@ -42,8 +43,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Feahter/dsh-plugins",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
     "directory": "plugins/update-check"
   },
-  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check"
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check",
+  "author": "Feahter"
 }

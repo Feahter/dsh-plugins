@@ -139,11 +139,10 @@ task_list → task_resume(task_id)          # 拿 run_id，注入状态
 | Host stub 套件（52 项：工具/租约/版本冲突/门禁/冷启动/路由鉴权/命令/配置/路径安全） | `node .verify-host.mjs` | 52/52 PASS，exit 0 |
 | 面板契约（7 项：loader、路由一致性、locale、icon、无 Harness 依赖、仅主题 token） | `node .verify-client.mjs` | 7/7 PASS |
 | 缺陷回退探测（并发建任务、未知 id 错误码、runs 去重、404 语义等） | `node .verify-host.mjs --defects` | 0 observed / 6 fixed |
-| 真实运行实例 | 本会话已安装并实操 4 轮 run | 见 `runs/*.md` 与 `~/.dsh/task-ledger/INDEX.md` |
 
-细节、逐项断言与残余风险见 `task-ledger/VERIFY.md`。
+细节、逐项断言与残余风险见 [`VERIFY.md`](./VERIFY.md)。
 
-## 相对原始设计（`dsh-task-centric-deep-research-agent.md`）的取舍
+## 相对原始设计的取舍
 
 保留：外置账本为唯一真源、run 降级为一次执行、证据分级、closeout、单写者、必留证伪记录、冷启动验收。
 
@@ -168,9 +167,10 @@ task_list → task_resume(task_id)          # 拿 run_id，注入状态
 - 面板未做可视化验证时只能确认代码与路由正确；渲染效果需在 Web UI 里实际打开。
 - 账本根目录是全局的（跨工作区）；按工作区隔离需要配置不同 `rootDir`。
 - 本地目录 bundle 是「链接安装」：更新 Host 侧代码后需要 remove_bundle + install_bundle（或重启 Harness）才会加载新的模块世代；Client 侧还需要刷新页面。
-- 面板目前由清单里的链接自动出现（例如订单 30 与 github-manager 同序），如需固定位置可在 profile patch 里调整。
+- 面板按 profile 清单顺序自动出现，如需固定位置可在 profile patch 里调整。
 
 ## 变更记录
 
+- **1.0.2** — 文档修正：VERIFY.md 结论与 1.0.1 的修复保持一致；删除不可复现的私有账本路径与内部引用；安装包内补齐自检脚本与 VERIFY.md。
 - **1.0.1** — 修掉验证中发现的 6 个缺陷：并发 `task_open` 可能复用 id 覆盖章程（改为 mkdir 原子占位 + `task-exists`）、未知 task_id 泄漏 ENOENT（改为 `task-not-found`）、runs 重复计数（按 `run_id` 折叠）、`task-not-found` 面板返回 500（改为 404）、`/index?status=` 未校验（改为 400）；`task_resume` 输出直接给出 `expected_version` 权威值。
 - **1.0.0** — 首版：外置账本、租约单写者、证据门禁、提示注入、面板与 `/task` 命令。

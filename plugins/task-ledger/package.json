@@ -1,9 +1,9 @@
 {
   "name": "dsh-task-ledger",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Task-centric ledger for the DeepSeek Harness: an external, canonical task ledger with resume leases, evidence-gated closeout, agent tools, and a management panel.",
   "license": "MIT",
-  "author": "feZ",
+  "author": "Feahter",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -21,7 +21,10 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    ".verify-host.mjs",
+    ".verify-client.mjs",
+    "VERIFY.md"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.4"
@@ -42,7 +45,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Feahter/dsh-plugins",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
     "directory": "plugins/task-ledger"
   },
   "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/task-ledger"
