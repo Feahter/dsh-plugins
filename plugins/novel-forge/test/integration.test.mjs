@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
 
 import { ForgeEngine } from '../src/forge/engine.js'
 import { createNovelRecipe } from '../src/recipes/novel/index.js'
@@ -205,6 +206,19 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
   assert.equal(epubBuffer.subarray(0, 2).toString('latin1'), 'PK')
   assert.ok(epubBuffer.length > 2000, `epub ${epubBuffer.length} bytes`)
   assert.match(epub.filename, /\.epub$/)
+
+  // 解包核对：6 章各自一个 xhtml，且正文真的进了书里（没有 unzip 就跳过）。
+  const listing = await new Promise((resolve) => {
+    execFile('unzip', ['-l', epub.path], (error, stdout) => resolve(error ? null : stdout))
+  })
+  if (listing) {
+    const chapters = (listing.match(/OEBPS\/\d+_\d+-\d+\.xhtml/g) ?? []).length
+    assert.equal(chapters, 6, listing)
+    const first = await new Promise((resolve) => {
+      execFile('unzip', ['-p', epub.path, 'OEBPS/0_1-1.xhtml'], (error, stdout) => resolve(error ? '' : stdout))
+    })
+    assert.match(first, /第1章/)
+  }
 })
 
 test('reviewGate：大纲与草稿后各停一次，continue 能续跑', async (t) => {

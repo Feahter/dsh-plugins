@@ -79,6 +79,21 @@ try {
   // 预览说明的遮罩在 headless 下有时不随弹层一起消失，会拦住侧栏点击。
   await page.evaluate(() => document.querySelectorAll('[class*="_mask_"]').forEach(el => el.remove()))
 
+  // 先经真 REST 建一本空书，验证书架不是只靠空态也能渲染。
+  const created = await page.evaluate(async () => {
+    const response = await fetch('/novel-forge/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ params: {
+        premise: '一个在旧书店整理遗物的女孩，发现每本书的空白页上会浮出下一个借书人的死期。',
+        title: '挂载验证书', chapters: 6, wordsPerChapter: 800,
+        pov: '第三人称限知', genre: '悬疑',
+      } }),
+    })
+    return { status: response.status, body: await response.text() }
+  })
+  if (created.status !== 201) throw new Error(`POST /projects ${created.status}: ${created.body.slice(0, 200)}`)
+
   const nav = page.locator('span[class*="panelTitle"]', { hasText: '墨炉' }).first()
   if (!(await nav.count())) throw new Error('侧栏没有出现「墨炉」')
   const navButton = page.locator('button', { hasText: /^墨炉/ }).first()
@@ -100,9 +115,16 @@ try {
   })
   if (recipes.status !== 200) throw new Error(`GET /recipes ${recipes.status}: ${recipes.body.slice(0, 200)}`)
 
-  await page.screenshot({ path: path.join(PLUGIN, 'test', 'screens', 'mount-check.png') })
+  if (!body.includes('挂载验证书')) throw new Error('书架没有显示刚创建的项目')
+  await page.getByRole('button', { name: '打开', exact: true }).first().dispatchEvent('click')
+  await page.waitForTimeout(1200)
+  const workbench = await page.locator('body').innerText()
+  if (!workbench.includes('总览') && !workbench.includes('故事核心')) {
+    throw new Error(`没有进入工作台；body=${workbench.replace(/\n+/g, ' | ').slice(0, 400)}`)
+  }
+  await page.screenshot({ path: path.join(PLUGIN, 'test', 'screens', 'mount-workbench.png') })
   if (errors.length) throw new Error(`console/page error: ${errors.slice(0, 3).join(' | ')}`)
-  console.log('✓ 真宿主：侧栏「墨炉」出现，面板渲染书架，/novel-forge/recipes 200，console error 0')
+  console.log('✓ 真宿主：侧栏「墨炉」出现，书架显示新建项目，工作台可进入，/recipes 200，console error 0')
 } finally {
   await browser?.close().catch(() => {})
   if (child?.pid) {

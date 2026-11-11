@@ -43,6 +43,7 @@ export const STATUS_LABEL = {
 }
 
 export const RUN_STATUS_LABEL = {
+  idle: '未开始',
   running: '运行中',
   done: '已完成',
   error: '失败',
