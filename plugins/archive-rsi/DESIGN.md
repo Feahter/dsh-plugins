@@ -240,12 +240,25 @@ samples only. Deep-equal fixture shape used by tests:
 
 ## 4. Rendered transcript (`sessions/<id>.md`, capped)
 
-Deterministic Markdown, max 256 KiB, truncated at a step boundary with
+Deterministic Markdown, max 1 MiB, truncated at a step boundary with
 `… [truncated: N events omitted]`. Sections: header table (id/preset/origin/created/turns/
 tokens/peak context), `## Findings` (omitted here — findings are a run artifact), then
-`## Timeline` with one block per turn: user text (human only) as a quote, assistant text,
-and one line per tool call `- \`<name>\` <callPreview 120c> → ok|error(<code>) <resultBytes>B`.
+`## Timeline` with one block per turn: user text (human only) as a quote, assistant text
+(each block capped at 12000 chars — a single long answer must survive intact), and one line
+per tool call `- \`<name>\` <callPreview 120c> → ok|error(<code>) <resultBytes>B`.
 Never include reasoning blocks. Never include `request/header`.
+
+**Reading a transcript is paged, not all-or-nothing.** The file is the whole conversation;
+the panel reads it in slices so a 1 MiB session never has to cross the wire at once.
+`GET /sessions/:id?transcript=1&maxChars=&offset=` returns `transcript` (the slice),
+`transcriptOffset`, `transcriptTotal` (full length) and `transcriptTruncated` (= *more
+content follows this slice*), and the panel's 「加载更多」 appends the next slice until
+`transcriptTruncated` is false. A slice must never be silently short: a caller that asks for
+N chars gets N chars or the honest end of the text.
+
+`store.transcript(id)` renders **on demand** when `sessions/<id>.md` is missing (old import,
+manual deletion, an artifact written by a pre-transcript version), caches the result, and
+returns `null` rather than throwing when the source cannot be decoded.
 
 ---
 
@@ -504,7 +517,7 @@ export class ArchiveStore {
   async index()                                    -> ArchiveIndex (read-only view)
   async list({ query, tag, status, workspace, limit, offset, sort })  -> { total, entries }
   async get(id)                                    -> { entry, facts } | null
-  async transcript(id)                             -> string | null
+  async transcript(id)                             -> string | null   // renders + caches on demand (§4)
   async autotag({ id, dryRun })                    -> { entries, tags, total }  // recompute auto tags
   async sync({ refresh })                          -> { scanned, imported, refreshed, skipped, failed: [{file, error}] }
   async update(id, patch)                          -> entry        // {title?, tags?, status?, note?, pinned?}
@@ -604,7 +617,7 @@ a plain JSON-serializable object. All tool errors are returned as `{ ok: false, 
 | tool | args | returns |
 |---|---|---|
 | `archive_list` | `{ query?, tag?, status?, workspace?, archived?, limit?, offset? }` | `{ ok, total, harnessArchive, entries: [{id,title,createdAt,workspace,origin,status,harnessArchived,harnessPinned,tags,metrics}] }` — `archived` filters on the Harness flag |
-| `archive_get` | `{ id, transcript?: boolean, maxChars? }` | `{ ok, entry, facts, transcript? }` |
+| `archive_get` | `{ id, transcript?: boolean, maxChars?, offset? }` | `{ ok, entry, facts, transcript?, transcriptOffset?, transcriptTotal?, transcriptTruncated? }` — the transcript is paged like §4: `maxChars` default 12000, clamped to [1000, 400000], `offset` default 0; page with `offset = transcriptOffset + transcript.length` until `transcriptTruncated` is false |
 | `archive_sync` | `{ refresh?: boolean }` | `{ ok, scanned, imported, refreshed, skipped, failed }` |
 | `archive_update` | `{ id, title?, tags?, status?, note? }` | `{ ok, entry }` |
 | `archive_autotag` | `{ id?, dryRun?, limit? }` | `{ ok, updated, total, sample: [{id, autoTags}] }` — recompute the §10 tags for one entry or the whole archive |
@@ -630,7 +643,7 @@ body cap 256 KiB; `{ok:false,error:{code,message}}` on failure; status codes:
 |---|---|
 | `GET /overview` | corpus counts, tag/workspace vocabulary, `lastRun` (§5 summary, not the full run), `autoRun:{enabled,everyDays,dueAt,due}`, proposal counts, root path |
 | `GET /sessions?query&tag&status&workspace&limit&offset&sort` | list |
-| `GET /sessions/:id?transcript=1&maxChars=` | entry + facts (+ transcript) |
+| `GET /sessions/:id?transcript=1&maxChars=&offset=` | entry + facts + transcript slice: `transcript`, `transcriptOffset`, `transcriptTotal`, `transcriptTruncated` (§4); `maxChars` default 24000, clamped to [1000, 400000] |
 | `PATCH /sessions/:id` | `{title?,note?,tags?,status?}` |
 | `DELETE /sessions/:id?purge=0\|1` | trash or purge the archive entry |
 | `POST /sync` | `{refresh?}` |
