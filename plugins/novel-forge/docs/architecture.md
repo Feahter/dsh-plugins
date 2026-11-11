@@ -637,6 +637,10 @@ export default {
 9. **LLM 来源标记**：`source.kind = 'dsh-forge'`、`sessionId = dsh-forge-<runId>`，同样是为了引擎通用化。
 10. **`dryRun` 不模拟上游产物**：只校验 stage 声明与参数，不执行上游；对空项目直接 dryRun 会在 each 解析时报 `ARTIFACT_MISSING`。这是有意的——dryRun 的语义是「这次要跑什么」，不是「假装跑完」。
 11. **取消的终态一次写入**：`cancelRun` 先置内存标记，`#finish` 一次性写 `run-end` + `cancelled`，避免客户端读到「已取消但事件流没有 run-end」的中间态。
+12. **`recipe.stats(project, read)` 钩子**：引擎每跑完一个 stage 调一次，把返回值并入 `project.stats`（钩子抛错静默，不影响主流程）。引擎只懂「统计是一个对象」，小说知识（总章数、已写字数、去空白 CJK 数）留在 recipe。
+13. **空文本自动加预算**：`LLM_EMPTY` 时网关把 `maxTokens` 逐次加倍（1000→2000→4000…上限 16000）再重试。真模型冒烟发现推理模型会把预算烧在 reasoning 上，导致空 `text-delta`；这条对任何 recipe 都成立。review 阶段另把预算从 2600 提到 4000。
+14. **`blurb` 出口是 Markdown**：提示词写给人的封面文案（`# 《书名》`/一句话卖点/`## 简介`/`## 标签`），recipe 用 `parseBlurbMarkdown` 解析回 `{title,tagline,blurb,tags}` 再按 `blurbSchema` 校验。真模型冒烟最初按 JSON 解析，必然 `LLM_PARSE`；这是提示词与 recipe 的契约错位，不是模型问题。
+15. **`GET /projects/:id` 返回 `project.artifacts` 摘要**；`GET /projects/:id/run` 在无 activeRunId 时回退到最近一次 run 的**完整**视图（含 events），否则完成后的首次打开会看到空事件流。
 
 ---
 
