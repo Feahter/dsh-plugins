@@ -1,0 +1,65 @@
+{
+  "name": "dsh-mind-canvas",
+  "version": "0.2.0",
+  "description": "脑图创意画布：无限画布上的选题脑图，从灵感一键长成结构，AI 帮你发散。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "src"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "dev": "node build.mjs --dev"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "mindmap",
+    "canvas",
+    "brainstorm",
+    "react-flow",
+    "opml",
+    "freemind",
+    "theme"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@xyflow/react": "^12.12.1",
+    "d3-hierarchy": "^3.1.2",
+    "esbuild": "^0.25.10",
+    "playwright": "^1.59.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "dependencies": {
+    "html-to-image": "^1.11.13"
+  }
+}

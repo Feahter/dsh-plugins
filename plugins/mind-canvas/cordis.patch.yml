@@ -1,0 +1,4 @@
+# dsh-mind-canvas：同一个包提供宿主半片（/mind-canvas 路由 + mind_canvas_* 工具）与浏览器半片（侧栏页面）
+- insert:
+    - id: mind-canvas
+      name: 'dsh-mind-canvas'

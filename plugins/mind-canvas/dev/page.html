@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mind-canvas harness</title>
+<style>
+  :root{
+    --dsw-alias-label-primary:#1b1d22; --dsw-alias-label-secondary:#525963;
+    --dsw-alias-label-tertiary:#8a919c; --dsw-alias-bg-base:#f6f7f9;
+    --dsw-alias-bg-layer-1:#ffffff; --dsw-alias-bg-layer-2:#ffffff;
+    --dsw-alias-bg-overlay:#ffffff;
+    --dsw-alias-border-l1:rgba(20,22,28,.10); --dsw-alias-border-l2:rgba(20,22,28,.18);
+    --dsw-alias-interactive-bg-hover:rgba(20,22,28,.05);
+    --dsw-alias-interactive-bg-active:rgba(20,22,28,.08);
+    --dsw-alias-brand-primary:#3a5bd9; --dsw-alias-link:#3a5bd9;
+    --dsw-alias-state-error-primary:#c4342b; --dsw-alias-state-success-primary:#1f8a52;
+    --dsw-radius-sm:8px; --dsw-radius-md:12px; --dsw-radius-lg:16px;
+    --dsw-elevation-soft:0 8px 24px rgba(0,0,0,.10);
+    --dsw-elevation-prominent:0 24px 60px rgba(0,0,0,.22);
+  }
+  html,body{height:100%;margin:0}
+  body{font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;background:#eef0f4}
+  #root{position:fixed;inset:0}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="./loader-stub.js"></script>
+<script src="../client.js"></script>
+<script src="./harness.bundle.js"></script>
+</body>
+</html>
