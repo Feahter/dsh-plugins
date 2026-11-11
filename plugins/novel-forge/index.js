@@ -38,7 +38,7 @@ export function modelInfo(ctx) {
 }
 
 export default {
-  inject: ['webServer', 'connection'],
+  inject: ['webServer', 'connection', 'tools'],
 
   apply(ctx) {
     const root = join(dshHome(), 'novel-forge')
