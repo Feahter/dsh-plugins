@@ -1,0 +1,16 @@
+# Bundle patch for dsh-task-ledger.
+#
+# Inserts the plugin row. All tunables have defaults in the plugin; override them
+# in the profile's own cordis.patch.yml when needed, for example:
+#
+#   - id: task-ledger
+#     name: 'dsh-task-ledger'
+#     config:
+#       rootDir: ~/.dsh/task-ledger
+#       leaseTtlSeconds: 3600
+#       injectBriefing: auto
+#       protocolSection: true
+#
+- insert:
+    - id: task-ledger
+      name: 'dsh-task-ledger'

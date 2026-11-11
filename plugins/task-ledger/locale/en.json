@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Task ledger",
+    "description": "An external, canonical task ledger on disk for charters, state, claims, decisions, evidence, and run handoffs, so a session can resume from a task id days later. The sidebar panel is the human management surface."
+  }
+}
