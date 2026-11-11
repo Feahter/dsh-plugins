@@ -1,0 +1,4 @@
+# dsh-novel-forge：同一个包提供宿主半片（/novel-forge 路由 + novel_* 工具）与浏览器半片（侧栏「墨炉」）
+- insert:
+    - id: novel-forge
+      name: 'dsh-novel-forge'

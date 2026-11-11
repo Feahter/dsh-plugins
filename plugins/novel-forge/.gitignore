@@ -1,0 +1,4 @@
+node_modules/
+dev/harness.bundle.js
+test/screens/*.png
+.tmp/

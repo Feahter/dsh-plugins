@@ -1,0 +1,64 @@
+{
+  "name": "dsh-novel-forge",
+  "version": "0.1.0",
+  "description": "墨炉：AI 小说全流程创作流水线。通用创作引擎 + 小说 recipe，从设定、大纲、细纲、草稿、连续性审校、修订到导出，一章一章把长篇小说炼出来。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "src",
+    "docs"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "verify": "node dev/verify.mjs"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "novel",
+    "writing",
+    "pipeline",
+    "creative"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "epub-gen-memory": "^1.1.2",
+    "marked": "^18.2.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "dompurify": "^3.3.1",
+    "esbuild": "^0.25.10",
+    "playwright": "^1.59.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
