@@ -481,12 +481,14 @@ export class ForgeEngine {
 
   async #finish(live, status) {
     const { run, project } = live
-    run.status = status
     run.endedAt = this.#now()
     run.current = { stage: null, item: null, label: null }
     project.activeRunId = null
     project.updatedAt = run.endedAt
+    // 先落项目再改内存状态：getRun 若在 saveProject 完成前看到 done，
+    // 调用方随后读 project 会读到 activeRunId 还在的旧状态（测试/UI 竞态）。
     await this.store.saveProject(project)
+    run.status = status
     if (status === 'cancelled') {
       await this.#emit(live, EVENT.RUN_END, { status: 'cancelled' })
     } else if (status === 'done') {

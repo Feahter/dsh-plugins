@@ -47,8 +47,11 @@ async function getRunForProject(engine, project, after) {
     const run = await engine.getRun(runId)
     if (run) return runView(run, after)
   }
+  // 没有 activeRunId 时回退到最近一次 run；必须取完整 run（带 events），
+  // listRuns 是摘要投影，客户端拿它渲染事件流会是空的。
   const runs = await engine.listRuns(project.id)
-  return runView(runs?.[0] ?? null, after)
+  const latest = runs?.[0]
+  return runView(latest ? await engine.getRun(latest.id) : null, after)
 }
 
 export async function handle({ engine, modelInfo }, request) {

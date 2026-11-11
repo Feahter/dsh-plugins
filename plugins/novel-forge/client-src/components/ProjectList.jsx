@@ -59,7 +59,7 @@ function Card({ project, onOpen, onContinue, onDelete, confirming, onConfirm, on
       : React.createElement('div', { className: 'nf-card-actions' },
         React.createElement(Button, { size: 'sm', variant: 'primary', onClick: onOpen }, done ? '打开' : started ? '继续' : '打开'),
         started && !done && !project.activeRunId
-          ? React.createElement(Button, { size: 'sm', variant: 'quiet', onClick: onContinue }, '继续炼')
+          ? React.createElement(Button, { size: 'sm', variant: 'quiet', onClick: onContinue }, '续跑')
           : null,
         React.createElement('span', { className: 'nf-grow' }),
         React.createElement(Button, {

@@ -98,7 +98,6 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
         },
       })
       await api.startRun(project.id, {
-        stages: STAGES.map(stage => stage.id),
         from: 'premise',
         autoApprove: !form.reviewGate,
       })

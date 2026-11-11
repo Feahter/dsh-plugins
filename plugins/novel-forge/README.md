@@ -66,7 +66,8 @@ Markdown 就是纯文本，JSON 就是普通 JSON，随时可以直接看、直�
 npm install
 node build.mjs          # 打包客户端 client.js
 npm test                # 引擎/存储/recipe/宿主单测
-node dev/verify.mjs     # Playwright 真跑 UI，截图到 test/screens/
+node dev/verify.mjs     # Playwright + 假宿主，跑 UI 交互，截图到 test/screens/
+node dev/e2e.mjs        # 真 HTTP 宿主 + 真引擎 + 真 client.js 的端到端（假 LLM）
 ```
 
 ## 已知限制

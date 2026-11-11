@@ -282,6 +282,9 @@ export function Workbench({ projectId, onBack, notify }) {
           setRun(current)
           setEvents(current?.events ?? [])
           seqRef.current = current?.events?.length ? Math.max(...current.events.map(event => event.seq ?? 0)) : 0
+          // 挂载时 run 已经结束（短项目常见）：产物与统计是在 loadProject 之后
+          // 才落盘的，必须再刷一次，否则章节列表/字数会停在 0。
+          if (current && current.status !== 'running') return loadProject()
         })
       })
       .catch(error => { if (alive) setLoadError(error.message) })

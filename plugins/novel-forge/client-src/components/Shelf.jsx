@@ -46,7 +46,6 @@ export function Shelf({ onOpen, onNew, notify }) {
     setBusyId(project.id)
     try {
       await startRun(project.id, {
-        stages: STAGES.map(stage => stage.id),
         from: startStage(project.raw ?? project),
         autoApprove: !project.raw?.params?.reviewGate,
       })

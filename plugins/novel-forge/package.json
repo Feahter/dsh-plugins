@@ -39,7 +39,8 @@
   "scripts": {
     "build": "node build.mjs",
     "test": "node --test test/*.test.mjs",
-    "verify": "node dev/verify.mjs"
+    "verify": "node dev/verify.mjs",
+    "e2e": "node dev/e2e.mjs"
   },
   "keywords": [
     "dsh-plugin",
