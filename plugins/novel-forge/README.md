@@ -72,6 +72,7 @@ node build.mjs          # 打包客户端 client.js
 npm test                # 引擎/存储/recipe/宿主单测
 node dev/verify.mjs     # Playwright + 假宿主，跑 UI 交互，截图到 test/screens/
 node dev/e2e.mjs        # 真 HTTP 宿主 + 真引擎 + 真 client.js 的端到端（假 LLM）
+node dev/mount-check.mjs # 临时 DSH_HOME 起真 dsh web，验证侧栏挂载与 /recipes
 ```
 
 ## 已知限制
