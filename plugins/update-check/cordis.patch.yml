@@ -1,0 +1,7 @@
+# dsh-update-check bundle patch
+#
+# 作为 Loader bundle 层挂载：在 profile 的 package.json dependencies 里
+# `link:` 本目录，并把 `dsh-update-check` 加进 dsh.profile.bundles。
+- insert:
+    - id: dsh-update-check
+      name: 'dsh-update-check'
