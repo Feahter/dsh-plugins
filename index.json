@@ -400,7 +400,7 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794408770
+          "updated": 1794409317
         }
       },
       "versions": [
@@ -411,6 +411,19 @@
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "0bf50449221b3a82f8a653a8d4fcc2a72a25a774",
+            "path": "plugins/task-ledger"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "1.0.2",
+          "publishTimestamp": 1794409317,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "37ba5f4b3dd85cd40982dc0087c48e2dae16e549",
             "path": "plugins/task-ledger"
           },
           "engines": {
@@ -451,7 +464,7 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794408770
+          "updated": 1794409317
         }
       },
       "versions": [
@@ -462,6 +475,19 @@
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "b226db5c672330e809bc673c4aa1684cd0d2b884",
+            "path": "plugins/update-check"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "0.1.1",
+          "publishTimestamp": 1794409317,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "37ba5f4b3dd85cd40982dc0087c48e2dae16e549",
             "path": "plugins/update-check"
           },
           "engines": {
