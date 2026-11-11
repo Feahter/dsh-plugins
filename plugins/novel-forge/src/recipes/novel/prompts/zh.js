@@ -1092,7 +1092,7 @@ function reviewPrompt(ctx) {
   return {
     system: `${CRAFT}\n\n${ADDENDA.review}`,
     user: hardCap(ctx, user, BUDGET.review.user),
-    maxTokens: 2600,
+    maxTokens: 4000,
     temperature: TEMPERATURE.review,
   }
 }

@@ -788,15 +788,17 @@ test('revise stage：有 block 时重写 draft + summary，findings 传入 promp
 test('blurb stage：书名/卖点/简介/标签，params.title 覆盖', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
-  const blurb = { title: '模型书名', tagline: '一句话卖点', blurb: '三句话简介。', tags: ['悬疑', '灵异'] }
-  const ctx = createFakeCtx({ params: { ...SAMPLE_PARAMS }, outputs: [jsonOut(blurb)] })
+  const blurbMd = '# 《模型书名》\n\n一句话卖点：一句话卖点\n\n## 简介\n三句话简介。\n\n## 标签\n悬疑 / 灵异'
+  const ctx = createFakeCtx({ params: { ...SAMPLE_PARAMS }, outputs: [textOut(blurbMd)] })
   const out = await stageOf(recipe, 'blurb').run(ctx)
   assert.equal(out.artifacts.blurb.content.title, '模型书名')
+  assert.equal(out.artifacts.blurb.content.tagline, '一句话卖点')
+  assert.ok(out.artifacts.blurb.content.blurb.includes('三句话简介'))
   assert.equal(out.artifacts.blurb.content.tags.length, 2)
 
   const overridden = createFakeCtx({
     params: { ...SAMPLE_PARAMS, title: '用户书名' },
-    outputs: [jsonOut(blurb)],
+    outputs: [textOut(blurbMd)],
   })
   const out2 = await stageOf(recipe, 'blurb').run(overridden)
   assert.equal(out2.artifacts.blurb.content.title, '用户书名')

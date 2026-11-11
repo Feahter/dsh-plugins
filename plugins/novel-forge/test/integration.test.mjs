@@ -94,7 +94,7 @@ function fakeLlm() {
       }
     }
     if (phase === 'blurb') {
-      return { title: '长夜将明', tagline: '有些名字，死了才被写对', blurb: '殡仪馆夜班新人……', tags: ['悬疑', '灵异'] }
+      return '# 《长夜将明》\n\n一句话卖点：有些名字，死了才被写对\n\n## 简介\n殡仪馆夜班新人……\n\n## 标签\n悬疑 / 灵异'
     }
     if (phase === 'prose' || phase === 'revise') return PROSE
     if (phase === 'summary') return '沈砚第一夜值班，听见三号柜里的亡者开口，亡者说名册第三行写错了。'
@@ -106,7 +106,7 @@ function fakeLlm() {
     async generate(opts) {
       calls.push({ phase: opts.phase ?? opts.label, chars: (opts.user ?? '').length })
       const phase = opts.phase ?? opts.label
-      if (phase === 'prose' || phase === 'revise' || phase === 'summary' || phase === 'bible' || phase === 'spine') {
+      if (phase === 'prose' || phase === 'revise' || phase === 'summary' || phase === 'bible' || phase === 'spine' || phase === 'blurb') {
         return { text: payload(opts), chars: 1000, model: 'fake' }
       }
       return { text: JSON.stringify(payload(opts)), chars: 1000, model: 'fake' }

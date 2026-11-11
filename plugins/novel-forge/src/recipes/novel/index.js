@@ -313,6 +313,25 @@ async function callText(ctx, stage, promptFn, { phase, maxTokens, temperature } 
   return String(result?.text ?? '').trim()
 }
 
+function parseBlurbMarkdown(text) {
+  const source = stripFence(text)
+  const pick = (re) => (source.match(re) || [])[1]?.trim() ?? ''
+  const title = pick(/^#\s*《([^》]+)》/m) || pick(/^#\s*(.+)$/m)
+  const tagline = pick(/一句话卖点[：:]\s*(.+)/)
+  const blurb = pick(/##\s*简介\s*\n([\s\S]*?)(?=\n##\s|$)/)
+  const tagsLine = pick(/##\s*标签\s*\n([\s\S]*?)(?=\n##\s|$)/)
+  const tags = tagsLine
+    .split(/[\/、,，|]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+  return {
+    title,
+    tagline,
+    blurb: blurb || (title || tagline ? '' : source),
+    tags,
+  }
+}
+
 function stripFence(text) {
   const source = String(text ?? '').trim()
   const fenced = source.match(/^```(?:md|markdown)?\s*\n([\s\S]*?)\n```$/i)
@@ -579,13 +598,13 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           await callText(summaryCtx, 'summary', prompts.summary, { phase: 'summary', maxTokens: 800 }),
         )
 
-        const { cjk } = craft.checkDraft({ text, params: ctx.params, beats: null })
+        const { stats } = craft.checkDraft({ text, params: ctx.params, beats: null })
         return {
           artifacts: {
             [`draft/${item.id}`]: { kind: 'md', content: text },
             [`summary/${item.id}`]: { kind: 'md', content: summary },
           },
-          note: `第 ${no} 章草稿完成，${cjk} 字`,
+          note: `第 ${no} 章草稿完成，${stats.cjk} 字`,
         }
       },
     },
@@ -693,11 +712,22 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       produces: ['blurb'],
       review: false,
       async run(ctx) {
-        const data = await callJson(ctx, 'blurb', prompts.blurb, blurbSchema)
-        const title = String(ctx.params?.title ?? '').trim() || data.title.trim()
+        // prompts.blurb 的出口是 Markdown（人读的封面文案），不是 JSON：
+        // 在这里解析回结构化字段，写盘仍是 json。
+        const raw = await callText(ctx, 'blurb', prompts.blurb, { phase: 'blurb' })
+        const parsed = parseBlurbMarkdown(raw)
+        const title = String(ctx.params?.title ?? '').trim() || parsed.title
+        const content = {
+          title,
+          tagline: parsed.tagline,
+          blurb: parsed.blurb,
+          tags: parsed.tags,
+        }
+        const checked = blurbSchema.safeParse(content)
+        if (!checked.success) throw parseError('blurb', `封面文案字段不合契约（${formatZod(checked.error)}）`, raw)
         return {
-          artifacts: { blurb: { kind: 'json', content: { ...data, title } } },
-          note: `封面文案：《${title}》`,
+          artifacts: { blurb: { kind: 'json', content: checked.data } },
+          note: `封面文案：《${checked.data.title}》`,
         }
       },
     },

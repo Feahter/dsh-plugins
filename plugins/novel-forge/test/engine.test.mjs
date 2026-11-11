@@ -518,6 +518,22 @@ test('LLM 网关空文本重试后成功', async (t) => {
   assert.equal(service.calls, 2)
 })
 
+test('LLM 网关连续空文本时逐次加倍 maxTokens', async (t) => {
+  const seen = []
+  const service = scriptedService([
+    async function* empty1() {},
+    async function* empty2() {},
+    (args) => {
+      seen.push(args.maxTokens)
+      return chunksOf({ type: 'text-delta', text: 'third' })(args)
+    },
+  ])
+  const gateway = createLlmGateway({ service, resolveModel: () => selection, retryDelays: [1] })
+  const result = await gateway.generate({ user: 'x', maxTokens: 1000 })
+  assert.equal(result.text, 'third')
+  assert.deepEqual(seen, [4000])
+})
+
 test('LLM 网关 json 解析失败抛 LLM_PARSE 并带 raw', async (t) => {
   const service = scriptedService([chunksOf({ type: 'text-delta', text: 'not json at all' })])
   const gateway = createLlmGateway({ service, resolveModel: () => selection, maxRetries: 0 })
