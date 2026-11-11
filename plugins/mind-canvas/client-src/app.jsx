@@ -259,6 +259,8 @@ function Canvas(props) {
     onDoublePaneClick, onViewportChange, stageRef,
   } = props
   const rf = useReactFlow()
+  const measuredRef = React.useRef(new Map())
+  const [measureTick, setMeasureTick] = React.useState(0)
 
   const collapsedSet = React.useMemo(
     () => new Set((doc?.collapsed ?? []).filter(id => doc?.nodes.some(node => node.id === id))),
@@ -288,10 +290,12 @@ function Canvas(props) {
       .filter(node => !hiddenByCollapse.has(node.id))
       .map(node => {
         const collapsed = collapsedSet.has(node.id)
+        const measured = measuredRef.current.get(node.id)
         return {
           id: node.id,
           type: 'mc',
           position: { x: node.x, y: node.y },
+          ...(measured ? { measured } : {}),
           className: 'mc-node-wrap',
           draggable: true,
           data: {
@@ -313,7 +317,7 @@ function Canvas(props) {
           },
         }
       })
-  }, [doc, selectedId, editingId, collapsedSet, t, onCommitText, onStartEdit, onCancelEdit, dispatch])
+  }, [doc, selectedId, editingId, collapsedSet, measureTick, t, onCommitText, onStartEdit, onCancelEdit, dispatch])
 
   const edges = React.useMemo(() => {
     if (!doc) return []
@@ -336,13 +340,23 @@ function Canvas(props) {
 
   const nodeTypes = React.useMemo(() => ({ mc: NodeCard }), [])
 
+  // 受控模式下必须自己接住 dimensions 变更，否则节点永远没有 measured：
+  // MiniMap 画不出方块，fitView 也只能按 0 尺寸算。
   const onNodesChange = React.useCallback(changes => {
     let moved = null
+    let measured = false
     for (const change of changes) {
       if (change.type === 'position' && change.position) {
         moved = change
+      } else if (change.type === 'dimensions' && change.dimensions) {
+        const previous = measuredRef.current.get(change.id)
+        if (!previous || previous.width !== change.dimensions.width || previous.height !== change.dimensions.height) {
+          measuredRef.current.set(change.id, change.dimensions)
+          measured = true
+        }
       }
     }
+    if (measured) setMeasureTick(tick => (tick + 1) % 100000)
     if (moved) dispatch({ type: 'moveNode', id: moved.id, x: moved.position.x, y: moved.position.y })
   }, [dispatch])
 

@@ -131,6 +131,9 @@ try {
 
   await page.waitForTimeout(150)
   check('父子之间画出连线', await page.locator('.react-flow__edge').count() === 1, `${await page.locator('.react-flow__edge').count()} 条`)
+  check('缩略图里能看到节点（受控模式接住了 measured）',
+    await page.locator('.react-flow__minimap-node').count() >= 2,
+    `${await page.locator('.react-flow__minimap-node').count()} 个方块`)
 
   // 3. 工具条在选中时出现
   await page.locator('.react-flow__node').first().click()

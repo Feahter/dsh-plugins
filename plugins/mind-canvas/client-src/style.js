@@ -228,7 +228,8 @@ body[data-ds-dark-theme] .mc-root{ color-scheme: dark; }
 .mc-toolbar-hint{ font-size: 11px; color: var(--ink3); padding: 0 6px; white-space: nowrap; }
 
 .mc-corner{
-  position: absolute; right: 14px; bottom: 40px; z-index: 5; display: flex; align-items: center; gap: 6px;
+  /* 放左下、缩放控件右侧：右下角留给 MiniMap，避免互相压住 */
+  position: absolute; left: 58px; bottom: 14px; z-index: 5; display: flex; align-items: center; gap: 6px;
   font-size: 11px; color: var(--ink3); padding: 5px 9px; border-radius: 999px;
   background: color-mix(in srgb, var(--card) 88%, transparent); border: .5px solid var(--line);
   backdrop-filter: blur(14px); pointer-events: none;
