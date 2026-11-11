@@ -187,7 +187,7 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794190942
+          "updated": 1794408770
         }
       },
       "versions": [
@@ -224,6 +224,19 @@
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "57c49af1d2da9beff5135342059e00e00190df8a",
+            "path": "plugins/archive-rsi"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "0.3.1",
+          "publishTimestamp": 1794408770,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "ffc19c4fa2651b1c53d803383925c1dfb74d186c",
             "path": "plugins/archive-rsi"
           },
           "engines": {
@@ -346,6 +359,110 @@
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "42bf4d63cb12bd45ba05b133d5a81914be788eb7",
             "path": "plugins/mind-canvas"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-task-ledger",
+      "title": {
+        "en": "Task ledger",
+        "zh": "任务账本"
+      },
+      "description": {
+        "en": "State that outlives the session: goals, decisions, evidence and next actions live in an external ledger (~/.dsh/task-ledger), not in the transcript. A single-writer resume lease returns a run_id, checkpoint writes are optimistically versioned, and closeout runs an evidence gate before a task may be marked done. Five task_* agent tools plus a sidebar panel that reads the ledger and drives tasks.",
+        "zh": "把状态所有权从会话搬到外置任务账本：目标、决策、证据、下一步都在 ~/.dsh/task-ledger 里，不在聊天记录里。续跑时取单写租约拿 run_id，checkpoint 用乐观版本号写入，收尾先跑证据门禁才允许标 done。五个 task_* 工具 + 直接读账本的侧边栏面板。"
+      },
+      "icon": "plugins/task-ledger/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/task-ledger",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/task-ledger"
+      },
+      "metadata": {
+        "category": "context-engineering",
+        "keywords": [
+          "task",
+          "ledger",
+          "sessions",
+          "resume",
+          "lease",
+          "evidence",
+          "closeout",
+          "panel",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794408770
+        }
+      },
+      "versions": [
+        {
+          "version": "1.0.1",
+          "publishTimestamp": 1794408770,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "0bf50449221b3a82f8a653a8d4fcc2a72a25a774",
+            "path": "plugins/task-ledger"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-update-check",
+      "title": {
+        "en": "Version update check",
+        "zh": "版本更新检查"
+      },
+      "description": {
+        "en": "A sidebar panel that reads the installed Desktop version from the app bundle itself and the newest version from your update source (the same app-update.yml electron-updater uses), then hands an available upgrade to the in-app updater: download, verify, confirm restart. No shell, no replacing a signed .app from the page.",
+        "zh": "侧边栏面板：从安装包本体读当前版本、从桌面端自己的更新源（与 electron-updater 同一个 app-update.yml）读最新版本，有新版就交给应用内更新器（下载 → 校验 → 确认重启）。不调 shell，不在页面侧替换签名包。"
+      },
+      "icon": "plugins/update-check/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/update-check"
+      },
+      "metadata": {
+        "category": "developer-tools",
+        "keywords": [
+          "update",
+          "version",
+          "upgrade",
+          "electron-updater",
+          "desktop",
+          "panel",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794408770
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794408770,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "b226db5c672330e809bc673c4aa1684cd0d2b884",
+            "path": "plugins/update-check"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.4"

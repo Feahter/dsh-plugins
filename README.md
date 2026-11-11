@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Five plugins live side by side under [`plugins/`](./plugins).
+Seven plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -51,6 +51,19 @@ A mind map on an infinite canvas inside the sidebar. Jot a thought and press Ent
 - Agent tools: `mind_canvas_read` (outline + stats) and `mind_canvas_add` (branch a node by text match).
 - Requirements: DSH `>= 0.2.1-rc.4`. Data lives in `~/.dsh/mind-canvas/state.json`; the host half has zero runtime dependencies.
 
+### [Task ledger](./plugins/task-ledger)
+
+State that outlives the session. Goals, decisions, evidence and next actions are written to an external ledger (`~/.dsh/task-ledger/`) instead of the transcript, so a task survives closing every conversation, switching model or switching agent: hand back the `task_id` and it resumes from the ledger. Five `task_*` tools — `task_list`, `task_open`, `task_resume` (takes the single-writer lease and returns a `run_id`), `task_checkpoint` (evidence, claims, decisions, next actions, optimistic `expected_version`) and `task_close` — plus a sidebar panel that reads the ledger directly.
+
+- Requirements: DSH `>= 0.2.1-rc.4`. Data lives in `~/.dsh/task-ledger/`; a failed ledger write is reported in the run report, never silently swallowed.
+- Every run must close with `task_close`; a failing evidence gate downgrades `done` to `blocked` unless the override is recorded as a decision.
+
+### [Version update check](./plugins/update-check)
+
+A sidebar panel that answers "what am I running, and is there anything newer?" — the installed version is read from the app bundle itself (Info.plist / packaged manifest, not guessed), the newest version from your update source (the same `app-update.yml` electron-updater uses). When they differ, one button hands the upgrade to the in-app updater: download, verify, confirm restart. The page never shells out and never replaces a signed `.app`.
+
+- Requirements: DSH `>= 0.2.1-rc.4`. Opening the Web UI in a plain browser has no preload bridge; the panel says so and degrades the button to a download link.
+
 ## Install manually
 
 The market index pins an exact commit for every version. The equivalent manual installs:
@@ -61,6 +74,8 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/archive-rsi"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/dsh-360"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/mind-canvas"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/task-ledger"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/update-check"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.
