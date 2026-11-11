@@ -10,6 +10,7 @@ import { scoreSkill } from './score.js';
 import { estimateTokens, round1, timestampId } from '../util.js';
 import { createSimilarityModel } from '../similarity.js';
 import { buildEvolution, parseLessons } from './evolution.js';
+import { classifySkill, taxonomyCatalog } from '../taxonomy.js';
 
 export const RUBRIC_VERSION = '2.0';
 const DAY_MS = 86_400_000;
@@ -194,6 +195,8 @@ export function analyzeSkill(input) {
     evolution,
   });
 
+  const scriptCount = files.filter((file) => String(file?.path || '').startsWith('scripts/')).length;
+
   const report = {
     name,
     source: summary.source || 'unknown',
@@ -222,6 +225,21 @@ export function analyzeSkill(input) {
     suggestions: scored.suggestions,
     overlaps: scored.overlaps,
   };
+  // Classification (TAXONOMY-SPEC §3) is computed here, after metrics / score /
+  // evolution exist, because `kind` and `state` are structural. The body is not
+  // retained on the report (it would bloat every scan payload), so pass the
+  // hints the structural rules need instead of re-reading the skill.
+  report.classification = classifySkill(report, {
+    bodyText: body,
+    bodyLines: metrics.bodyLines,
+    referenceCount: metrics.referenceCount,
+    scriptCount,
+    siblingNames: (input.siblings || [])
+      .map((sibling) => sibling && sibling.name)
+      .filter((siblingName) => typeof siblingName === 'string' && siblingName !== ''),
+    cwd: options.cwd,
+    home: options.home,
+  });
   if (!parsed && raw) report.rawError = 'frontmatter 解析失败，仅按正文与 registry 元数据分析';
   return report;
 }
@@ -238,6 +256,12 @@ export function buildPortfolio(reports, meta = {}) {
     score: { ...report.score },
     verdict: { ...report.verdict },
   }));
+  const taxonomy = taxonomyCatalog('skills');
+  // Invariant (TAXONOMY-SPEC §3): every item carries a classification. analyzeSkill
+  // always attaches one; this fallback keeps callers that hand-build reports honest.
+  for (const report of list) {
+    if (!report.classification) report.classification = classifySkill(report);
+  }
 
   // Merge candidates need the sibling's total, which only exists here.
   const byName = new Map(list.map((report) => [report.name, report]));
@@ -368,6 +392,7 @@ export function buildPortfolio(reports, meta = {}) {
     .sort((a, b) => b.pendingScore - a.pendingScore || a.name.localeCompare(b.name))
     .slice(0, 10);
   const pendingEvolution = evolutionList.map((entry) => entry.name);
+  const deltaAvg = previous ? round1(avgScore - previous.avgScore) : null;
 
   return {
     generatedAt,
@@ -377,6 +402,7 @@ export function buildPortfolio(reports, meta = {}) {
     sessionsScanned: Number(meta.sessionsScanned) || 0,
     usageAvailable: meta.usageAvailable !== false,
     catalogDescriptionMaxLength: Number(options.catalogDescriptionMaxLength) || 500,
+    taxonomy,
     totals: {
       skills: list.length,
       avgScore,
@@ -387,15 +413,75 @@ export function buildPortfolio(reports, meta = {}) {
       zeroUse: zeroUse.length,
       referenceFiles,
       bySource,
+      byRole: axisCounts(list, taxonomy, 'role'),
+      byLayer: axisCounts(list, taxonomy, 'layer'),
+      byKind: axisCounts(list, taxonomy, 'kind'),
+      byScope: axisCounts(list, taxonomy, 'scope'),
       evolution: evolutionAgg,
     },
     previous,
-    deltaAvg: previous ? round1(avgScore - previous.avgScore) : null,
+    deltaAvg,
+    trend: buildTrend(list, previous, generatedAt, deltaAvg),
     skills: list,
     overlaps: overlapPairs,
     quickWins: quickWins.slice(0, 8),
     evolution: evolutionList,
     issues: { zeroUse, truncated, brokenLinks, dangerous, pendingEvolution },
+  };
+}
+
+/**
+ * Count one classification axis in catalog order (zero buckets dropped).
+ * Dense-then-strip keeps key order stable no matter the report order.
+ * @param {object[]} list
+ * @param {object} taxonomy
+ * @param {'role'|'kind'|'scope'} axisId
+ */
+function axisCounts(list, taxonomy, axisId) {
+  const axis = (taxonomy.axes || []).find((entry) => entry.id === axisId);
+  const counts = {};
+  if (!axis) return counts;
+  for (const value of axis.values) counts[value.id] = 0;
+  for (const report of list) {
+    const value = report.classification && report.classification[axisId];
+    const id = value && typeof value === 'object' ? value.id : null;
+    if (id && counts[id] !== undefined) counts[id] += 1;
+  }
+  const out = {};
+  for (const value of axis.values) if (counts[value.id] > 0) out[value.id] = counts[value.id];
+  return out;
+}
+
+/**
+ * Portfolio trend computed from the per-item `score.delta` plus the previous
+ * scan meta (TAXONOMY-SPEC §3).
+ *
+ * No comparable previous scan (first scan, or a rubric-version reset that
+ * cleared `previous`) means no trend at all: returning zeros would make the UI
+ * claim "0 项变化" for a scan it has never compared. `null` is the honest
+ * "unknown" and the UI already hides null trend fields.
+ */
+function buildTrend(list, previous, generatedAt, deltaAvg) {
+  if (!previous) {
+    return { generatedAt, previousGeneratedAt: null, avgDelta: null, itemsChanged: null };
+  }
+  let sum = 0;
+  let counted = 0;
+  let itemsChanged = 0;
+  for (const report of list) {
+    const raw = report.score ? report.score.delta : null;
+    if (raw == null) continue;
+    const delta = Number(raw);
+    if (!Number.isFinite(delta)) continue;
+    sum += delta;
+    counted += 1;
+    if (delta !== 0) itemsChanged += 1;
+  }
+  return {
+    generatedAt,
+    previousGeneratedAt: previous.generatedAt != null ? previous.generatedAt : null,
+    avgDelta: counted > 0 ? round1(sum / counted) : deltaAvg,
+    itemsChanged: counted > 0 ? itemsChanged : 0,
   };
 }
 

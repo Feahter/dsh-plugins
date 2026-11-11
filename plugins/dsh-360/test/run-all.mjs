@@ -21,9 +21,9 @@ const steps = [
   ['syntax index.js', ['--check', join(root, 'index.js')], [join(root, 'index.js')]],
   ['syntax client.js', ['--check', join(root, 'client.js')], [join(root, 'client.js')]],
   [
-    'core tests (grade + skills + agents)',
-    ['--test', join(here, 'grade.test.mjs'), join(here, 'skills.test.mjs'), join(here, 'agents.test.mjs')],
-    [join(here, 'grade.test.mjs'), join(here, 'skills.test.mjs'), join(here, 'agents.test.mjs')],
+    'core tests (grade + skills + agents + client cache)',
+    ['--test', join(here, 'grade.test.mjs'), join(here, 'skills.test.mjs'), join(here, 'agents.test.mjs'), join(here, 'client-cache.test.mjs'), join(here, 'taxonomy.test.mjs'), join(here, 'perf.test.mjs'), join(here, 'backup-retention.test.mjs')],
+    [join(here, 'grade.test.mjs'), join(here, 'skills.test.mjs'), join(here, 'agents.test.mjs'), join(here, 'client-cache.test.mjs'), join(here, 'taxonomy.test.mjs'), join(here, 'perf.test.mjs'), join(here, 'backup-retention.test.mjs')],
   ],
   ['host verify', [join(here, 'verify-host.mjs')], [join(here, 'verify-host.mjs')]],
   ['client verify', [join(here, 'verify-client.mjs')], [join(here, 'verify-client.mjs')]],

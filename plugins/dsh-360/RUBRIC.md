@@ -6,6 +6,10 @@
 >
 > 两套 rubric 的版本谱系：skills 沿用 Rubric 2.0（`lib/skills/analyze.js` 的 `RUBRIC_VERSION = '2.0'`），agents 沿用 Rubric 1.0（`lib/agents/analyze.js` 的 `RUBRIC_VERSION = '1.0'`），合并后只在等级制与输出形状上统一，评分口径不动。
 
+## 0. 分类不是评分（v0.2）
+
+每个对象另有四轴分类（职责 / 类型 / 范围 / 状态；技能多一轴「层级」区分元技能与任务技能，见 [TAXONOMY-SPEC.md](TAXONOMY-SPEC.md)）。分类只用于导航与筛选，**不进入六维、不加分也不减分**；`role.confidence` 与 `role.evidence` 必须随报告展示，「其他」是关键词未命中的诚实兜底，不得为了好看手工改标签。任何新关键词先改 `lib/taxonomy.js` 与词表测试，再谈 UI。
+
 ## 1. 统一等级制（S~E × ±，18 档）
 
 `lib/grade.js` 是**唯一实现**，任何地方不得再写死阈值。字母表达整体健康度，`+ / -` 表达字母内的位置；`rank` 越小越好（S+ = 0，E- = 17）。

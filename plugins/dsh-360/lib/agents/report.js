@@ -36,6 +36,56 @@ function quickWinIndex(portfolio) {
 }
 
 /**
+ * One compact Chinese classification line: 职责 · 类型 · 范围 · 状态.
+ * Labels always come from `report.classification` (taxonomy.js).
+ */
+function classificationLine(report) {
+  const classification = report.classification;
+  if (!classification || !classification.role) return null;
+  const parts = [classification.role.label, classification.kind?.label, classification.scope?.label]
+    .filter(Boolean);
+  const states = (classification.state || []).map((state) => state.label).filter(Boolean);
+  if (states.length > 0) parts.push(states.join('、'));
+  return `分类：${parts.join(' · ')}`;
+}
+
+/**
+ * Short 分类分布 section: role table with counts (totals.byRole) plus compact
+ * kind/scope lines. Labels come from portfolio.taxonomy (kind is 类型 here).
+ */
+function classificationSection(portfolio) {
+  const taxonomy = portfolio.taxonomy;
+  const totals = portfolio.totals || {};
+  const axes = taxonomy && Array.isArray(taxonomy.axes) ? taxonomy.axes : [];
+  const roleAxis = axes.find((axis) => axis.id === 'role');
+  const byRole = totals.byRole || {};
+  const rows = [];
+  if (roleAxis) {
+    for (const value of roleAxis.values) {
+      const count = byRole[value.id] || 0;
+      if (count > 0) rows.push([value.label, count, value.description || '—']);
+    }
+  }
+  if (rows.length === 0) return [];
+  rows.sort((a, b) => b[1] - a[1]);
+
+  const lines = ['## 分类分布', ''];
+  lines.push(table(['职责', '数量', '说明'], rows));
+  lines.push('');
+  const countMaps = { kind: totals.byKind || {}, scope: totals.byScope || {} };
+  for (const axis of axes) {
+    const counts = countMaps[axis.id];
+    if (!counts) continue;
+    const parts = axis.values
+      .filter((value) => (counts[value.id] || 0) > 0)
+      .map((value) => `${value.label} ${counts[value.id]}`);
+    if (parts.length > 0) lines.push(`${axis.label}：${parts.join(' · ')}`);
+  }
+  lines.push('');
+  return lines;
+}
+
+/**
  * @param {object} portfolio
  * @param {{detail?:boolean}} options
  */
@@ -79,6 +129,8 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
     lines.push('作用域分布：' + Object.entries(totals.byScope).map(([scope, count]) => `${scope} ${count}`).join(' · '));
     lines.push('');
   }
+
+  lines.push(...classificationSection(portfolio));
 
   lines.push('## 优先级总表（分数从低到高）');
   lines.push('');
@@ -167,6 +219,8 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
       lines.push(`### ${index + 1}. \`${report.name}\` — ${report.score.total} 分（${report.score.grade}）· ${report.verdict.label}`);
       lines.push('');
       lines.push(`- 类型：${SUBJECT_KIND_LABEL[report.kind] || report.kind} · 作用域：${report.scope} · 覆盖：${report.coverage} · 置信度 ${pct(report.score.confidence)}${report.score.delta != null ? ` · 较上次 ${report.score.delta >= 0 ? '+' : ''}${report.score.delta}` : ''}`);
+      const taxonomyLine = classificationLine(report);
+      if (taxonomyLine) lines.push(`- ${taxonomyLine}`);
       if (report.path) lines.push(`- 路径：\`${report.path}\``);
       lines.push(`- 结论：${report.verdict.reason}`);
       lines.push('');
@@ -252,6 +306,7 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
   lines.push('## 口径与局限');
   lines.push('');
   lines.push('- 分数是启发式体检，不是内容正确性证明；每条扣分都应能在报告里找到证据。');
+  lines.push('- 分类（职责/类型/范围/状态）由名称与描述的关键词加权命中、路径与发现启发式推导，置信度与命中词只出现在 JSON 里；不是精确语义判定。');
   lines.push('- 注入证据来自会话日志的 `Instructions from:` 文本，harness 版本变化可能换格式；缺失时按“无证据”处理并降置信度。');
   lines.push('- 子代理定义的使用次数来自 `subagent/catalog` 的 label 匹配，label 由父 agent 自由撰写，存在漏配。');
   lines.push('- 跨文件冲突是词面启发式，近义不同词的矛盾会漏报。');

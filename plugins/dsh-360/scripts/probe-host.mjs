@@ -24,8 +24,14 @@ if (!existsSync(entry)) {
 
 const args = process.argv.slice(2);
 const json = args.includes('--json');
+const summary = args.includes('--summary');
 const surfaceIdx = args.indexOf('--surface');
 const surface = surfaceIdx >= 0 ? args[surfaceIdx + 1] : 'both';
+
+if (surface !== 'agents') {
+  console.error('probe-host: the skills surface needs a live DSH ctx.skills; use --surface agents here or the live dsh360_scan tool.');
+  process.exit(2);
+}
 
 const captured = { tools: new Map(), routes: new Map() };
 const ctx = {
@@ -50,12 +56,12 @@ const ctx = {
 };
 
 const mod = await import(entry);
-const config = { windowDays: 30, roots: [], maxDepth: 6, evolution: true, backupsKeep: 20, catalogDescriptionMaxLength: 500 };
+const config = { windowDays: 30, roots: [], maxDepth: 6, evolution: true, backupsKeep: 20, catalogDescriptionMaxLength: 500, warmup: false };
 const disposer = mod.apply(ctx, config);
 
 const scan = captured.tools.get('dsh360_scan');
 if (!scan) throw new Error('dsh360_scan was not registered');
-const result = await scan.execute({ surface, detail: 'full', refresh: true });
+const result = await scan.execute({ surface, detail: summary ? 'summary' : 'full', refresh: true });
 const payload = result?.data ?? result;
 
 if (json) {

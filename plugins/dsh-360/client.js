@@ -35,6 +35,9 @@ window.__ModuleLoader__.load({
       filterGrade: '等级',
       filterVerdict: '结论',
       filterAll: '全部',
+      filters: '筛选',
+      clearFilters: '清空筛选',
+      closeFilters: '收起筛选',
       verdictKeep: '保留',
       verdictWatch: '观察',
       verdictMerge: '合并',
@@ -99,6 +102,43 @@ window.__ModuleLoader__.load({
       evolveCancel: '取消',
       statAvg: '平均分',
       statGrades: 'S~E 分布',
+      // classification + human-first summary (taxonomy supplies value labels)
+      axisRole: '职责',
+      axisLayer: '层级',
+      axisKind: '类型',
+      axisScope: '范围',
+      axisGrade: '等级',
+      moreFilters: '更多筛选',
+      classificationTitle: '分类',
+      classificationRole: '职责',
+      classificationLayer: '层级',
+      classificationKind: '类型',
+      classificationScope: '范围',
+      classificationState: '状态',
+      classificationConfidence: '置信度 {value}',
+      classificationEvidence: '依据：{value}',
+      classificationFilterRole: '按职责筛选',
+      classificationEmpty: '这次扫描还没有分类信息；宿主升级后会自动出现职责、类型与范围。',
+      dataTime: '数据时间 {time}',
+      summarySkills: '{count} 个技能，{need} 个待处理；最该先看 {top}',
+      summaryAgents: '{count} 个对象，{need} 个待处理；最该先看 {top}',
+      summaryOkSkills: '{count} 个技能，全部状态良好',
+      summaryOkAgents: '{count} 个对象，全部状态良好',
+      trendLine: '较上次平均分 {delta}，{changed} 项变化',
+      trendDeltaOnly: '较上次平均分 {delta}',
+      trendChangedOnly: '较上次 {changed} 项变化',
+      staleBanner: '更新于 {time}，正在刷新',
+      staleFailed: '更新于 {time}，刷新失败：{message}',
+      effectNow: '本次优化',
+      effectLast: '上次优化',
+      effectLine: '{title}：{items} 项，分数 {before} → {after}（{delta}），省 {tokens} tokens',
+      effectTokensUp: '{title}：{items} 项，分数 {before} → {after}（{delta}），常驻 token +{tokens}',
+      effectLineNoTokens: '{title}：{items} 项，分数 {before} → {after}（{delta}）',
+      effectUps: '升级 {count} 项',
+      effectVerdicts: '结论变化 {count} 项',
+      effectToastItem: '{name} {before} → {after}',
+      applyToastItems: '已应用，备份 {backupId}；{items}',
+      applyAllToastItems: '已应用 {count} 项安全优化，备份 {backupId}；{items}',
       // skills surface (skills* prefix on conflicts)
       skillsSubtitle: '按需加载 / 渐进披露 / 可执行性 / 边界 / 卫生 / 持续进化 六维评分',
       skillsSearchPlaceholder: '搜索名称 / 描述…',
@@ -291,6 +331,9 @@ window.__ModuleLoader__.load({
       filterGrade: 'Grade',
       filterVerdict: 'Verdict',
       filterAll: 'All',
+      filters: 'Filters',
+      clearFilters: 'Clear filters',
+      closeFilters: 'Hide filters',
       verdictKeep: 'Keep',
       verdictWatch: 'Watch',
       verdictMerge: 'Merge',
@@ -355,6 +398,42 @@ window.__ModuleLoader__.load({
       evolveCancel: 'Cancel',
       statAvg: 'Avg score',
       statGrades: 'S~E',
+      axisRole: 'Role',
+      axisLayer: 'Layer',
+      axisKind: 'Kind',
+      axisScope: 'Scope',
+      axisGrade: 'Grade',
+      moreFilters: 'More filters',
+      classificationTitle: 'Classification',
+      classificationRole: 'Role',
+      classificationLayer: 'Layer',
+      classificationKind: 'Kind',
+      classificationScope: 'Scope',
+      classificationState: 'State',
+      classificationConfidence: 'Confidence {value}',
+      classificationEvidence: 'Evidence: {value}',
+      classificationFilterRole: 'Filter by role',
+      classificationEmpty: 'This scan has no classification yet; role, kind, and scope appear once the host supplies them.',
+      dataTime: 'Data time {time}',
+      summarySkills: '{count} skills, {need} need attention; start with {top}',
+      summaryAgents: '{count} subjects, {need} need attention; start with {top}',
+      summaryOkSkills: '{count} skills, everything looks healthy',
+      summaryOkAgents: '{count} subjects, everything looks healthy',
+      trendLine: 'Since last scan: average {delta}, {changed} changed',
+      trendDeltaOnly: 'Since last scan: average {delta}',
+      trendChangedOnly: '{changed} changed since last scan',
+      staleBanner: 'Updated {time}, refreshing',
+      staleFailed: 'Updated {time}, refresh failed: {message}',
+      effectNow: 'This optimization',
+      effectLast: 'Last optimization',
+      effectLine: '{title}: {items} items, score {before} → {after} ({delta}), saved {tokens} tokens',
+      effectTokensUp: '{title}: {items} items, score {before} → {after} ({delta}), resident tokens +{tokens}',
+      effectLineNoTokens: '{title}: {items} items, score {before} → {after} ({delta})',
+      effectUps: 'Grade up: {count}',
+      effectVerdicts: 'Verdict changed: {count}',
+      effectToastItem: '{name} {before} → {after}',
+      applyToastItems: 'Applied, backup {backupId}; {items}',
+      applyAllToastItems: 'Applied {count} safe fixes, backup {backupId}; {items}',
       skillsSubtitle: 'Score skills across on-demand loading, progressive disclosure, actionability, boundary, hygiene, and continuous evolution',
       skillsSearchPlaceholder: 'Search name / description…',
       skillsOnlyProblems: 'Only major+ issues',
@@ -662,6 +741,245 @@ window.__ModuleLoader__.load({
       return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate());
     }
 
+    function formatDateTime(value) {
+      if (value == null || value === '') return '—';
+      const date = new Date(Number(value));
+      if (!Number.isFinite(date.getTime())) return '—';
+      const pad = (n) => (n < 10 ? '0' + n : String(n));
+      return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+        + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+
+    function formatInt(value) {
+      if (value == null || !Number.isFinite(Number(value))) return '—';
+      return String(Math.round(Number(value))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    function signed1(value) {
+      if (value == null || !Number.isFinite(Number(value))) return '—';
+      const n = Number(value);
+      return (n > 0 ? '+' : '') + fmt1(n);
+    }
+
+    // ---------------------------------------------------------- classification
+    // Value labels are taxonomy-first. The client never keeps its own role list:
+    // `portfolio.taxonomy` wins, then the per-item classification label, then the
+    // raw id (which is also the only path an old host without taxonomy can take).
+
+    function classificationOf(item) {
+      const value = item && item.classification;
+      return value && typeof value === 'object' ? value : null;
+    }
+
+    function axisEntryOf(item, axis) {
+      const classification = classificationOf(item);
+      if (!classification) return null;
+      const entry = classification[axis];
+      if (!entry) return null;
+      if (typeof entry === 'string') return { id: entry, label: '' };
+      return typeof entry === 'object' ? entry : null;
+    }
+
+    function axisIdOf(item, axis) {
+      const entry = axisEntryOf(item, axis);
+      if (entry && typeof entry.id === 'string' && entry.id) return entry.id;
+      // Older hosts expose kind/scope directly on the subject; keep that readable.
+      if (axis === 'kind' && item && typeof item.kind === 'string') return item.kind;
+      if (axis === 'scope' && item && typeof item.scope === 'string') return item.scope;
+      return '';
+    }
+
+    function taxonomyIndex(taxonomy) {
+      const axes = {};
+      const order = [];
+      const list = taxonomy && Array.isArray(taxonomy.axes) ? taxonomy.axes : [];
+      for (const axis of list) {
+        if (!axis || typeof axis.id !== 'string' || !axis.id) continue;
+        const values = {};
+        const valueOrder = [];
+        const entries = Array.isArray(axis.values) ? axis.values : [];
+        for (const value of entries) {
+          if (!value || typeof value.id !== 'string' || !value.id) continue;
+          values[value.id] = value;
+          valueOrder.push(value.id);
+        }
+        axes[axis.id] = { id: axis.id, label: axis.label || axis.id, values, valueOrder };
+        order.push(axis.id);
+      }
+      return { axes, order };
+    }
+
+    function taxonomyLabelOf(tax, axis, id) {
+      const bucket = tax && tax.axes ? tax.axes[axis] : null;
+      const value = bucket && id ? bucket.values[id] : null;
+      return value && typeof value.label === 'string' && value.label ? value.label : '';
+    }
+
+    function axisLabelOf(tax, item, axis, t, fallbackKeys) {
+      const id = axisIdOf(item, axis);
+      if (!id) return '';
+      const fromTaxonomy = taxonomyLabelOf(tax, axis, id);
+      if (fromTaxonomy) return fromTaxonomy;
+      const entry = axisEntryOf(item, axis);
+      if (entry && typeof entry.label === 'string' && entry.label) return entry.label;
+      const key = fallbackKeys && fallbackKeys[id];
+      if (key) return t(key);
+      return id;
+    }
+
+    function classificationSummaryOf(item) {
+      const classification = classificationOf(item);
+      const summary = classification && classification.summary;
+      return typeof summary === 'string' && summary.trim() ? summary.trim() : '';
+    }
+
+    function classificationLabelMapOf(items, axis) {
+      const map = {};
+      for (const item of items || []) {
+        const id = axisIdOf(item, axis);
+        const entry = axisEntryOf(item, axis);
+        if (id && entry && typeof entry.label === 'string' && entry.label && !map[id]) {
+          map[id] = entry.label;
+        }
+      }
+      return map;
+    }
+
+    function stateEntriesOf(item, tax, pendingFallbackLabel) {
+      const classification = classificationOf(item);
+      const raw = classification && classification.state;
+      const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      const entries = [];
+      for (const value of list) {
+        if (!value) continue;
+        const id = typeof value === 'string' ? value : value.id;
+        if (!id) continue;
+        const label = taxonomyLabelOf(tax, 'state', id)
+          || (typeof value === 'object' && typeof value.label === 'string' && value.label)
+          || id;
+        entries.push({ id, label });
+      }
+      if (entries.length === 0 && pendingFallbackLabel) {
+        entries.push({ id: 'pending', label: pendingFallbackLabel });
+      }
+      return entries;
+    }
+
+    function axisCountsOf(items, axis, totalsMap) {
+      if (totalsMap && typeof totalsMap === 'object' && Object.keys(totalsMap).length > 0) {
+        return totalsMap;
+      }
+      const counts = {};
+      for (const item of items || []) {
+        const id = axisIdOf(item, axis);
+        if (!id) continue;
+        counts[id] = (counts[id] || 0) + 1;
+      }
+      return counts;
+    }
+
+    function axisOptionsOf(tax, axis, counts, fallbackKeys, t, classLabels) {
+      const options = [];
+      const seen = new Set();
+      const bucket = tax && tax.axes ? tax.axes[axis] : null;
+      const order = bucket ? bucket.valueOrder : [];
+      for (const id of order) {
+        if (!(counts[id] > 0)) continue;
+        seen.add(id);
+        const value = bucket.values[id];
+        options.push({
+          id,
+          label: value.label || (classLabels && classLabels[id]) || id,
+          description: value.description || '',
+          count: counts[id],
+        });
+      }
+      for (const id of Object.keys(counts)) {
+        if (seen.has(id) || !(counts[id] > 0)) continue;
+        const key = fallbackKeys && fallbackKeys[id];
+        options.push({
+          id,
+          label: (classLabels && classLabels[id]) || (key ? t(key) : id),
+          description: '',
+          count: counts[id],
+        });
+      }
+      return options;
+    }
+
+    function gradeCountsOf(items) {
+      const counts = { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
+      for (const item of items || []) {
+        const letter = gradeLetterOf(item && item.score);
+        if (counts[letter] !== undefined) counts[letter] += 1;
+      }
+      return counts;
+    }
+
+    // "Needs action" is the only aggregation the summary line performs; it is
+    // deliberately wider than one verdict so a broken C-grade item still shows up.
+    const ACTION_VERDICTS = { watch: true, merge: true, archive: true };
+
+    function itemNeedsAction(item) {
+      const code = item && item.verdict && item.verdict.code;
+      if (code && ACTION_VERDICTS[code]) return true;
+      const letter = gradeLetterOf(item && item.score);
+      return letter === 'C' || letter === 'D' || letter === 'E';
+    }
+
+    function topFixOf(items) {
+      const needs = (items || []).filter(itemNeedsAction);
+      if (!needs.length) return null;
+      return needs.reduce((best, item) => {
+        const score = numberOr(item && item.score && item.score.total, 101);
+        const bestScore = numberOr(best && best.score && best.score.total, 101);
+        return score < bestScore ? item : best;
+      }, needs[0]);
+    }
+
+    function displayNameOf(item, fallback) {
+      if (item && typeof item.name === 'string' && item.name) return item.name;
+      if (item && typeof item.id === 'string' && item.id) return item.id;
+      return fallback || '—';
+    }
+
+    function trendLineOf(portfolio, t) {
+      const trend = portfolio && portfolio.trend;
+      if (!trend || typeof trend !== 'object') return '';
+      const avg = trend.avgDelta;
+      const changed = trend.itemsChanged;
+      const hasAvg = avg != null && Number.isFinite(Number(avg));
+      const hasChanged = changed != null && Number.isFinite(Number(changed));
+      if (hasAvg && hasChanged) {
+        return t('trendLine', { delta: signed1(avg), changed: Math.round(Number(changed)) });
+      }
+      if (hasAvg) return t('trendDeltaOnly', { delta: signed1(avg) });
+      if (hasChanged) return t('trendChangedOnly', { changed: Math.round(Number(changed)) });
+      return '';
+    }
+
+    // --------------------------------------------------------------- effect card
+
+    function effectTargetsOf(effect) {
+      return Array.isArray(effect && effect.targets) ? effect.targets : [];
+    }
+
+    function effectBackupIdsOf(effect) {
+      return Array.isArray(effect && effect.backupIds)
+        ? effect.backupIds.filter((id) => typeof id === 'string' && id)
+        : [];
+    }
+
+    function effectToastOf(effect, resolveName, t) {
+      const targets = effectTargetsOf(effect);
+      if (!targets.length) return '';
+      return targets.slice(0, 3).map((target) => t('effectToastItem', {
+        name: resolveName(target && target.key),
+        before: fmt1(target && target.before),
+        after: fmt1(target && target.after),
+      })).join('；');
+    }
+
     const SEV_RANK = { critical: 0, major: 1, minor: 2, info: 3 };
 
     // ------------------------------------------------------------------- icons
@@ -699,6 +1017,10 @@ window.__ModuleLoader__.load({
       h('path', { key: 'a', d: 'M12 3v12' }),
       h('path', { key: 'b', d: 'm7 10 5 5 5-5' }),
       h('path', { key: 'c', d: 'M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2' }),
+    ], props && props.size);
+
+    const FilterIcon = (props) => icon([
+      h('path', { key: 'a', d: 'M3 5h18l-7 8v6l-4 2v-8z' }),
     ], props && props.size);
 
     const ChartIcon = (props) => icon([
@@ -765,6 +1087,278 @@ window.__ModuleLoader__.load({
       }, notice.text);
     }
 
+    // ------------------------------------------------- human-first shared pieces
+
+    function DeltaText(props) {
+      const raw = props.delta;
+      if (raw == null || !Number.isFinite(Number(raw))) return null;
+      const value = Number(raw);
+      const dir = value > 0 ? 'up' : value < 0 ? 'down' : 'flat';
+      const arrow = value > 0 ? '↑' : value < 0 ? '↓' : '→';
+      return h('span', {
+        className: 'd360-delta' + (props.className ? ' ' + props.className : ''),
+        'data-delta': dir,
+        title: props.title,
+      }, arrow + ' ' + signed1(value));
+    }
+
+    function StateBadgeList(props) {
+      const entries = props.entries || [];
+      if (!entries.length) return null;
+      return h('span', { className: 'd360-states' },
+        entries.slice(0, props.limit || 4).map((entry) => h('span', {
+          className: 'd360-state',
+          key: entry.id,
+          'data-state': entry.id,
+        },
+          h('span', { className: 'd360-stateDot', 'aria-hidden': true }),
+          h('span', { className: 'd360-stateLabel' }, entry.label))));
+    }
+
+    function ClassificationPills(props) {
+      const tax = props.taxonomy;
+      const item = props.item;
+      const t = props.t;
+      const fallback = props.fallbackKeys || {};
+      const pills = ['role', 'layer', 'kind', 'scope']
+        .filter((axis) => axis !== 'layer' || axisIdOf(item, 'layer') === 'meta')
+        .map((axis) => {
+          const label = axisLabelOf(tax, item, axis, t, fallback[axis]);
+          return label ? { axis, label } : null;
+        })
+        .filter(Boolean);
+      if (!pills.length) return null;
+      return h('span', { className: 'd360-pills' },
+        pills.map((pill) => h('span', {
+          className: 'd360-pill',
+          key: pill.axis,
+          'data-axis': pill.axis,
+        }, pill.label)));
+    }
+
+    function AxisFilter(props) {
+      const values = Array.isArray(props.values) ? props.values : [];
+      if (!values.length) return null;
+      return h('div', {
+        className: 'd360-axis',
+        role: 'group',
+        'aria-label': props.title,
+        'data-axis': props.axis,
+      },
+        h('span', { className: 'd360-axisLabel' }, props.title),
+        h('div', { className: 'd360-axisChips' },
+          h('button', {
+            type: 'button',
+            className: 'd360-chipBtn',
+            'data-axis': props.axis,
+            'data-value': 'all',
+            'aria-pressed': props.current === 'all' ? 'true' : 'false',
+            onClick: () => props.onSelect('all'),
+          }, h('span', { className: 'd360-chipLabel' }, props.t('filterAll'))),
+          values.map((value) => h('button', {
+            type: 'button',
+            className: 'd360-chipBtn',
+            key: value.id,
+            'data-axis': props.axis,
+            'data-value': value.id,
+            'aria-pressed': props.current === value.id ? 'true' : 'false',
+            title: value.description || undefined,
+            onClick: () => props.onSelect(value.id),
+          },
+            h('span', { className: 'd360-chipLabel' }, value.label),
+            value.count == null ? null : h('span', { className: 'd360-chipCount' }, String(value.count))))));
+    }
+
+    function SummaryLine(props) {
+      const items = props.items || [];
+      if (!items.length) return null;
+      const needs = items.filter(itemNeedsAction);
+      const top = topFixOf(items);
+      const line = needs.length && top
+        ? props.t(props.kind === 'skills' ? 'summarySkills' : 'summaryAgents', {
+          count: items.length,
+          need: needs.length,
+          top: displayNameOf(top),
+        })
+        : props.t(props.kind === 'skills' ? 'summaryOkSkills' : 'summaryOkAgents', {
+          count: items.length,
+        });
+      const meta = [
+        props.t('dataTime', {
+          time: formatDateTime(props.portfolio && (props.portfolio.generatedAt || props.portfolio.cachedAt)),
+        }),
+      ];
+      const trend = trendLineOf(props.portfolio, props.t);
+      if (trend) meta.push(trend);
+      return h('div', { className: 'd360-summary' },
+        h('p', { className: 'd360-summaryLine' }, line),
+        h('p', { className: 'd360-summaryMeta' }, meta.join(' · ')));
+    }
+
+    function StaleBanner(props) {
+      const portfolio = props.portfolio;
+      if (!portfolio || !portfolio.stale) return null;
+      const time = formatDateTime(portfolio.cachedAt || portfolio.generatedAt);
+      const text = props.error
+        ? props.t('staleFailed', { time, message: props.error })
+        : props.t('staleBanner', { time });
+      return h('div', {
+        className: 'd360-staleBanner',
+        role: 'status',
+        'aria-live': 'polite',
+      }, text);
+    }
+
+    function EffectCard(props) {
+      const effect = props.effect;
+      if (!effect || typeof effect !== 'object') return null;
+      const targets = effectTargetsOf(effect);
+      const items = numberOr(effect.items, targets.length);
+      const tokens = Number(effect.tokensSaved);
+      const hasTokens = effect.tokensSaved != null && Number.isFinite(tokens);
+      const title = props.isLast ? props.t('effectLast') : props.t('effectNow');
+      const tokensSaved = hasTokens && tokens > 0;
+      const tokensAdded = hasTokens && tokens < 0;
+      const line = (tokensSaved || tokensAdded)
+        ? props.t(tokensSaved ? 'effectLine' : 'effectTokensUp', {
+          title,
+          items,
+          before: fmt1(effect.scoreBefore),
+          after: fmt1(effect.scoreAfter),
+          delta: effect.delta == null ? '—' : signed1(effect.delta),
+          tokens: formatInt(Math.abs(tokens)),
+        })
+        : props.t('effectLineNoTokens', {
+          title,
+          items,
+          before: fmt1(effect.scoreBefore),
+          after: fmt1(effect.scoreAfter),
+          delta: effect.delta == null ? '—' : signed1(effect.delta),
+        });
+      const extras = [];
+      if (numberOr(effect.gradeUps, 0) > 0) {
+        extras.push(props.t('effectUps', { count: Math.round(numberOr(effect.gradeUps, 0)) }));
+      }
+      if (numberOr(effect.verdictChanges, 0) > 0) {
+        extras.push(props.t('effectVerdicts', { count: Math.round(numberOr(effect.verdictChanges, 0)) }));
+      }
+      return h('div', {
+        className: 'd360-effect',
+        'data-source': props.isLast ? 'last' : 'now',
+        role: 'status',
+      },
+        h('div', { className: 'd360-effectBody' },
+          h('div', { className: 'd360-effectLine' }, line),
+          extras.length ? h('div', { className: 'd360-effectMeta' }, extras.join(' · ')) : null),
+        props.onUndo
+          ? h('button', {
+            type: 'button',
+            className: 'd360-effectUndo',
+            disabled: props.busy,
+            onClick: props.onUndo,
+          }, h(UndoIcon, { size: 13 }), h('span', null, props.t('undo')))
+          : null);
+    }
+
+    function LoadingSkeleton(props) {
+      const cards = [0, 1, 2, 3, 4, 5];
+      const rows = [0, 1, 2, 3];
+      return h('div', {
+        className: 'd360-skeleton',
+        'data-surface': props.surface,
+        role: 'status',
+        'aria-live': 'polite',
+      },
+        h('div', { className: 'd360-skelStats' },
+          cards.map((index) => h('div', { className: 'd360-skelCard', key: index }))),
+        h('div', { className: 'd360-skelBody' },
+          h('div', { className: 'd360-skelPane' },
+            rows.map((index) => h('div', {
+              className: 'd360-skelBar',
+              key: index,
+              style: { width: index % 2 === 0 ? '88%' : '64%' },
+            }))),
+          h('div', { className: 'd360-skelPane d360-skelPaneWide' },
+            h('div', { className: 'd360-skelBar', style: { width: '42%' } }),
+            h('div', { className: 'd360-skelBar', style: { width: '92%' } }),
+            h('div', { className: 'd360-skelBar', style: { width: '74%' } }))),
+        h('div', { className: 'd360-loadingText' }, props.label));
+    }
+
+    function ClassificationCard(props) {
+      const item = props.item;
+      const t = props.t;
+      const tax = props.taxonomy;
+      const fallback = props.fallbackKeys || {};
+      const classification = classificationOf(item);
+      const roleLabel = axisLabelOf(tax, item, 'role', t);
+      const layerLabel = axisLabelOf(tax, item, 'layer', t);
+      const kindLabel = axisLabelOf(tax, item, 'kind', t, fallback.kind);
+      const scopeLabel = axisLabelOf(tax, item, 'scope', t, fallback.scope);
+      const states = stateEntriesOf(item, tax, props.pendingFallbackLabel || null);
+      const roleEntry = axisEntryOf(item, 'role');
+      const evidence = roleEntry && Array.isArray(roleEntry.evidence)
+        ? roleEntry.evidence.filter((entry) => typeof entry === 'string' && entry)
+        : [];
+      const confidenceRaw = roleEntry && roleEntry.confidence != null
+        ? roleEntry.confidence
+        : (classification && classification.confidence);
+      const confidence = confidenceRaw != null && Number.isFinite(Number(confidenceRaw))
+        ? Number(confidenceRaw)
+        : null;
+      const roleId = axisIdOf(item, 'role');
+      const summary = classificationSummaryOf(item);
+
+      if (!classification && !roleLabel && !kindLabel && !scopeLabel) {
+        return h('div', { className: 'd360-classEmpty' }, t('classificationEmpty'));
+      }
+
+      const valueNode = (label) => h('span', { className: 'd360-classValue' }, label || '—');
+      const rows = [
+        ['role', t('classificationRole'), valueNode(roleLabel)],
+        ...(layerLabel ? [['layer', t('classificationLayer'), valueNode(layerLabel)]] : []),
+        ['kind', t('classificationKind'), valueNode(kindLabel)],
+        ['scope', t('classificationScope'), valueNode(scopeLabel)],
+        ['state', t('classificationState'), states.length
+          ? h('span', { className: 'd360-classStates' },
+            states.map((entry) => h('span', {
+              className: 'd360-state',
+              key: entry.id,
+              'data-state': entry.id,
+            },
+              h('span', { className: 'd360-stateDot', 'aria-hidden': true }),
+              h('span', { className: 'd360-stateLabel' }, entry.label))))
+          : h('span', { className: 'd360-classValue' }, '—')],
+      ];
+
+      return h('div', { className: 'd360-classCard' },
+        h('div', { className: 'd360-classGrid' },
+          rows.map((row) => h('div', {
+            className: 'd360-classItem',
+            key: row[0],
+            'data-axis': row[0],
+          },
+            h('span', { className: 'd360-classLabel' }, row[1]),
+            row[0] === 'role'
+              ? h('span', {
+                className: 'd360-classValue',
+                title: evidence.length ? t('classificationEvidence', { value: evidence.join('、') }) : undefined,
+              }, roleLabel || '—')
+              : row[2],
+            row[0] === 'role' && confidence != null
+              ? h('span', { className: 'd360-classMeta' },
+                t('classificationConfidence', { value: Math.round(confidence * 100) + '%' }))
+              : null,
+            row[0] === 'role' && roleId && props.onFilterRole
+              ? h('button', {
+                type: 'button',
+                className: 'd360-linkBtn',
+                onClick: () => props.onFilterRole(roleId),
+              }, t('classificationFilterRole'))
+              : null))),
+        summary ? h('p', { className: 'd360-classSummary' }, summary) : null);
+    }
+
     // ============================================================== skills (s360-)
 
     function skillsSevKey(severity) {
@@ -772,6 +1366,8 @@ window.__ModuleLoader__.load({
     }
 
     function skillsTopSeverity(skill) {
+      // `view=list` snapshots carry topSeverity; details carry findings.
+      if (skill && skill.topSeverity) return skill.topSeverity;
       const findings = (skill && skill.findings) || [];
       if (findings.some((f) => f.severity === 'critical')) return 'critical';
       if (findings.some((f) => f.severity === 'major')) return 'major';
@@ -781,6 +1377,9 @@ window.__ModuleLoader__.load({
     }
 
     function skillsHasMajorPlus(skill) {
+      const top = skill && skill.topSeverity;
+      if (top === 'critical' || top === 'major') return true;
+      if (top) return false;
       return ((skill && skill.findings) || []).some(
         (f) => f.severity === 'critical' || f.severity === 'major',
       );
@@ -898,22 +1497,26 @@ window.__ModuleLoader__.load({
       const usage = skill.usage || {};
       const perWeek = usage.perWeek != null ? fmt1(usage.perWeek) : null;
       const verdictLabel = skillsVerdictLabelOf(skill.verdict && skill.verdict.code);
+      const summary = classificationSummaryOf(skill) || clip(skill.description || '', 84);
+      const states = stateEntriesOf(skill, props.taxonomy, skillsEvolutionPending(skill) ? t('evolvePendingBadge') : null);
       return h('button', {
         type: 'button',
         className: 's360-row',
         'data-selected': skill.name === props.selected ? 'true' : 'false',
         onClick: () => props.onSelect(skill.name),
-        title: skill.name,
+        title: skill.path || skill.name,
       },
         h('span', { className: gradeBadgeClass('s360-', skill.score) }, skill.score.grade),
         h('div', { className: 's360-rowMain' },
           h('div', { className: 's360-rowTitleLine' },
             h('span', { className: 's360-rowName' }, skill.name),
-            h('span', { className: 's360-rowScore' }, fmt1(skill.score.total))),
-          h('div', { className: 's360-rowDesc' }, clip(skill.description || '', 84)),
+            h('span', { className: 's360-rowScore' }, fmt1(skill.score.total)),
+            h(DeltaText, { delta: skill.score.delta, className: 'd360-rowDelta' })),
+          summary ? h('div', { className: 's360-rowDesc' }, clip(summary, 84)) : null,
           h('div', { className: 's360-rowMeta' },
-            skill.source ? h(Chip, { prefix: 's360-', title: skill.source }, skill.source) : null,
+            h(ClassificationPills, { item: skill, taxonomy: props.taxonomy, t }),
             verdictLabel ? h(Chip, { prefix: 's360-', tone: skill.verdict.code }, t(verdictLabel)) : null,
+            h(StateBadgeList, { entries: states }),
             skillsEvolutionPending(skill)
               ? h(Chip, { prefix: 's360-', tone: 'evolve', title: t('evolutionTitle') }, t('evolvePendingBadge'))
               : null,
@@ -1158,6 +1761,7 @@ window.__ModuleLoader__.load({
       },
         h('h3', { className: 's360-sectionTitle' },
           t('evolutionTitle'),
+          pending.hasUnclosed ? h(Chip, { prefix: 's360-', tone: 'evolve' }, t('evolvePendingBadge')) : null,
           ev.applicable ? null : h(Chip, { prefix: 's360-', tone: 'na' }, t('skillsNotScored'))),
         ev.applicable ? null : h('div', { className: 's360-muted' }, t('skillsEvolutionNotScored')),
         h('div', { className: 's360-metrics' },
@@ -1271,6 +1875,16 @@ window.__ModuleLoader__.load({
             labeled(t, 'coverageLabel', detail.coverage === 'full' ? t('coverageFull') : t('coveragePartial'))) : null),
 
         h('section', { className: 's360-section' },
+          h('h3', { className: 's360-sectionTitle' }, t('classificationTitle')),
+          h(ClassificationCard, {
+            item: detail,
+            taxonomy: props.taxonomy,
+            t,
+            onFilterRole: props.onFilterRole,
+            pendingFallbackLabel: skillsEvolutionPending(detail) ? t('evolvePendingBadge') : null,
+          })),
+
+        h('section', { className: 's360-section' },
           h('h3', { className: 's360-sectionTitle' }, t('dimensionsTitle')),
           dimensions.map((dim) => h(SkillsDimensionBlock, { dim, t, key: dim.id }))),
 
@@ -1343,6 +1957,7 @@ window.__ModuleLoader__.load({
     }
 
     function agentsTopSeverity(subject) {
+      if (subject && subject.topSeverity) return subject.topSeverity;
       const findings = (subject && subject.findings) || [];
       if (findings.some((f) => f.severity === 'critical')) return 'critical';
       if (findings.some((f) => f.severity === 'major')) return 'major';
@@ -1352,6 +1967,9 @@ window.__ModuleLoader__.load({
     }
 
     function agentsHasMajorPlus(subject) {
+      const top = subject && subject.topSeverity;
+      if (top === 'critical' || top === 'major') return true;
+      if (top) return false;
       return ((subject && subject.findings) || []).some(
         (f) => f.severity === 'critical' || f.severity === 'major',
       );
@@ -1514,13 +2132,14 @@ window.__ModuleLoader__.load({
       const subject = props.subject;
       const t = props.t;
       const sev = agentsTopSeverity(subject);
-      const kindKey = AGENTS_KIND_KEY[subject.kind] || null;
-      const scopeKey = AGENTS_SCOPE_KEY[subject.scope] || null;
       const verdictCode = agentsVerdictCodeOf(subject);
       const verdictKey = agentsVerdictKeyOf(verdictCode);
       const inj = (subject && subject.injection) || {};
       const injected = numberOr(inj.sessionsInjected, 0);
       const pending = agentsEvolutionPending(subject);
+      const summary = classificationSummaryOf(subject)
+        || clip(subject.title || subject.description || subject.path || '', 84);
+      const states = stateEntriesOf(subject, props.taxonomy, pending ? t('evolvePendingBadge') : null);
       return h('button', {
         type: 'button',
         className: 'a360-row',
@@ -1534,12 +2153,18 @@ window.__ModuleLoader__.load({
         h('div', { className: 'a360-rowMain' },
           h('div', { className: 'a360-rowTitleLine' },
             h('span', { className: 'a360-rowName' }, subject.name),
-            kindKey ? h(Chip, { prefix: 'a360-', tone: 'kind-' + subject.kind }, t(kindKey)) : null,
-            h('span', { className: 'a360-rowScore' }, fmt1(agentsTotalOf(subject)))),
-          h('div', { className: 'a360-rowDesc' }, clip(subject.title || subject.description || subject.path || '', 84)),
+            h('span', { className: 'a360-rowScore' }, fmt1(agentsTotalOf(subject))),
+            h(DeltaText, { delta: subject.score && subject.score.delta, className: 'd360-rowDelta' })),
+          summary ? h('div', { className: 'a360-rowDesc' }, clip(summary, 84)) : null,
           h('div', { className: 'a360-rowMeta' },
-            scopeKey ? h(Chip, { prefix: 'a360-', tone: 'scope' }, t(scopeKey)) : null,
+            h(ClassificationPills, {
+              item: subject,
+              taxonomy: props.taxonomy,
+              t,
+              fallbackKeys: { kind: AGENTS_KIND_KEY, scope: AGENTS_SCOPE_KEY },
+            }),
             h(Chip, { prefix: 'a360-', tone: injected > 0 ? 'inj-ok' : 'inj-missing' }, injectionText(subject, t)),
+            h(StateBadgeList, { entries: states }),
             pending ? h(Chip, { prefix: 'a360-', tone: 'evolve', title: t('evolutionTitle') }, t('evolvePendingBadge')) : null,
             verdictKey ? h(Chip, { prefix: 'a360-', tone: verdictCode }, t(verdictKey)) : null,
             sev ? h(Chip, { prefix: 'a360-', tone: 'sev-' + sev }, t(agentsSevKey(sev))) : null)));
@@ -2002,6 +2627,17 @@ window.__ModuleLoader__.load({
             : null),
 
         h('section', { className: 'a360-section' },
+          h('h3', { className: 'a360-sectionTitle' }, t('classificationTitle')),
+          h(ClassificationCard, {
+            item: detail,
+            taxonomy: props.taxonomy,
+            t,
+            onFilterRole: props.onFilterRole,
+            pendingFallbackLabel: agentsEvolutionPending(detail) ? t('evolvePendingBadge') : null,
+            fallbackKeys: { kind: AGENTS_KIND_KEY, scope: AGENTS_SCOPE_KEY },
+          })),
+
+        h('section', { className: 'a360-section' },
           h('h3', { className: 'a360-sectionTitle' }, t('dimensionsTitle')),
           dimensions.slice().sort((a, b) => {
             const ia = AGENTS_DIM_ORDER.indexOf(a.id);
@@ -2056,10 +2692,13 @@ window.__ModuleLoader__.load({
 
       // useState order — MUST stay in sync with test/verify-client.mjs seeds:
       // 0 tab
-      // 1..18 skills surface (18 states)
-      // 19..38 agents surface (20 states)
+      // 1..23 skills surface (23 states)
+      // 24..46 agents surface (23 states)
+      // Requested flags start from the active tab, so a direct mount on the agents
+      // tab never causes a skills scan (and vice versa). Switching tabs flips them.
       const [tab, setTab] = React.useState('skills');
 
+      const [skillsRequested, setSkillsRequested] = React.useState(tab === 'skills');
       const [skillsLoading, setSkillsLoading] = React.useState(true);
       const [skillsPortfolio, setSkillsPortfolio] = React.useState(null);
       const [skillsLoadError, setSkillsLoadError] = React.useState('');
@@ -2070,6 +2709,11 @@ window.__ModuleLoader__.load({
       const [skillsDetailError, setSkillsDetailError] = React.useState('');
       const [skillsDetailVersion, setSkillsDetailVersion] = React.useState(0);
       const [skillsQuery, setSkillsQuery] = React.useState('');
+      const [skillsFiltersOpen, setSkillsFiltersOpen] = React.useState(false);
+      const [skillsRoleFilter, setSkillsRoleFilter] = React.useState('all');
+      const [skillsLayerFilter, setSkillsLayerFilter] = React.useState('all');
+      const [skillsKindFilter, setSkillsKindFilter] = React.useState('all');
+      const [skillsScopeFilter, setSkillsScopeFilter] = React.useState('all');
       const [skillsGradeFilter, setSkillsGradeFilter] = React.useState('all');
       const [skillsVerdictFilter, setSkillsVerdictFilter] = React.useState('all');
       const [skillsSourceFilter, setSkillsSourceFilter] = React.useState('all');
@@ -2078,7 +2722,9 @@ window.__ModuleLoader__.load({
       const [skillsBusy, setSkillsBusy] = React.useState(false);
       const [skillsLastBackupIds, setSkillsLastBackupIds] = React.useState([]);
       const [skillsEvolveEditor, setSkillsEvolveEditor] = React.useState(null);
+      const [skillsEffect, setSkillsEffect] = React.useState(null);
 
+      const [agentsRequested, setAgentsRequested] = React.useState(tab === 'agents');
       const [agentsLoading, setAgentsLoading] = React.useState(true);
       const [agentsPortfolio, setAgentsPortfolio] = React.useState(null);
       const [agentsLoadError, setAgentsLoadError] = React.useState('');
@@ -2089,16 +2735,19 @@ window.__ModuleLoader__.load({
       const [agentsDetailError, setAgentsDetailError] = React.useState('');
       const [agentsDetailVersion, setAgentsDetailVersion] = React.useState(0);
       const [agentsQuery, setAgentsQuery] = React.useState('');
+      const [agentsFiltersOpen, setAgentsFiltersOpen] = React.useState(false);
+      const [agentsRoleFilter, setAgentsRoleFilter] = React.useState('all');
       const [agentsKindFilter, setAgentsKindFilter] = React.useState('all');
+      const [agentsScopeFilter, setAgentsScopeFilter] = React.useState('all');
       const [agentsGradeFilter, setAgentsGradeFilter] = React.useState('all');
       const [agentsVerdictFilter, setAgentsVerdictFilter] = React.useState('all');
-      const [agentsScopeFilter, setAgentsScopeFilter] = React.useState('all');
       const [agentsOnlyProblems, setAgentsOnlyProblems] = React.useState(false);
       const [agentsOnlyEvolution, setAgentsOnlyEvolution] = React.useState(false);
       const [agentsNotice, setAgentsNotice] = React.useState(null);
       const [agentsBusy, setAgentsBusy] = React.useState(false);
       const [agentsLastBackupIds, setAgentsLastBackupIds] = React.useState([]);
       const [agentsEvolveEditor, setAgentsEvolveEditor] = React.useState(null);
+      const [agentsEffect, setAgentsEffect] = React.useState(null);
 
       const skillsForceRefresh = React.useRef(false);
       const agentsForceRefresh = React.useRef(false);
@@ -2109,15 +2758,42 @@ window.__ModuleLoader__.load({
         ? agentsLastBackupIds
         : (agentsLastBackupIds ? [agentsLastBackupIds] : []);
 
-      // ---- skills scan effect
+      // ---- skills scan effect (lazy surface + stale-while-revalidate)
       React.useEffect(() => {
+        if (!skillsRequested) return undefined;
+        // Already painted: only a forced refresh (button / post-write) may re-scan.
+        if (skillsPortfolio && !skillsForceRefresh.current) return undefined;
         let alive = true;
+        const forced = skillsForceRefresh.current;
+        skillsForceRefresh.current = false;
         setSkillsLoading(true);
         setSkillsLoadError('');
-        const suffix = skillsForceRefresh.current ? '?refresh=1' : '';
-        skillsForceRefresh.current = false;
         (async () => {
+          let quick = null;
+          if (!forced) {
+            try {
+              const snapshot = await api(SKILLS_API, '/scan?quick=1');
+              if (snapshot && Array.isArray(snapshot.skills)) {
+                quick = snapshot.stale === false
+                  ? snapshot
+                  : { ...snapshot, stale: true, cachedAt: snapshot.cachedAt || Date.now() };
+              }
+            } catch (_error) {
+              quick = null; // no snapshot yet (404) or a snapshot read failure: normal scan
+            }
+            if (!alive) return;
+            if (quick) {
+              setSkillsPortfolio(quick);
+              setSkillsSelected((previous) => {
+                const skills = quick.skills || [];
+                if (previous && skills.some((s) => s.name === previous)) return previous;
+                return skills.length ? skills[0].name : '';
+              });
+              setSkillsLoading(false);
+            }
+          }
           try {
+            const suffix = forced ? '?refresh=1&view=list' : '?view=list';
             const data = await api(SKILLS_API, '/scan' + suffix);
             if (!alive) return;
             setSkillsPortfolio(data);
@@ -2133,15 +2809,16 @@ window.__ModuleLoader__.load({
           }
         })();
         return () => { alive = false; };
-      }, [skillsRefreshKey]);
+      }, [skillsRefreshKey, skillsRequested]);
 
-      // ---- skills detail effect
+      // ---- skills detail effect (only after the surface was requested)
       React.useEffect(() => {
         if (!skillsSelected) {
           setSkillsDetail(null);
           setSkillsDetailError('');
           return undefined;
         }
+        if (!skillsRequested) return undefined;
         let alive = true;
         setSkillsDetailLoading(true);
         setSkillsDetailError('');
@@ -2159,17 +2836,43 @@ window.__ModuleLoader__.load({
           (error) => { if (alive) setSkillsDetailError(errMessage(error)); },
         ).finally(() => { if (alive) setSkillsDetailLoading(false); });
         return () => { alive = false; };
-      }, [skillsSelected, skillsDetailVersion]);
+      }, [skillsSelected, skillsDetailVersion, skillsRequested]);
 
-      // ---- agents scan effect
+      // ---- agents scan effect (lazy surface + stale-while-revalidate)
       React.useEffect(() => {
+        if (!agentsRequested) return undefined;
+        if (agentsPortfolio && !agentsForceRefresh.current) return undefined;
         let alive = true;
+        const forced = agentsForceRefresh.current;
+        agentsForceRefresh.current = false;
         setAgentsLoading(true);
         setAgentsLoadError('');
-        const suffix = agentsForceRefresh.current ? '?refresh=1' : '';
-        agentsForceRefresh.current = false;
         (async () => {
+          let quick = null;
+          if (!forced) {
+            try {
+              const snapshot = await api(AGENTS_API, '/scan?quick=1');
+              if (snapshot && Array.isArray(snapshot.subjects)) {
+                quick = snapshot.stale === false
+                  ? snapshot
+                  : { ...snapshot, stale: true, cachedAt: snapshot.cachedAt || Date.now() };
+              }
+            } catch (_error) {
+              quick = null;
+            }
+            if (!alive) return;
+            if (quick) {
+              setAgentsPortfolio(quick);
+              setAgentsSelected((previous) => {
+                const subjects = quick.subjects || [];
+                if (previous && subjects.some((s) => s.id === previous)) return previous;
+                return subjects.length ? subjects[0].id : '';
+              });
+              setAgentsLoading(false);
+            }
+          }
           try {
+            const suffix = forced ? '?refresh=1&view=list' : '?view=list';
             const data = await api(AGENTS_API, '/scan' + suffix);
             if (!alive) return;
             setAgentsPortfolio(data);
@@ -2185,15 +2888,16 @@ window.__ModuleLoader__.load({
           }
         })();
         return () => { alive = false; };
-      }, [agentsRefreshKey]);
+      }, [agentsRefreshKey, agentsRequested]);
 
-      // ---- agents detail effect
+      // ---- agents detail effect (only after the surface was requested)
       React.useEffect(() => {
         if (!agentsSelected) {
           setAgentsDetail(null);
           setAgentsDetailError('');
           return undefined;
         }
+        if (!agentsRequested) return undefined;
         let alive = true;
         setAgentsDetailLoading(true);
         setAgentsDetailError('');
@@ -2213,7 +2917,7 @@ window.__ModuleLoader__.load({
           (error) => { if (alive) setAgentsDetailError(errMessage(error)); },
         ).finally(() => { if (alive) setAgentsDetailLoading(false); });
         return () => { alive = false; };
-      }, [agentsSelected, agentsDetailVersion]);
+      }, [agentsSelected, agentsDetailVersion, agentsRequested]);
 
       // ---- toast auto-dismiss (one per surface)
       React.useEffect(() => {
@@ -2229,28 +2933,78 @@ window.__ModuleLoader__.load({
       }, [agentsNotice]);
 
       // ---- skills memos
+      const skillsItems = React.useMemo(
+        () => (skillsPortfolio && Array.isArray(skillsPortfolio.skills) ? skillsPortfolio.skills : []),
+        [skillsPortfolio],
+      );
+
+      const skillsTax = React.useMemo(
+        () => taxonomyIndex(skillsPortfolio && skillsPortfolio.taxonomy),
+        [skillsPortfolio],
+      );
+
+      const skillsCounts = React.useMemo(() => {
+        const totals = (skillsPortfolio && skillsPortfolio.totals) || {};
+        return {
+          role: axisCountsOf(skillsItems, 'role', totals.byRole),
+          layer: axisCountsOf(skillsItems, 'layer', totals.byLayer),
+          kind: axisCountsOf(skillsItems, 'kind', totals.byKind),
+          scope: axisCountsOf(skillsItems, 'scope', totals.byScope),
+          grade: (totals.grades && typeof totals.grades === 'object')
+            ? totals.grades
+            : gradeCountsOf(skillsItems),
+        };
+      }, [skillsItems, skillsPortfolio]);
+
+      const skillsClassLabels = React.useMemo(() => ({
+        role: classificationLabelMapOf(skillsItems, 'role'),
+        layer: classificationLabelMapOf(skillsItems, 'layer'),
+        kind: classificationLabelMapOf(skillsItems, 'kind'),
+        scope: classificationLabelMapOf(skillsItems, 'scope'),
+      }), [skillsItems]);
+
+      const skillsRoleOptions = React.useMemo(
+        () => axisOptionsOf(skillsTax, 'role', skillsCounts.role, null, t, skillsClassLabels.role),
+        [skillsTax, skillsCounts.role, skillsClassLabels.role, t],
+      );
+      const skillsLayerOptions = React.useMemo(
+        () => axisOptionsOf(skillsTax, 'layer', skillsCounts.layer, null, t, skillsClassLabels.layer),
+        [skillsTax, skillsCounts.layer, skillsClassLabels.layer, t],
+      );
+      const skillsKindOptions = React.useMemo(
+        () => axisOptionsOf(skillsTax, 'kind', skillsCounts.kind, null, t, skillsClassLabels.kind),
+        [skillsTax, skillsCounts.kind, skillsClassLabels.kind, t],
+      );
+      const skillsScopeOptions = React.useMemo(
+        () => axisOptionsOf(skillsTax, 'scope', skillsCounts.scope, null, t, skillsClassLabels.scope),
+        [skillsTax, skillsCounts.scope, skillsClassLabels.scope, t],
+      );
+
       const skillsVisible = React.useMemo(() => {
-        const skills = (skillsPortfolio && skillsPortfolio.skills) || [];
         const needle = skillsQuery.trim().toLowerCase();
-        return skills.filter((s) => {
+        return skillsItems.filter((s) => {
+          if (skillsRoleFilter !== 'all' && axisIdOf(s, 'role') !== skillsRoleFilter) return false;
+          if (skillsLayerFilter !== 'all' && axisIdOf(s, 'layer') !== skillsLayerFilter) return false;
+          if (skillsKindFilter !== 'all' && axisIdOf(s, 'kind') !== skillsKindFilter) return false;
+          if (skillsScopeFilter !== 'all' && axisIdOf(s, 'scope') !== skillsScopeFilter) return false;
           if (skillsGradeFilter !== 'all' && gradeLetterOf(s.score) !== skillsGradeFilter) return false;
-          if (skillsVerdictFilter !== 'all' && s.verdict.code !== skillsVerdictFilter) return false;
+          if (skillsVerdictFilter !== 'all' && (s.verdict && s.verdict.code) !== skillsVerdictFilter) return false;
           if (skillsSourceFilter !== 'all' && s.source !== skillsSourceFilter) return false;
           if (skillsOnlyProblems && !skillsHasMajorPlus(s)) return false;
           if (needle) {
-            const hay = [s.name, s.description].join(' ').toLowerCase();
+            const hay = [s.name, s.description, classificationSummaryOf(s)].join(' ').toLowerCase();
             if (!hay.includes(needle)) return false;
           }
           return true;
         });
-      }, [skillsPortfolio, skillsQuery, skillsGradeFilter, skillsVerdictFilter, skillsSourceFilter, skillsOnlyProblems]);
+      }, [skillsItems, skillsQuery, skillsRoleFilter, skillsLayerFilter, skillsKindFilter, skillsScopeFilter,
+        skillsGradeFilter, skillsVerdictFilter, skillsSourceFilter, skillsOnlyProblems]);
 
       const skillsSources = React.useMemo(() => {
-        const skills = (skillsPortfolio && skillsPortfolio.skills) || [];
         const seen = new Set();
-        skills.forEach((s) => { if (s.source) seen.add(s.source); });
+        skillsItems.forEach((s) => { if (s.source) seen.add(s.source); });
         return Array.from(seen).sort();
-      }, [skillsPortfolio]);
+      }, [skillsItems]);
 
       // ---- agents memos
       const agentsSubjects = React.useMemo(
@@ -2258,37 +3012,85 @@ window.__ModuleLoader__.load({
         [agentsPortfolio],
       );
 
+      const agentsTax = React.useMemo(
+        () => taxonomyIndex(agentsPortfolio && agentsPortfolio.taxonomy),
+        [agentsPortfolio],
+      );
+
+      const agentsCounts = React.useMemo(() => {
+        const totals = (agentsPortfolio && agentsPortfolio.totals) || {};
+        return {
+          role: axisCountsOf(agentsSubjects, 'role', totals.byRole),
+          kind: axisCountsOf(agentsSubjects, 'kind', totals.byKind),
+          scope: axisCountsOf(agentsSubjects, 'scope', totals.byScope),
+          grade: (totals.grades && typeof totals.grades === 'object')
+            ? totals.grades
+            : gradeCountsOf(agentsSubjects),
+        };
+      }, [agentsSubjects, agentsPortfolio]);
+
+      const agentsClassLabels = React.useMemo(() => ({
+        role: classificationLabelMapOf(agentsSubjects, 'role'),
+        kind: classificationLabelMapOf(agentsSubjects, 'kind'),
+        scope: classificationLabelMapOf(agentsSubjects, 'scope'),
+      }), [agentsSubjects]);
+
+      const agentsRoleOptions = React.useMemo(
+        () => axisOptionsOf(agentsTax, 'role', agentsCounts.role, null, t, agentsClassLabels.role),
+        [agentsTax, agentsCounts.role, agentsClassLabels.role, t],
+      );
+      const agentsKindOptions = React.useMemo(
+        () => axisOptionsOf(agentsTax, 'kind', agentsCounts.kind, AGENTS_KIND_KEY, t, agentsClassLabels.kind),
+        [agentsTax, agentsCounts.kind, agentsClassLabels.kind, t],
+      );
+      const agentsScopeOptions = React.useMemo(
+        () => axisOptionsOf(agentsTax, 'scope', agentsCounts.scope, AGENTS_SCOPE_KEY, t, agentsClassLabels.scope),
+        [agentsTax, agentsCounts.scope, agentsClassLabels.scope, t],
+      );
+
       const agentsVisible = React.useMemo(() => {
         const needle = agentsQuery.trim().toLowerCase();
         return agentsSubjects.filter((s) => {
-          if (agentsKindFilter !== 'all' && s.kind !== agentsKindFilter) return false;
+          if (agentsRoleFilter !== 'all' && axisIdOf(s, 'role') !== agentsRoleFilter) return false;
+          if (agentsKindFilter !== 'all' && axisIdOf(s, 'kind') !== agentsKindFilter) return false;
+          if (agentsScopeFilter !== 'all' && axisIdOf(s, 'scope') !== agentsScopeFilter) return false;
           if (agentsGradeFilter !== 'all' && gradeLetterOf(s.score) !== agentsGradeFilter) return false;
           if (agentsVerdictFilter !== 'all' && agentsVerdictCodeOf(s) !== agentsVerdictFilter) return false;
-          if (agentsScopeFilter !== 'all' && s.scope !== agentsScopeFilter) return false;
           if (agentsOnlyProblems && !agentsHasMajorPlus(s)) return false;
           if (agentsOnlyEvolution && !agentsEvolutionPending(s)) return false;
           if (needle) {
-            const hay = [s.id, s.name, s.path, s.title, s.description]
+            const hay = [s.id, s.name, s.path, s.title, s.description, classificationSummaryOf(s)]
               .filter(Boolean).join(' ').toLowerCase();
             if (!hay.includes(needle)) return false;
           }
           return true;
         });
-      }, [agentsSubjects, agentsQuery, agentsKindFilter, agentsGradeFilter, agentsVerdictFilter, agentsScopeFilter, agentsOnlyProblems, agentsOnlyEvolution]);
-
-      const agentsScopes = React.useMemo(() => {
-        const seen = new Set();
-        agentsSubjects.forEach((s) => { if (s.scope) seen.add(s.scope); });
-        return Array.from(seen).sort();
-      }, [agentsSubjects]);
-
-      const agentsKinds = React.useMemo(() => {
-        const seen = new Set();
-        agentsSubjects.forEach((s) => { if (s.kind) seen.add(s.kind); });
-        return ['instruction', 'agent', 'preset'].filter((kind) => seen.has(kind));
-      }, [agentsSubjects]);
+      }, [agentsSubjects, agentsQuery, agentsRoleFilter, agentsKindFilter, agentsScopeFilter,
+        agentsGradeFilter, agentsVerdictFilter, agentsOnlyProblems, agentsOnlyEvolution]);
 
       // ---- skills handlers
+      function skillsNameOf(key) {
+        const found = skillsItems.find((item) => item.name === key || item.id === key);
+        return found ? displayNameOf(found, key) : String(key == null ? '—' : key);
+      }
+
+      function skillsFilterByRole(roleId) {
+        if (!roleId) return;
+        setSkillsRoleFilter(roleId);
+        setSkillsFiltersOpen(true);
+      }
+
+      function skillsClearFilters() {
+        setSkillsRoleFilter('all');
+        setSkillsLayerFilter('all');
+        setSkillsKindFilter('all');
+        setSkillsScopeFilter('all');
+        setSkillsGradeFilter('all');
+        setSkillsVerdictFilter('all');
+        setSkillsSourceFilter('all');
+        setSkillsOnlyProblems(false);
+      }
+
       const skillsRefresh = React.useCallback(() => {
         skillsForceRefresh.current = true;
         setSkillsRefreshKey((value) => value + 1);
@@ -2311,14 +3113,19 @@ window.__ModuleLoader__.load({
           });
           const backupId = res && res.backupId;
           const after = res && res.report && res.report.score ? res.report.score.total : null;
+          const effect = res && res.effect && typeof res.effect === 'object' ? res.effect : null;
+          if (effect) setSkillsEffect(effect);
           setSkillsLastBackupIds(backupId ? [backupId] : []);
+          const itemsText = effect ? effectToastOf(effect, skillsNameOf, t) : '';
           setSkillsNotice({
             kind: 'success',
-            text: t('applyDone', {
-              backupId: backupId || '—',
-              before: fmt1(before),
-              after: fmt1(after),
-            }),
+            text: itemsText
+              ? t('applyToastItems', { backupId: backupId || '—', items: itemsText })
+              : t('applyDone', {
+                backupId: backupId || '—',
+                before: fmt1(before),
+                after: fmt1(after),
+              }),
           });
           await skillsRefreshAfterWrite();
         } catch (error) {
@@ -2406,12 +3213,24 @@ window.__ModuleLoader__.load({
           const res = await api(SKILLS_API, '/apply-all', { method: 'POST', body });
           const backupId = res && res.backupId;
           const appliedCount = res && res.applied ? res.applied.length : 0;
-          setSkillsLastBackupIds(backupId ? [backupId] : []);
+          const effect = res && res.effect && typeof res.effect === 'object' ? res.effect : null;
+          if (effect) setSkillsEffect(effect);
+          const backupIds = Array.isArray(res && res.backupIds) && res.backupIds.length
+            ? res.backupIds
+            : (backupId ? [backupId] : []);
+          setSkillsLastBackupIds(backupIds);
+          const itemsText = effect ? effectToastOf(effect, skillsNameOf, t) : '';
           setSkillsNotice({
             kind: 'success',
-            text: appliedCount
-              ? t('applyAllDone', { count: appliedCount, backupId: backupId || '—' })
-              : t('applyAllNone'),
+            text: itemsText
+              ? t('applyAllToastItems', {
+                count: appliedCount || numberOr(effect && effect.items, 0),
+                backupId: backupId || '—',
+                items: itemsText,
+              })
+              : (appliedCount
+                ? t('applyAllDone', { count: appliedCount, backupId: backupId || '—' })
+                : t('applyAllNone')),
           });
           await skillsRefreshAfterWrite();
         } catch (error) {
@@ -2421,21 +3240,24 @@ window.__ModuleLoader__.load({
         }
       }
 
-      async function skillsUndoLast() {
+      async function skillsUndoLast(idsOverride) {
         const confirmed = window.confirm(t('skillsConfirmUndo'));
         if (!confirmed) return;
+        const ids = Array.isArray(idsOverride) && idsOverride.length > 0 ? idsOverride : skillsUndoIds;
         setSkillsBusy(true);
         try {
           const res = await api(SKILLS_API, '/undo', {
             method: 'POST',
-            body: skillsUndoIds.length > 0 ? { backupIds: skillsUndoIds } : {},
+            body: ids.length > 0 ? { backupIds: ids } : {},
           });
           const doneIds = res && Array.isArray(res.backups) ? res.backups.map((item) => item.backupId) : [];
           const backupId = doneIds.length > 0
             ? (doneIds.length === 1 ? doneIds[0] : t('undoMany', { count: doneIds.length }))
-            : (skillsUndoIds[0] || '—');
+            : (ids[0] || '—');
           setSkillsNotice({ kind: 'success', text: t('undoDone', { backupId }) });
           setSkillsLastBackupIds([]);
+          setSkillsEffect(null);
+          setSkillsPortfolio((previous) => (previous ? { ...previous, lastApply: null } : previous));
           await skillsRefreshAfterWrite();
         } catch (error) {
           setSkillsNotice({ kind: 'error', text: t('opFailed', { message: errMessage(error) }) });
@@ -2465,6 +3287,27 @@ window.__ModuleLoader__.load({
       }
 
       // ---- agents handlers
+      function agentsNameOf(key) {
+        const found = agentsSubjects.find((item) => item.id === key || item.name === key);
+        return found ? displayNameOf(found, key) : String(key == null ? '—' : key);
+      }
+
+      function agentsFilterByRole(roleId) {
+        if (!roleId) return;
+        setAgentsRoleFilter(roleId);
+        setAgentsFiltersOpen(true);
+      }
+
+      function agentsClearFilters() {
+        setAgentsRoleFilter('all');
+        setAgentsKindFilter('all');
+        setAgentsScopeFilter('all');
+        setAgentsGradeFilter('all');
+        setAgentsVerdictFilter('all');
+        setAgentsOnlyProblems(false);
+        setAgentsOnlyEvolution(false);
+      }
+
       const agentsRefresh = React.useCallback(() => {
         agentsForceRefresh.current = true;
         setAgentsRefreshKey((value) => value + 1);
@@ -2487,14 +3330,19 @@ window.__ModuleLoader__.load({
           });
           const backupId = res && res.backupId;
           const after = res && res.report && res.report.score ? res.report.score.total : null;
+          const effect = res && res.effect && typeof res.effect === 'object' ? res.effect : null;
+          if (effect) setAgentsEffect(effect);
           setAgentsLastBackupIds(backupId ? [backupId] : []);
+          const itemsText = effect ? effectToastOf(effect, agentsNameOf, t) : '';
           setAgentsNotice({
             kind: 'success',
-            text: t('applyDone', {
-              backupId: backupId || '—',
-              before: fmt1(before),
-              after: fmt1(after),
-            }),
+            text: itemsText
+              ? t('applyToastItems', { backupId: backupId || '—', items: itemsText })
+              : t('applyDone', {
+                backupId: backupId || '—',
+                before: fmt1(before),
+                after: fmt1(after),
+              }),
           });
           await agentsRefreshAfterWrite();
         } catch (error) {
@@ -2582,12 +3430,24 @@ window.__ModuleLoader__.load({
           const res = await api(AGENTS_API, '/apply-all', { method: 'POST', body });
           const backupId = res && res.backupId;
           const appliedCount = res && res.applied ? res.applied.length : 0;
-          setAgentsLastBackupIds(backupId ? [backupId] : []);
+          const effect = res && res.effect && typeof res.effect === 'object' ? res.effect : null;
+          if (effect) setAgentsEffect(effect);
+          const backupIds = Array.isArray(res && res.backupIds) && res.backupIds.length
+            ? res.backupIds
+            : (backupId ? [backupId] : []);
+          setAgentsLastBackupIds(backupIds);
+          const itemsText = effect ? effectToastOf(effect, agentsNameOf, t) : '';
           setAgentsNotice({
             kind: 'success',
-            text: appliedCount
-              ? t('applyAllDone', { count: appliedCount, backupId: backupId || '—' })
-              : t('applyAllNone'),
+            text: itemsText
+              ? t('applyAllToastItems', {
+                count: appliedCount || numberOr(effect && effect.items, 0),
+                backupId: backupId || '—',
+                items: itemsText,
+              })
+              : (appliedCount
+                ? t('applyAllDone', { count: appliedCount, backupId: backupId || '—' })
+                : t('applyAllNone')),
           });
           await agentsRefreshAfterWrite();
         } catch (error) {
@@ -2597,14 +3457,17 @@ window.__ModuleLoader__.load({
         }
       }
 
-      async function agentsUndoLast() {
+      async function agentsUndoLast(idsOverride) {
         const confirmed = window.confirm(t('agentsConfirmUndo'));
         if (!confirmed) return;
+        const ids = Array.isArray(idsOverride) && idsOverride.length > 0 ? idsOverride : agentsUndoIds;
         setAgentsBusy(true);
         try {
           const res = await api(AGENTS_API, '/undo', {
             method: 'POST',
-            body: agentsUndoIds.length > 0 ? { backupId: agentsUndoIds[0] } : {},
+            body: ids.length > 1
+              ? { backupIds: ids }
+              : (ids.length === 1 ? { backupId: ids[0] } : {}),
           });
           const doneIds = Array.isArray(res && res.backups)
             ? res.backups.map((item) => item.backupId)
@@ -2612,9 +3475,11 @@ window.__ModuleLoader__.load({
           const backupId = (res && res.backupId)
             || (doneIds.length > 0
               ? (doneIds.length === 1 ? doneIds[0] : t('undoMany', { count: doneIds.length }))
-              : (agentsUndoIds[0] || '—'));
+              : (ids[0] || '—'));
           setAgentsNotice({ kind: 'success', text: t('undoDone', { backupId }) });
           setAgentsLastBackupIds([]);
+          setAgentsEffect(null);
+          setAgentsPortfolio((previous) => (previous ? { ...previous, lastApply: null } : previous));
           await agentsRefreshAfterWrite();
         } catch (error) {
           setAgentsNotice({ kind: 'error', text: t('opFailed', { message: errMessage(error) }) });
@@ -2645,10 +3510,27 @@ window.__ModuleLoader__.load({
 
       // ---- render helpers
 
-      const GRADE_LETTER_OPTIONS = [['all', t('filterAll')], ['S', 'S'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'], ['E', 'E']];
       const gradeDistribution = (grades) => ['S', 'A', 'B', 'C', 'D', 'E'].map((g) => g + ' ' + (grades[g] ?? 0)).join(' · ');
+      const gradeOptionsFor = (counts) => ['S', 'A', 'B', 'C', 'D', 'E'].map((letter) => ({
+        id: letter,
+        label: letter,
+        count: counts[letter] || 0,
+      }));
+      const verdictOptionsFor = (includeTrim) => {
+        const options = [
+          { id: 'keep', label: t('verdictKeep') },
+          { id: 'watch', label: t('verdictWatch') },
+          { id: 'merge', label: t('verdictMerge') },
+          { id: 'archive', label: t('verdictArchive') },
+        ];
+        if (includeTrim) options.splice(3, 0, { id: 'trim', label: t('verdictTrim') });
+        return options;
+      };
+      const sourceOptionsFor = (sources) => sources.map((source) => ({ id: source, label: source }));
 
       function renderSkillsTab() {
+        const stale = !!(skillsPortfolio && skillsPortfolio.stale);
+        const backgroundRefresh = skillsLoading && !!skillsPortfolio;
         const toolbar = h('div', { className: 's360-header' },
           h('p', { className: 's360-subtitle' }, t('skillsSubtitle')),
           h('div', { className: 's360-headerActions' },
@@ -2656,10 +3538,12 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 's360-btn s360-btnGhost',
               onClick: skillsRefresh,
-              disabled: skillsLoading || skillsBusy,
+              // A failed background refresh keeps the stale data but must still
+              // allow an explicit retry; only an in-flight one blocks the button.
+              disabled: skillsLoading || skillsBusy || (stale && !skillsLoadError),
               title: t('refresh'),
               'aria-label': t('refresh'),
-            }, skillsLoading ? h(Spinner, { prefix: 's360-' }) : h(RefreshIcon, { size: 14 }), h('span', null, t('refresh'))),
+            }, backgroundRefresh ? h(Spinner, { prefix: 's360-' }) : h(RefreshIcon, { size: 14 }), h('span', null, t('refresh'))),
             h('button', {
               type: 'button',
               className: 's360-btn',
@@ -2683,7 +3567,7 @@ window.__ModuleLoader__.load({
 
         let body;
         if (skillsLoading && !skillsPortfolio) {
-          body = h('div', { className: 's360-center' }, h(Spinner, { prefix: 's360-' }), h('span', null, t('loading')));
+          body = h(LoadingSkeleton, { surface: 'skills', label: t('loading') });
         } else if (skillsLoadError && !skillsPortfolio) {
           body = h('div', { className: 's360-center' },
             h('div', { className: 's360-errorText' }, t('loadFailed', { message: skillsLoadError })),
@@ -2699,56 +3583,103 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 's360-btn s360-btnPrimary', onClick: skillsRefresh }, t('refresh')));
         } else {
           const totals = (skillsPortfolio && skillsPortfolio.totals) || {};
-          const grades = totals.grades || {};
-          const gradesText = gradeDistribution(grades);
+          const gradesText = gradeDistribution(skillsCounts.grade);
+          const effectNow = skillsEffect;
+          const effectLast = !effectNow && skillsPortfolio ? skillsPortfolio.lastApply : null;
 
           const statsBar = h('div', { className: 's360-stats', role: 'group', 'aria-label': t('tabSkills') },
-            h(StatCard, { prefix: 's360-', label: t('statSkills'), value: String(totals.skills ?? 0) }),
+            h(StatCard, { prefix: 's360-', label: t('statSkills'), value: String(totals.skills ?? skillsItems.length) }),
             h(StatCard, { prefix: 's360-', label: t('statAvg'), value: fmt1(totals.avgScore) }),
             h(StatCard, { prefix: 's360-', label: t('statGrades'), value: gradesText }),
             h(StatCard, { prefix: 's360-', label: t('statCatalogTokens'), value: formatTokens(totals.catalogTokens) + ' ' + t('tokensUnit') }),
             h(StatCard, { prefix: 's360-', label: t('statFullTokens'), value: formatTokens(totals.fullLoadTokens) + ' ' + t('tokensUnit') }),
             h(StatCard, { prefix: 's360-', label: t('statZeroUse'), value: String(totals.zeroUse ?? 0) }));
 
-          const filterChips = (options, current, onChange) => options.map((opt) => h('button', {
-            key: opt[0],
-            type: 'button',
-            className: 's360-filter',
-            'data-active': current === opt[0] ? 'true' : 'false',
-            onClick: () => onChange(opt[0]),
-          }, opt[1]));
-
-          const verdictOptions = [['all', t('filterAll')], ['keep', t('verdictKeep')], ['watch', t('verdictWatch')], ['merge', t('verdictMerge')], ['archive', t('verdictArchive')]];
-          const sourceOptions = [['all', t('filterAll')]].concat(skillsSources.map((s) => [s, s]));
-
+          const skillsActiveFilters = [
+            skillsRoleFilter, skillsLayerFilter, skillsKindFilter, skillsScopeFilter,
+            skillsGradeFilter, skillsVerdictFilter, skillsSourceFilter,
+          ].filter((value) => value !== 'all').length + (skillsOnlyProblems ? 1 : 0);
           const listPane = h('aside', { className: 's360-listPane', 'aria-label': t('tabSkills') },
             h('div', { className: 's360-listHead' },
-              h('div', { className: 's360-searchWrap' },
-                h(SearchIcon, { size: 14 }),
-                h('input', {
-                  type: 'search',
-                  className: 's360-input s360-search',
-                  value: skillsQuery,
-                  placeholder: t('skillsSearchPlaceholder'),
-                  'aria-label': t('skillsSearchPlaceholder'),
-                  onChange: (event) => setSkillsQuery(event.target.value),
-                })),
-              h('div', { className: 's360-filters', role: 'group', 'aria-label': t('filterGrade') },
-                h('span', { className: 's360-filterLabel' }, t('filterGrade')),
-                h('div', { className: 's360-filterRow' }, filterChips(GRADE_LETTER_OPTIONS, skillsGradeFilter, setSkillsGradeFilter))),
-              h('div', { className: 's360-filters', role: 'group', 'aria-label': t('filterVerdict') },
-                h('span', { className: 's360-filterLabel' }, t('filterVerdict')),
-                h('div', { className: 's360-filterRow' }, filterChips(verdictOptions, skillsVerdictFilter, setSkillsVerdictFilter))),
-              h('div', { className: 's360-filters', role: 'group', 'aria-label': t('filterSource') },
-                h('span', { className: 's360-filterLabel' }, t('filterSource')),
-                h('div', { className: 's360-filterRow' }, filterChips(sourceOptions, skillsSourceFilter, setSkillsSourceFilter))),
-              h('label', { className: 's360-problemsToggle' },
-                h('input', {
-                  type: 'checkbox',
-                  checked: skillsOnlyProblems,
-                  onChange: (event) => setSkillsOnlyProblems(event.target.checked),
+              h('div', { className: 'd360-filterBar' },
+                h('div', { className: 's360-searchWrap' },
+                  h(SearchIcon, { size: 14 }),
+                  h('input', {
+                    type: 'search',
+                    className: 's360-input s360-search',
+                    value: skillsQuery,
+                    placeholder: t('skillsSearchPlaceholder'),
+                    'aria-label': t('skillsSearchPlaceholder'),
+                    onChange: (event) => setSkillsQuery(event.target.value),
+                  })),
+                h('button', {
+                  type: 'button',
+                  className: 'd360-filterBtn',
+                  'data-open': skillsFiltersOpen ? 'true' : 'false',
+                  'aria-expanded': skillsFiltersOpen ? 'true' : 'false',
+                  'aria-controls': 's360-filter-panel',
+                  title: t('filters'),
+                  onClick: () => setSkillsFiltersOpen((value) => !value),
+                },
+                  h(FilterIcon, { size: 14 }),
+                  h('span', { className: 'd360-filterBtnLabel' }, t('filters')),
+                  skillsActiveFilters > 0
+                    ? h('span', { className: 'd360-filterCount', 'aria-label': String(skillsActiveFilters) }, String(skillsActiveFilters))
+                    : null),
+                skillsActiveFilters > 0
+                  ? h('button', { type: 'button', className: 'd360-clearFilters', onClick: skillsClearFilters }, t('clearFilters'))
+                  : null),
+              h('div', {
+                className: 'd360-filterPanel',
+                id: 's360-filter-panel',
+                hidden: !skillsFiltersOpen,
+                role: 'group',
+                'aria-label': t('filters'),
+              },
+                h('div', { className: 'd360-filterPanelHead' },
+                  h('span', { className: 'd360-filterPanelTitle' }, t('filters')),
+                  h('button', {
+                    type: 'button',
+                    className: 'd360-filterClose',
+                    onClick: () => setSkillsFiltersOpen(false),
+                  }, t('closeFilters'))),
+                h(AxisFilter, {
+                  axis: 'role', title: t('axisRole'), values: skillsRoleOptions,
+                  current: skillsRoleFilter, onSelect: setSkillsRoleFilter, t,
                 }),
-                h('span', null, t('skillsOnlyProblems'))),
+                h(AxisFilter, {
+                  axis: 'layer', title: t('axisLayer'), values: skillsLayerOptions,
+                  current: skillsLayerFilter, onSelect: setSkillsLayerFilter, t,
+                }),
+                h(AxisFilter, {
+                  axis: 'kind', title: t('axisKind'), values: skillsKindOptions,
+                  current: skillsKindFilter, onSelect: setSkillsKindFilter, t,
+                }),
+                h(AxisFilter, {
+                  axis: 'scope', title: t('axisScope'), values: skillsScopeOptions,
+                  current: skillsScopeFilter, onSelect: setSkillsScopeFilter, t,
+                }),
+                h(AxisFilter, {
+                  axis: 'grade', title: t('axisGrade'), values: gradeOptionsFor(skillsCounts.grade),
+                  current: skillsGradeFilter, onSelect: setSkillsGradeFilter, t,
+                }),
+                h(AxisFilter, {
+                  axis: 'verdict', title: t('filterVerdict'), values: verdictOptionsFor(false),
+                  current: skillsVerdictFilter, onSelect: setSkillsVerdictFilter, t,
+                }),
+                sourceOptionsFor(skillsSources).length
+                  ? h(AxisFilter, {
+                    axis: 'source', title: t('filterSource'), values: sourceOptionsFor(skillsSources),
+                    current: skillsSourceFilter, onSelect: setSkillsSourceFilter, t,
+                  })
+                  : null,
+                h('label', { className: 's360-problemsToggle' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: skillsOnlyProblems,
+                    onChange: (event) => setSkillsOnlyProblems(event.target.checked),
+                  }),
+                  h('span', null, t('skillsOnlyProblems')))),
               h('div', { className: 's360-listMeta' }, t('skillsCount', { count: skillsVisible.length }))),
             h('div', { className: 's360-list' },
               skillsVisible.length === 0
@@ -2756,6 +3687,7 @@ window.__ModuleLoader__.load({
                 : skillsVisible.map((skill) => h(SkillRow, {
                   key: skill.name,
                   skill,
+                  taxonomy: skillsTax,
                   t,
                   selected: skillsSelected,
                   onSelect: skillsJumpTo,
@@ -2778,11 +3710,13 @@ window.__ModuleLoader__.load({
             detailPane = h('section', { className: 's360-detail' },
               h(SkillsDetailView, {
                 detail: currentDetail,
+                taxonomy: skillsTax,
                 t,
                 busy: skillsBusy,
                 onApply: skillsApplyOrEvolve,
                 onApplyAll: skillsApplyAll,
                 onJump: skillsJumpTo,
+                onFilterRole: skillsFilterByRole,
                 evolveEditor: skillsEvolveEditor,
                 onEvolveEdit: skillsOpenEvolveEditor,
                 onEvolveChange: skillsChangeEvolveField,
@@ -2795,7 +3729,24 @@ window.__ModuleLoader__.load({
           }
 
           body = h('div', { className: 's360-content' },
-            skillsLoadError ? h('div', { className: 's360-banner', 'data-kind': 'error' }, t('loadFailed', { message: skillsLoadError })) : null,
+            h(StaleBanner, { portfolio: skillsPortfolio, t, error: skillsLoadError }),
+            effectNow
+              ? h(EffectCard, {
+                effect: effectNow, t, busy: skillsBusy,
+                onUndo: effectBackupIdsOf(effectNow).length
+                  ? () => skillsUndoLast(effectBackupIdsOf(effectNow))
+                  : undefined,
+              })
+              : (effectLast ? h(EffectCard, {
+                effect: effectLast, isLast: true, t, busy: skillsBusy,
+                onUndo: effectBackupIdsOf(effectLast).length
+                  ? () => skillsUndoLast(effectBackupIdsOf(effectLast))
+                  : undefined,
+              }) : null),
+            skillsLoadError && !stale
+              ? h('div', { className: 's360-banner', 'data-kind': 'error' }, t('loadFailed', { message: skillsLoadError }))
+              : null,
+            h(SummaryLine, { kind: 'skills', items: skillsItems, portfolio: skillsPortfolio, t }),
             statsBar,
             h('div', { className: 's360-body' }, listPane, detailPane));
         }
@@ -2804,6 +3755,8 @@ window.__ModuleLoader__.load({
       }
 
       function renderAgentsTab() {
+        const stale = !!(agentsPortfolio && agentsPortfolio.stale);
+        const backgroundRefresh = agentsLoading && !!agentsPortfolio;
         const toolbar = h('div', { className: 'a360-header' },
           h('p', { className: 'a360-subtitle' }, t('agentsSubtitle')),
           h('div', { className: 'a360-headerActions' },
@@ -2813,10 +3766,10 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'a360-btn a360-btnGhost',
               onClick: agentsRefresh,
-              disabled: agentsLoading || agentsBusy,
+              disabled: agentsLoading || agentsBusy || (stale && !agentsLoadError),
               title: t('refresh'),
               'aria-label': t('refresh'),
-            }, agentsLoading ? h(Spinner, { prefix: 'a360-' }) : h(RefreshIcon, { size: 14 }), h('span', null, t('refresh'))),
+            }, backgroundRefresh ? h(Spinner, { prefix: 'a360-' }) : h(RefreshIcon, { size: 14 }), h('span', null, t('refresh'))),
             h('button', {
               type: 'button',
               className: 'a360-btn',
@@ -2841,7 +3794,7 @@ window.__ModuleLoader__.load({
 
         let body;
         if (agentsLoading && !agentsPortfolio) {
-          body = h('div', { className: 'a360-center' }, h(Spinner, { prefix: 'a360-' }), h('span', null, t('loading')));
+          body = h(LoadingSkeleton, { surface: 'agents', label: t('loading') });
         } else if (agentsLoadError && !agentsPortfolio) {
           body = h('div', { className: 'a360-center' },
             h('div', { className: 'a360-errorText' }, t('loadFailed', { message: agentsLoadError })),
@@ -2858,68 +3811,100 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'a360-btn a360-btnPrimary', onClick: agentsRefresh }, t('refresh')));
         } else {
           const totals = (agentsPortfolio && agentsPortfolio.totals) || {};
-          const grades = totals.grades || {};
-          const gradesText = gradeDistribution(grades);
+          const gradesText = gradeDistribution(agentsCounts.grade);
+          const effectNow = agentsEffect;
+          const effectLast = !effectNow && agentsPortfolio ? agentsPortfolio.lastApply : null;
 
           const statsBar = h('div', { className: 'a360-stats', role: 'group', 'aria-label': t('tabAgents') },
-            h(StatCard, { prefix: 'a360-', label: t('statSubjects'), value: String(totals.subjects ?? 0) }),
+            h(StatCard, { prefix: 'a360-', label: t('statSubjects'), value: String(totals.subjects ?? agentsSubjects.length) }),
             h(StatCard, { prefix: 'a360-', label: t('statAvg'), value: fmt1(totals.avgScore) }),
             h(StatCard, { prefix: 'a360-', label: t('statGrades'), value: gradesText }),
             h(StatCard, { prefix: 'a360-', label: t('statResidentTokens'), value: formatTokens(totals.residentTokens) + ' ' + t('tokensUnit') }),
             h(StatCard, { prefix: 'a360-', label: t('statZeroInject'), value: String(totals.zeroInject ?? 0) }),
             h(StatCard, { prefix: 'a360-', label: t('statConflicts'), value: String(totals.conflicts ?? 0) }));
 
-          const filterChips = (options, current, onChange) => options.map((opt) => h('button', {
-            key: opt[0],
-            type: 'button',
-            className: 'a360-filter',
-            'data-active': current === opt[0] ? 'true' : 'false',
-            onClick: () => onChange(opt[0]),
-          }, opt[1]));
-
-          const kindOptions = [['all', t('filterAll')]].concat(agentsKinds.map((kind) => [kind, t(AGENTS_KIND_KEY[kind] || kind)]));
-          const verdictOptions = [['all', t('filterAll')], ['keep', t('verdictKeep')], ['watch', t('verdictWatch')],
-            ['trim', t('verdictTrim')], ['merge', t('verdictMerge')], ['archive', t('verdictArchive')]];
-          const scopeOptions = [['all', t('filterAll')]].concat(agentsScopes.map((scope) => [scope, t(AGENTS_SCOPE_KEY[scope] || scope)]));
-
+          const agentsActiveFilters = [
+            agentsRoleFilter, agentsKindFilter, agentsScopeFilter,
+            agentsGradeFilter, agentsVerdictFilter,
+          ].filter((value) => value !== 'all').length + (agentsOnlyProblems ? 1 : 0) + (agentsOnlyEvolution ? 1 : 0);
           const listPane = h('aside', { className: 'a360-listPane', 'aria-label': t('tabAgents') },
             h('div', { className: 'a360-listHead' },
-              h('div', { className: 'a360-searchWrap' },
-                h(SearchIcon, { size: 14 }),
-                h('input', {
-                  type: 'search',
-                  className: 'a360-input a360-search',
-                  value: agentsQuery,
-                  placeholder: t('agentsSearchPlaceholder'),
-                  'aria-label': t('agentsSearchPlaceholder'),
-                  onChange: (event) => setAgentsQuery(event.target.value),
-                })),
-              h('div', { className: 'a360-filters', role: 'group', 'aria-label': t('filterKind') },
-                h('span', { className: 'a360-filterLabel' }, t('filterKind')),
-                h('div', { className: 'a360-filterRow' }, filterChips(kindOptions, agentsKindFilter, setAgentsKindFilter))),
-              h('div', { className: 'a360-filters', role: 'group', 'aria-label': t('filterGrade') },
-                h('span', { className: 'a360-filterLabel' }, t('filterGrade')),
-                h('div', { className: 'a360-filterRow' }, filterChips(GRADE_LETTER_OPTIONS, agentsGradeFilter, setAgentsGradeFilter))),
-              h('div', { className: 'a360-filters', role: 'group', 'aria-label': t('filterVerdict') },
-                h('span', { className: 'a360-filterLabel' }, t('filterVerdict')),
-                h('div', { className: 'a360-filterRow' }, filterChips(verdictOptions, agentsVerdictFilter, setAgentsVerdictFilter))),
-              h('div', { className: 'a360-filters', role: 'group', 'aria-label': t('filterScope') },
-                h('span', { className: 'a360-filterLabel' }, t('filterScope')),
-                h('div', { className: 'a360-filterRow' }, filterChips(scopeOptions, agentsScopeFilter, setAgentsScopeFilter))),
-              h('label', { className: 'a360-problemsToggle' },
-                h('input', {
-                  type: 'checkbox',
-                  checked: agentsOnlyProblems,
-                  onChange: (event) => setAgentsOnlyProblems(event.target.checked),
+              h('div', { className: 'd360-filterBar' },
+                h('div', { className: 'a360-searchWrap' },
+                  h(SearchIcon, { size: 14 }),
+                  h('input', {
+                    type: 'search',
+                    className: 'a360-input a360-search',
+                    value: agentsQuery,
+                    placeholder: t('agentsSearchPlaceholder'),
+                    'aria-label': t('agentsSearchPlaceholder'),
+                    onChange: (event) => setAgentsQuery(event.target.value),
+                  })),
+                h('button', {
+                  type: 'button',
+                  className: 'd360-filterBtn',
+                  'data-open': agentsFiltersOpen ? 'true' : 'false',
+                  'aria-expanded': agentsFiltersOpen ? 'true' : 'false',
+                  'aria-controls': 'a360-filter-panel',
+                  title: t('filters'),
+                  onClick: () => setAgentsFiltersOpen((value) => !value),
+                },
+                  h(FilterIcon, { size: 14 }),
+                  h('span', { className: 'd360-filterBtnLabel' }, t('filters')),
+                  agentsActiveFilters > 0
+                    ? h('span', { className: 'd360-filterCount', 'aria-label': String(agentsActiveFilters) }, String(agentsActiveFilters))
+                    : null),
+                agentsActiveFilters > 0
+                  ? h('button', { type: 'button', className: 'd360-clearFilters', onClick: agentsClearFilters }, t('clearFilters'))
+                  : null),
+              h('div', {
+                className: 'd360-filterPanel',
+                id: 'a360-filter-panel',
+                hidden: !agentsFiltersOpen,
+                role: 'group',
+                'aria-label': t('filters'),
+              },
+                h('div', { className: 'd360-filterPanelHead' },
+                  h('span', { className: 'd360-filterPanelTitle' }, t('filters')),
+                  h('button', {
+                    type: 'button',
+                    className: 'd360-filterClose',
+                    onClick: () => setAgentsFiltersOpen(false),
+                  }, t('closeFilters'))),
+                h(AxisFilter, {
+                  axis: 'role', title: t('axisRole'), values: agentsRoleOptions,
+                  current: agentsRoleFilter, onSelect: setAgentsRoleFilter, t,
                 }),
-                h('span', null, t('agentsOnlyProblems'))),
-              h('label', { className: 'a360-problemsToggle' },
-                h('input', {
-                  type: 'checkbox',
-                  checked: agentsOnlyEvolution,
-                  onChange: (event) => setAgentsOnlyEvolution(event.target.checked),
+                h(AxisFilter, {
+                  axis: 'kind', title: t('axisKind'), values: agentsKindOptions,
+                  current: agentsKindFilter, onSelect: setAgentsKindFilter, t,
                 }),
-                h('span', null, t('onlyEvolution'))),
+                h(AxisFilter, {
+                  axis: 'scope', title: t('axisScope'), values: agentsScopeOptions,
+                  current: agentsScopeFilter, onSelect: setAgentsScopeFilter, t,
+                }),
+                h(AxisFilter, {
+                  axis: 'grade', title: t('axisGrade'), values: gradeOptionsFor(agentsCounts.grade),
+                  current: agentsGradeFilter, onSelect: setAgentsGradeFilter, t,
+                }),
+                h(AxisFilter, {
+                  axis: 'verdict', title: t('filterVerdict'), values: verdictOptionsFor(true),
+                  current: agentsVerdictFilter, onSelect: setAgentsVerdictFilter, t,
+                }),
+                h('label', { className: 'a360-problemsToggle' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: agentsOnlyProblems,
+                    onChange: (event) => setAgentsOnlyProblems(event.target.checked),
+                  }),
+                  h('span', null, t('agentsOnlyProblems'))),
+                h('label', { className: 'a360-problemsToggle' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: agentsOnlyEvolution,
+                    onChange: (event) => setAgentsOnlyEvolution(event.target.checked),
+                  }),
+                  h('span', null, t('onlyEvolution')))),
               h('div', { className: 'a360-listMeta' }, t('agentsCount', { count: agentsVisible.length }))),
             h('div', { className: 'a360-list' },
               agentsVisible.length === 0
@@ -2927,6 +3912,7 @@ window.__ModuleLoader__.load({
                 : agentsVisible.map((subject) => h(SubjectRow, {
                   key: subject.id,
                   subject,
+                  taxonomy: agentsTax,
                   t,
                   selected: agentsSelected,
                   onSelect: agentsJumpTo,
@@ -2950,11 +3936,13 @@ window.__ModuleLoader__.load({
               h(AgentsDetailView, {
                 detail: currentDetail,
                 conflicts: agentsConflictsFor(agentsPortfolio, currentDetail.id),
+                taxonomy: agentsTax,
                 t,
                 busy: agentsBusy,
                 onApply: agentsApplyOrEvolve,
                 onApplyAll: agentsApplyAll,
                 onJump: agentsJumpTo,
+                onFilterRole: agentsFilterByRole,
                 evolveEditor: agentsEvolveEditor,
                 onEvolveEdit: agentsOpenEvolveEditor,
                 onEvolveChange: agentsChangeEvolveField,
@@ -2967,10 +3955,24 @@ window.__ModuleLoader__.load({
           }
 
           body = h('div', { className: 'a360-content' },
-            agentsLoadError
-              ? h('div', { className: 'a360-banner', 'data-kind': 'error' },
-                t('loadFailed', { message: agentsLoadError }))
+            h(StaleBanner, { portfolio: agentsPortfolio, t, error: agentsLoadError }),
+            effectNow
+              ? h(EffectCard, {
+                effect: effectNow, t, busy: agentsBusy,
+                onUndo: effectBackupIdsOf(effectNow).length
+                  ? () => agentsUndoLast(effectBackupIdsOf(effectNow))
+                  : undefined,
+              })
+              : (effectLast ? h(EffectCard, {
+                effect: effectLast, isLast: true, t, busy: agentsBusy,
+                onUndo: effectBackupIdsOf(effectLast).length
+                  ? () => agentsUndoLast(effectBackupIdsOf(effectLast))
+                  : undefined,
+              }) : null),
+            agentsLoadError && !stale
+              ? h('div', { className: 'a360-banner', 'data-kind': 'error' }, t('loadFailed', { message: agentsLoadError }))
               : null,
+            h(SummaryLine, { kind: 'agents', items: agentsSubjects, portfolio: agentsPortfolio, t }),
             statsBar,
             h('div', { className: 'a360-body' }, listPane, detailPane));
         }
@@ -2978,8 +3980,8 @@ window.__ModuleLoader__.load({
         return h('div', { className: 'd360-tabBody' }, toolbar, body, h(Notice, { prefix: 'a360-', notice: agentsNotice }));
       }
 
-      const skillsCount = skillsPortfolio && Array.isArray(skillsPortfolio.skills) ? skillsPortfolio.skills.length : 0;
-      const agentsCount = agentsPortfolio && Array.isArray(agentsPortfolio.subjects) ? agentsPortfolio.subjects.length : 0;
+      const skillsCount = skillsItems.length;
+      const agentsCount = agentsSubjects.length;
 
       const header = h('div', { className: 'd360-header' },
         h('div', { className: 'd360-heading' },
@@ -2994,8 +3996,11 @@ window.__ModuleLoader__.load({
           'data-tab': 'skills',
           'data-active': tab === 'skills' ? 'true' : 'false',
           'aria-selected': tab === 'skills' ? 'true' : 'false',
-          onClick: () => setTab('skills'),
-        }, t('tabSkills'), h('span', { className: 'd360-tabBadge' }, String(skillsCount))),
+          onClick: () => {
+            setTab('skills');
+            setSkillsRequested(true);
+          },
+        }, t('tabSkills'), h('span', { className: 'd360-tabBadge' }, skillsPortfolio ? String(skillsCount) : '—')),
         h('button', {
           type: 'button',
           role: 'tab',
@@ -3003,8 +4008,11 @@ window.__ModuleLoader__.load({
           'data-tab': 'agents',
           'data-active': tab === 'agents' ? 'true' : 'false',
           'aria-selected': tab === 'agents' ? 'true' : 'false',
-          onClick: () => setTab('agents'),
-        }, t('tabAgents'), h('span', { className: 'd360-tabBadge' }, String(agentsCount))));
+          onClick: () => {
+            setTab('agents');
+            setAgentsRequested(true);
+          },
+        }, t('tabAgents'), h('span', { className: 'd360-tabBadge' }, agentsPortfolio ? String(agentsCount) : '—')));
 
       const activeTab = tab === 'skills' ? renderSkillsTab() : renderAgentsTab();
 
@@ -3030,6 +4038,81 @@ window.__ModuleLoader__.load({
       '.d360-tabBody{flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden}',
       '@keyframes d360-spin{to{transform:rotate(360deg)}}',
 
+      // shared human-first pieces (summary, axis filters, classification, effect, skeleton)
+      '.d360-summary{display:flex;flex-direction:column;gap:2px;flex:none}',
+      '.d360-summaryLine{margin:0;font-size:13px;font-weight:600;overflow-wrap:anywhere}',
+      '.d360-summaryMeta{margin:0;font-size:11px;color:var(--dsw-alias-label-secondary)}',
+      '.d360-staleBanner{display:flex;align-items:center;gap:8px;flex:none;border:0.5px solid var(--dsw-alias-border-l1);border-left:3px solid var(--dsw-alias-state-business-primary);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:11.5px;padding:6px 10px}',
+      '.d360-filterBar{display:flex;align-items:center;gap:6px;min-width:0}',
+      '.d360-filterBtn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font-size:11px;cursor:pointer;white-space:nowrap}',
+      '.d360-filterBtn:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2)}',
+      '.d360-filterBtn[data-open="true"]{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}',
+      '.d360-filterCount{display:inline-flex;align-items:center;justify-content:center;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base);font-size:9px;line-height:1;font-weight:600}',
+      '.d360-clearFilters{border:0;background:transparent;color:var(--dsw-alias-label-secondary);font-size:10.5px;cursor:pointer;padding:0 2px;white-space:nowrap;text-decoration:underline}',
+      '.d360-clearFilters:hover{color:var(--dsw-alias-label-primary)}',
+      '.d360-filterPanel{display:flex;flex-direction:column;gap:8px;padding:8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);max-height:min(52vh,420px);overflow:auto}',
+      '.d360-filterPanel[hidden]{display:none}',
+      '.d360-filterPanelHead{display:flex;align-items:center;justify-content:space-between;gap:8px}',
+      '.d360-filterPanelTitle{font-size:11px;font-weight:600;color:var(--dsw-alias-label-primary)}',
+      '.d360-filterClose{border:0;background:transparent;color:var(--dsw-alias-label-secondary);font-size:10.5px;cursor:pointer;padding:0}',
+      '.d360-filterPanel .d360-axis{gap:4px}',
+      '.d360-axis{display:flex;flex-direction:column;gap:3px}',
+      '.d360-axisLabel{font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
+      '.d360-axisChips{display:flex;flex-wrap:wrap;gap:4px}',
+      '.d360-chipBtn{display:inline-flex;align-items:center;gap:4px;border:0.5px solid transparent;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:19px;padding:0 7px;cursor:pointer}',
+      '.d360-chipBtn:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
+      '.d360-chipBtn[aria-pressed="true"]{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-weight:600}',
+      '.d360-chipCount{font-size:10px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}',
+      '.d360-more{border:0.5px solid var(--dsw-alias-border-l1);border-radius:7px;padding:0 7px;background:var(--dsw-alias-bg-base)}',
+      '.d360-moreSummary{list-style:none;cursor:pointer;font-size:10.5px;line-height:22px;color:var(--dsw-alias-label-secondary)}',
+      '.d360-moreSummary::-webkit-details-marker{display:none}',
+      '.d360-more .d360-axis{padding:0 0 6px}',
+      '.d360-pills{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}',
+      '.d360-pill{display:inline-flex;align-items:center;border:0.5px solid var(--dsw-alias-border-l1);border-radius:999px;padding:0 6px;font-size:10px;line-height:15px;color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+      '.d360-pill[data-axis="role"]{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}',
+      '.d360-pill[data-axis="layer"]{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);font-weight:600}',
+      '.d360-states{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}',
+      '.d360-state{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+      '.d360-stateDot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2);flex:none}',
+      '.d360-state[data-state="active"] .d360-stateDot{background:var(--dsw-alias-state-success-primary)}',
+      '.d360-state[data-state="idle"] .d360-stateDot{background:var(--dsw-alias-border-l2)}',
+      '.d360-state[data-state="unobserved"] .d360-stateDot{background:var(--dsw-alias-border-l2)}',
+      '.d360-state[data-state="pending"] .d360-stateDot{background:var(--dsw-alias-state-business-primary)}',
+      '.d360-state[data-state="overlap"] .d360-stateDot{background:var(--dsw-alias-state-warn-primary)}',
+      '.d360-state[data-state="critical"] .d360-stateDot{background:var(--dsw-alias-state-error-primary)}',
+      '.d360-state[data-state="stale-ref"] .d360-stateDot{background:var(--dsw-alias-state-warn-primary)}',
+      '.d360-state[data-state="conflict"] .d360-stateDot{background:var(--dsw-alias-state-error-primary)}',
+      '.d360-delta{font-size:10px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+      '.d360-delta[data-delta="up"]{color:var(--dsw-alias-state-success-primary)}',
+      '.d360-delta[data-delta="down"]{color:var(--dsw-alias-state-error-primary)}',
+      '.d360-rowDelta{margin-left:2px}',
+      '.d360-effect{display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex:none;border:0.5px solid var(--dsw-alias-border-l1);border-left:3px solid var(--dsw-alias-brand-primary);border-radius:9px;background:var(--dsw-alias-bg-layer-1);padding:8px 11px}',
+      '.d360-effect[data-source="last"]{border-left-color:var(--dsw-alias-border-l2)}',
+      '.d360-effectBody{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
+      '.d360-effectLine{font-size:12px;font-weight:600;overflow-wrap:anywhere}',
+      '.d360-effectMeta{font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
+      '.d360-effectUndo{display:inline-flex;align-items:center;gap:5px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11px;line-height:22px;padding:0 9px;cursor:pointer;white-space:nowrap}',
+      '.d360-effectUndo:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}',
+      '.d360-effectUndo:disabled{opacity:.5;cursor:default}',
+      '.d360-classCard{display:flex;flex-direction:column;gap:7px}',
+      '.d360-classGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}',
+      '.d360-classItem{display:flex;flex-direction:column;gap:2px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);padding:7px 9px;min-width:0}',
+      '.d360-classLabel{font-size:10px;color:var(--dsw-alias-label-secondary)}',
+      '.d360-classValue{font-size:12px;font-weight:600;overflow-wrap:anywhere}',
+      '.d360-classMeta{font-size:10.5px;color:var(--dsw-alias-label-secondary)}',
+      '.d360-classStates{display:flex;align-items:center;gap:7px;flex-wrap:wrap}',
+      '.d360-classSummary{margin:0;font-size:11.5px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}',
+      '.d360-classEmpty{font-size:11.5px;color:var(--dsw-alias-label-secondary);border:0.5px dashed var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px}',
+      '.d360-linkBtn{border:0;background:transparent;color:var(--dsw-alias-brand-primary);font:inherit;font-size:10.5px;padding:0;cursor:pointer;align-self:flex-start;text-decoration:underline}',
+      '.d360-skeleton{display:flex;flex-direction:column;gap:12px;flex:1;min-height:0}',
+      '.d360-skelStats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;flex:none}',
+      '.d360-skelCard{height:54px;border-radius:10px;background:var(--dsw-alias-bg-layer-2);opacity:.65;animation:d360-shimmer 1.4s ease-in-out infinite}',
+      '.d360-skelBody{display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:12px;flex:1;min-height:0}',
+      '.d360-skelPane{display:flex;flex-direction:column;gap:9px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);padding:14px 12px;min-height:0}',
+      '.d360-skelBar{height:14px;border-radius:6px;background:var(--dsw-alias-bg-layer-2);opacity:.65;animation:d360-shimmer 1.4s ease-in-out infinite}',
+      '.d360-loadingText{font-size:11.5px;color:var(--dsw-alias-label-secondary);text-align:center}',
+      '@keyframes d360-shimmer{0%,100%{opacity:.45}50%{opacity:.85}}',
+
       // skills surface (s360-)
       '.s360-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex:none}',
       '.s360-subtitle{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary)}',
@@ -3049,10 +4132,10 @@ window.__ModuleLoader__.load({
       '.s360-stat{display:flex;flex-direction:column;gap:2px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:9px 12px;min-width:0}',
       '.s360-statValue{font-size:16px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.s360-statLabel{font-size:10.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.s360-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:12px}',
+      '.s360-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:12px}',
       '.s360-listPane{min-height:0;min-width:0;display:flex;flex-direction:column;border:0.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);overflow:hidden}',
       '.s360-listHead{display:flex;flex-direction:column;gap:7px;padding:11px 12px 9px;border-bottom:0.5px solid var(--dsw-alias-border-l1);flex:none}',
-      '.s360-searchWrap{position:relative;display:flex;align-items:center;gap:6px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary)}',
+      '.s360-searchWrap{position:relative;display:flex;flex:1;min-width:0;align-items:center;gap:6px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary)}',
       '.s360-searchWrap:focus-within{border-color:var(--dsw-alias-border-l2)}',
       '.s360-input{width:100%;border:0.5px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;padding:6px 8px;outline:none}',
       '.s360-search{border:0;background:transparent;padding:6px 2px}',
@@ -3234,10 +4317,10 @@ window.__ModuleLoader__.load({
       '.a360-stat{display:flex;flex-direction:column;gap:2px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:9px 12px;min-width:0}',
       '.a360-statValue{font-size:16px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.a360-statLabel{font-size:10.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-      '.a360-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(250px,330px) minmax(0,1fr);gap:12px}',
+      '.a360-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(280px,370px) minmax(0,1fr);gap:12px}',
       '.a360-listPane{min-height:0;min-width:0;display:flex;flex-direction:column;border:0.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1);overflow:hidden}',
       '.a360-listHead{display:flex;flex-direction:column;gap:7px;padding:11px 12px 9px;border-bottom:0.5px solid var(--dsw-alias-border-l1);flex:none}',
-      '.a360-searchWrap{position:relative;display:flex;align-items:center;gap:6px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary)}',
+      '.a360-searchWrap{position:relative;display:flex;flex:1;min-width:0;align-items:center;gap:6px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary)}',
       '.a360-searchWrap:focus-within{border-color:var(--dsw-alias-border-l2)}',
       '.a360-input{width:100%;border:0.5px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;padding:6px 8px;outline:none}',
       '.a360-search{border:0;background:transparent;padding:6px 2px}',
@@ -3422,7 +4505,8 @@ window.__ModuleLoader__.load({
       '.a360-toast[data-kind="success"]{border-color:var(--dsw-alias-state-success-primary)}',
       '.a360-toast[data-kind="error"]{border-color:var(--dsw-alias-state-error-primary)}',
 
-      '@media (max-width: 880px){.s360-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.s360-body{grid-template-columns:minmax(0,1fr)}.s360-listPane{max-height:300px}.a360-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.a360-body{grid-template-columns:minmax(0,1fr)}.a360-listPane{max-height:300px}}',
+      '@media (prefers-reduced-motion: reduce){.s360-spinner,.a360-spinner,.d360-skelCard,.d360-skelBar{animation:none}.d360-skelCard,.d360-skelBar{opacity:.6}}',
+      '@media (max-width: 880px){.s360-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.s360-body{grid-template-columns:minmax(0,1fr)}.s360-listPane{max-height:300px}.a360-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.a360-body{grid-template-columns:minmax(0,1fr)}.a360-listPane{max-height:300px}.d360-skelStats{grid-template-columns:repeat(3,minmax(0,1fr))}.d360-skelBody{grid-template-columns:minmax(0,1fr)}.d360-classGrid{grid-template-columns:minmax(0,1fr)}}',
       '@media (max-width: 620px){.s360-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.s360-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.s360-header{flex-direction:column}.a360-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.a360-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.a360-header{flex-direction:column}}',
     ].join('\n');
 

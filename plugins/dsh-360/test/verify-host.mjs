@@ -375,6 +375,7 @@ plugin.apply(ctx, {
   evolution: true,
   roots: [subjectsRoot],
   maxDepth: 6,
+  warmup: false,
 });
 
 // 1. registration surface -------------------------------------------------
@@ -403,6 +404,14 @@ assert.equal(response.body.data.surfaces[1], 'agents');
 assert.equal(typeof response.body.data.version, 'string');
 console.log('PASS 2 health:', JSON.stringify(response.body.data));
 
+// 2b. quick snapshot is absent before the first scan --------------------
+response = await request('GET', '/api/dsh-360/skills/scan?quick=1');
+if (response.status !== 404) console.error('quick body', JSON.stringify(response.body));
+assert.equal(response.status, 404, 'no snapshot before the first scan');
+response = await request('GET', '/api/dsh-360/agents/scan?quick=1');
+assert.equal(response.status, 404, 'no agents snapshot before the first scan');
+console.log('PASS 2b quick snapshot: 404 before first scan');
+
 // 3. skills scan/detail ---------------------------------------------------
 response = await request('GET', '/api/dsh-360/skills/scan');
 assert.equal(response.status, 200, JSON.stringify(response.body));
@@ -421,6 +430,26 @@ for (const report of skillsPortfolio.skills) {
 }
 const goodReport = skillsPortfolio.skills.find((report) => report.name === 'good');
 assert.ok(goodReport.usage.count >= 5, 'skill-load usage evidence reached good');
+
+response = await request('GET', '/api/dsh-360/skills/scan?quick=1');
+assert.equal(response.status, 200, JSON.stringify(response.body));
+assert.equal(response.body.data.stale, true, 'quick snapshot is marked stale');
+assert.equal(typeof response.body.data.cachedAt, 'number', 'quick snapshot carries cachedAt');
+assert.equal(response.body.data.skills.length, 2, 'quick snapshot carries the list');
+assert.equal(response.body.data.skills[0].findings, undefined, 'quick snapshot omits full findings');
+console.log('PASS 3b quick snapshot: stale + cachedAt + list only');
+
+response = await request('GET', '/api/dsh-360/skills/scan?view=list');
+assert.equal(response.status, 200, JSON.stringify(response.body));
+const listView = response.body.data;
+assert.equal(listView.stale, undefined, 'fresh list view is not marked stale');
+assert.equal(listView.skills.length, 2, 'list view carries every row');
+assert.equal(listView.skills[0].findings, undefined, 'list view omits findings (detail route owns them)');
+assert.ok(listView.skills[0].topSeverity === undefined || typeof listView.skills[0].topSeverity === 'string');
+assert.ok(listView.taxonomy, 'list view keeps the taxonomy for labels');
+assert.ok(JSON.stringify(listView).length < JSON.stringify(skillsPortfolio).length,
+  'list view is smaller than the full portfolio');
+console.log('PASS 3c list view: fresh, no bodies/findings, taxonomy kept');
 
 response = await request('GET', '/api/dsh-360/skills/skill?name=good');
 assert.equal(response.status, 200, JSON.stringify(response.body));
@@ -453,6 +482,11 @@ assert.equal(agentReport.kind, 'agent');
 assert.ok(instrReport.injection.sessionsInjected >= 2, 'injection evidence reached the instruction subject');
 assert.ok(agentReport.usage.subagentRuns >= 1, 'delegation evidence reached the agent subject');
 
+response = await request('GET', '/api/dsh-360/agents/scan?quick=1');
+assert.equal(response.status, 200, JSON.stringify(response.body));
+assert.equal(response.body.data.stale, true);
+assert.ok(response.body.data.subjects.length >= 2, 'agents quick snapshot carries subjects');
+
 response = await request('GET', '/api/dsh-360/agents/subject?id=' + encodeURIComponent(instrReport.id));
 assert.equal(response.status, 200, JSON.stringify(response.body));
 assert.ok(response.body.data.body.includes('项目说明书'), 'subject body returned');
@@ -475,6 +509,10 @@ assert.ok(Array.isArray(bothScan.surfaces.agents.subjects), 'agents summary in b
 const skillsScan = await scanTool.execute({ surface: 'skills' });
 assert.deepEqual(Object.keys(skillsScan.surfaces), ['skills']);
 assert.equal(skillsScan.surfaces.skills.skills.length, 2);
+assert.ok(['meta', 'task'].includes(skillsScan.surfaces.skills.skills[0].layer),
+  'skills summary carries the layer id');
+assert.deepEqual(skillsScan.surfaces.skills.taxonomy.axes.layer && Object.keys(skillsScan.surfaces.skills.taxonomy.axes.layer),
+  ['meta', 'task'], 'compact taxonomy maps both layer labels');
 
 const agentsScan = await scanTool.execute({ surface: 'agents' });
 assert.deepEqual(Object.keys(agentsScan.surfaces), ['agents']);
@@ -551,11 +589,47 @@ assert.equal(typeof skillsApplied.beforeTotal, 'number');
 assert.equal(typeof skillsApplied.afterTotal, 'number');
 assert.notEqual(sha256(await readFile(join(skillsRoot, 'bad', 'SKILL.md'))), sha256(badBefore), 'SKILL.md really changed');
 await access(join(skillsBackupRoot, skillsApplied.backupId, 'manifest.json'));
+assert.ok(skillsApplied.effect && typeof skillsApplied.effect.items === 'number', 'apply returns an effect summary');
+assert.equal(skillsApplied.effect.items, 1);
+assert.equal(typeof skillsApplied.effect.scoreBefore, 'number');
+assert.equal(typeof skillsApplied.effect.scoreAfter, 'number');
+assert.equal(typeof skillsApplied.effect.delta, 'number');
+const afterApplyScan = (await request('GET', '/api/dsh-360/skills/scan?refresh=1')).body.data;
+assert.ok(afterApplyScan.lastApply && afterApplyScan.lastApply.items === 1, 'next scan surfaces lastApply effect');
+assert.ok(Array.isArray(skillsApplied.effect.backupIds) && skillsApplied.effect.backupIds.length === 1,
+  'effect carries the backup id needed for a later undo');
+assert.ok(Array.isArray(afterApplyScan.lastApply.backupIds) && afterApplyScan.lastApply.backupIds.length === 1,
+  'lastApply keeps backup provenance across reloads');
+console.log('PASS 6a effect: score', skillsApplied.effect.scoreBefore, '->', skillsApplied.effect.scoreAfter,
+  '(' + skillsApplied.effect.delta + '), tokens saved', skillsApplied.effect.tokensSaved);
+
+// Batch undo pre-validates the whole id list: a 31-id request (above the old
+// 30 cap) with unknown ids must fail with 404 before restoring anything.
+response = await request('POST', '/api/dsh-360/skills/undo', {
+  backupIds: Array.from({ length: 31 }, (_, index) => `missing-${index}`),
+});
+assert.equal(response.status, 404, 'unknown batch ids fail closed');
+assert.ok(!response.body.ok);
+assert.ok(!(await readFile(join(skillsRoot, 'bad', 'SKILL.md'))).equals(badBefore),
+  'failed batch undo restored nothing');
 
 response = await request('POST', '/api/dsh-360/skills/undo', { backupId: skillsApplied.backupId });
 assert.equal(response.status, 200, JSON.stringify(response.body));
 assert.ok((await readFile(join(skillsRoot, 'bad', 'SKILL.md'))).equals(badBefore), 'skills undo restored SKILL.md byte-for-byte');
 console.log('PASS 6 skills apply+undo:', badChosen.id, '| backup', skillsApplied.backupId, '| restored byte-for-byte');
+
+// 6b. optimize(dryRun=false) returns and persists one aggregated effect -----
+const optimized = await optimizeTool.execute({ surface: 'skills', names: ['bad'], dryRun: false, safeOnly: true });
+assert.ok(optimized.effect && optimized.effect.items >= 1, 'optimize returns an effect');
+assert.ok(Array.isArray(optimized.effect.backupIds) && optimized.effect.backupIds.length >= 1,
+  'optimize effect carries every backup id it created');
+const optimizeLastApply = JSON.parse(await readFile(join(dataDir, 'cache', 'skills-last-apply.json'), 'utf8'));
+assert.equal(optimizeLastApply.items, optimized.effect.items, 'persisted effect matches the response, not the last target');
+assert.deepEqual(optimizeLastApply.backupIds, optimized.effect.backupIds);
+response = await request('POST', '/api/dsh-360/skills/undo', { backupIds: optimized.effect.backupIds });
+assert.equal(response.status, 200, JSON.stringify(response.body));
+assert.ok((await readFile(join(skillsRoot, 'bad', 'SKILL.md'))).equals(badBefore), 'optimize batch is undoable');
+console.log('PASS 6b optimize effect:', optimized.effect.items, 'item(s),', optimized.effect.backupIds.length, 'backup(s)');
 
 // 7. agents apply + undo (byte restore) ----------------------------------
 fresh = (await request('GET', '/api/dsh-360/agents/scan?refresh=1')).body.data;

@@ -16,7 +16,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { createSkillsSurface } from './lib/host-skills.js';
 import { createAgentsSurface } from './lib/host-agents.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.2';
 const HEALTH_PREFIX = '/api/dsh-360/health';
 
 class HarnessError extends Error {
@@ -71,6 +71,10 @@ function normalizeConfig(config) {
     evolution: raw.evolution === false ? false : true,
     roots: normalizeRoots(raw.roots),
     maxDepth: positiveInteger(raw.maxDepth, 6, 16),
+    // Pre-scan in the background so the panel's first open paints the snapshot
+    // immediately instead of paying the cold scan. Tests/probes pass
+    // warmup:false to stay deterministic; users can opt out with `warmup: false`.
+    warmup: raw.warmup !== false,
   };
 }
 
@@ -172,7 +176,7 @@ function requireSingleSurface(value) {
 function createTools(surfaces, reportDir) {
   const scanTool = defineTool(
     'dsh360_scan',
-    'Score the current DeepSeek Harness surface end to end. The "surface" argument selects which side to audit: "skills" (the skill catalog: SKILL.md trigger surface, real usage, overlap, progressive disclosure, actionability, boundary/governance, maintenance hygiene, continuous evolution) or "agents" (resident instruction files AGENTS.md/CLAUDE.md/instructions.md, subagent definitions agents/*.md, and per-profile agent presets). Default "both" scans both. Call it when the user asks to audit, score, inventory, or clean up their skills or 说明书/子代理定义; asks why a skill never triggers or an AGENTS.md never gets injected; complains a description is too long or subjects overlap; or wants to know what to merge/archive. detail="summary" (default) returns compact per-item lists with totals, usage, verdict and the top finding; detail="full" returns whole portfolios with metrics, findings and suggestions.',
+    'Score the current DeepSeek Harness surface end to end. The "surface" argument selects which side to audit: "skills" (the skill catalog: SKILL.md trigger surface, real usage, overlap, progressive disclosure, actionability, boundary/governance, maintenance hygiene, continuous evolution) or "agents" (resident instruction files AGENTS.md/CLAUDE.md/instructions.md, subagent definitions agents/*.md, and per-profile agent presets). Default "both" scans both. Call it when the user asks to audit, score, inventory, or clean up their skills or 说明书/子代理定义; asks why a skill never triggers or an AGENTS.md never gets injected; complains a description is too long or subjects overlap; or wants to know what to merge/archive. detail="summary" (default) returns a compact per-item list (score, grade, verdict, classification, top finding, delta) with totals; detail="full" returns whole portfolios with metrics, findings and suggestions. Every item carries a four-axis `classification` (role / kind / scope / state) plus a one-line summary; `detail="full"`, the report and the panel also expose stable `tags` ids.',
     {
       type: 'object',
       properties: {
@@ -243,7 +247,7 @@ function createTools(surfaces, reportDir) {
 
   const optimizeTool = defineTool(
     'dsh360_optimize',
-    'Plan or apply the safe mechanical fixes a surface suggests. "surface" is required: "skills" (link orphan references, extract oversized sections into references/, trim over-long descriptions, front-load trigger sentences) or "agents" (extract oversized reference sections into agent-notes/, link orphan agent-notes, embed the managed lessons block, and — draft only — rewrite over-long subagent descriptions or add a boundary skeleton). Every write goes to a backup that can be undone. Call it when the user says "optimize/fix/clean up my skills" or "optimize/fix/clean up my 说明书/子代理定义", "apply the suggestions", "make the catalog cheaper", or wants to preview the fixes first (dryRun=true). safeOnly=true (default) applies only content-lossless auto actions; draft actions are skipped unless safeOnly=false. Pass names/ids and/or actionIds to narrow the scope. dryRun defaults to true and returns the plan without writing; pass dryRun=false to apply (after the user confirms).',
+    'Plan or apply the safe mechanical fixes a surface suggests. Applied fixes return an `effect` summary (score before/after, delta, token delta, grade-ups, backupIds for undo). "surface" is required: "skills" (link orphan references, extract oversized sections into references/, trim over-long descriptions, front-load trigger sentences) or "agents" (extract oversized reference sections into agent-notes/, link orphan agent-notes, embed the managed lessons block, and — draft only — rewrite over-long subagent descriptions or add a boundary skeleton). Every write goes to a backup that can be undone. Call it when the user says "optimize/fix/clean up my skills" or "optimize/fix/clean up my 说明书/子代理定义", "apply the suggestions", "make the catalog cheaper", or wants to preview the fixes first (dryRun=true). safeOnly=true (default) applies only content-lossless auto actions; draft actions are skipped unless safeOnly=false. Pass names/ids and/or actionIds to narrow the scope. dryRun defaults to true and returns the plan without writing; pass dryRun=false to apply (after the user confirms).',
     {
       type: 'object',
       properties: {
@@ -433,5 +437,21 @@ export function apply(ctx, config = {}) {
 
   for (const definition of createTools(surfaces, base.reportDir)) {
     ctx.effect(() => ctx.tools.register(definition));
+  }
+
+  if (normalized.warmup) {
+    const timer = setTimeout(() => {
+      (async () => {
+        for (const surface of [skillsSurface, agentsSurface]) {
+          try {
+            await surface.scan({});
+          } catch {
+            // Warm-up is best-effort: a failed scan must never surface at boot.
+          }
+        }
+      })();
+    }, 1500);
+    timer.unref?.();
+    ctx.effect(() => () => clearTimeout(timer));
   }
 }

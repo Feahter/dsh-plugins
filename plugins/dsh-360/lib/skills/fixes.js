@@ -460,10 +460,17 @@ export async function listBackups(backupRoot) {
   return backups;
 }
 
-/** Delete all but the newest `keep` backups. */
-export async function pruneBackups(backupRoot, keep = 20) {
+/**
+ * Delete all but the newest `keep` backups, never touching `protectedIds`
+ * (the backups created by the current batch must stay undoable even when the
+ * batch is larger than the retention window).
+ */
+export async function pruneBackups(backupRoot, keep = 20, protectedIds = []) {
   const backups = await listBackups(backupRoot);
-  const doomed = backups.slice(Math.max(0, keep));
+  const protectedSet = new Set(Array.isArray(protectedIds) ? protectedIds : []);
+  const keepCount = Math.max(0, Number(keep) || 0);
+  const rest = backups.filter((backup) => !protectedSet.has(backup.id));
+  const doomed = rest.slice(Math.max(0, keepCount - (backups.length - rest.length)));
   for (const backup of doomed) {
     await rm(join(backupRoot, backup.id), { recursive: true, force: true });
   }

@@ -36,9 +36,26 @@ export function prefersChinese(text) {
   return cjkRatio(text) >= 0.15;
 }
 
+// Bounded memo tables for the pure text helpers below. The conflict detector,
+// the similarity model and the scorers all re-visit the same descriptions and
+// body slices; caching by input string removes the repeated regex work while
+// keeping the returned values byte-identical.
+const MEMO_MAX_ENTRIES = 500;
+const normalizeCache = new Map();
+const overlapTokenCache = new Map();
+
+function memoPut(cache, key, value) {
+  if (cache.size >= MEMO_MAX_ENTRIES) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
+  return value;
+}
+
 /** Lower-case, collapse whitespace, strip a UTF-8 BOM. */
 export function normalizeText(text) {
-  return String(text || '').replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim();
+  const key = String(text || '');
+  const cached = normalizeCache.get(key);
+  if (cached !== undefined) return cached;
+  return memoPut(normalizeCache, key, key.replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim());
 }
 
 /** Deterministic, filesystem-safe slug. CJK titles fall back to a short hash. */
@@ -146,23 +163,28 @@ export function triggerTerms(description) {
 /**
  * Similarity-oriented token set: quoted phrases, Latin words (≥3 chars, no
  * stopwords), CJK bigrams. Used for overlap detection rather than scoring
- * trigger density.
+ * trigger density. The returned Set is cached, so callers must treat it as
+ * read-only.
  * @param {string} text
  * @returns {Set<string>}
  */
 export function overlapTokens(text) {
-  const normalized = normalizeText(text).toLowerCase();
+  const key = String(text || '');
+  const cached = overlapTokenCache.get(key);
+  if (cached !== undefined) return cached;
+  const normalized = normalizeText(key).toLowerCase();
   const tokens = new Set();
-  if (!normalized) return tokens;
-  for (const match of normalized.matchAll(/["“”'']([^"“”'']{2,40})["“”'']/g)) tokens.add('q:' + match[1].trim());
-  for (const match of normalized.matchAll(/[a-z][a-z0-9_-]{2,}/g)) {
-    if (!LATIN_STOP.has(match[0])) tokens.add(match[0]);
+  if (normalized) {
+    for (const match of normalized.matchAll(/["“”'']([^"“”'']{2,40})["“”'']/g)) tokens.add('q:' + match[1].trim());
+    for (const match of normalized.matchAll(/[a-z][a-z0-9_-]{2,}/g)) {
+      if (!LATIN_STOP.has(match[0])) tokens.add(match[0]);
+    }
+    const cjkRuns = normalized.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g) || [];
+    for (const run of cjkRuns) {
+      for (let i = 0; i < run.length - 1; i += 1) tokens.add('c:' + run.slice(i, i + 2));
+    }
   }
-  const cjkRuns = normalized.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g) || [];
-  for (const run of cjkRuns) {
-    for (let i = 0; i < run.length - 1; i += 1) tokens.add('c:' + run.slice(i, i + 2));
-  }
-  return tokens;
+  return memoPut(overlapTokenCache, key, tokens);
 }
 
 /** Character trigram set, punctuation and whitespace removed. */

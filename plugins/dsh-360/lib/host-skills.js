@@ -22,6 +22,16 @@ import { applyPlan, listBackups, planFixes, pruneBackups, undoBackup } from './s
 import { parseSkillMarkdown } from './frontmatter.js';
 import { renderMarkdown } from './skills/report.js';
 import { collectUsage } from './usage.js';
+import {
+  buildEffect,
+  clearSnapshotLastApply,
+  mergeEffects,
+  readLastApply,
+  readSnapshot,
+  toSnapshot,
+  writeLastApply,
+  writeSnapshot,
+} from './client-cache.js';
 
 const ROUTE_PREFIX = '/api/dsh-360/skills';
 const MAX_BODY_BYTES = 256 * 1024;
@@ -304,6 +314,8 @@ function createSkillsHost(ctx, config, paths) {
   const backupRoot = paths.backupDir;
   const reportDir = paths.reportDir;
   const sessionsDir = join(paths.home, 'sessions');
+  const snapshotPath = join(paths.dataDir, 'cache', 'skills-portfolio.json');
+  const lastApplyPath = join(paths.dataDir, 'cache', 'skills-last-apply.json');
 
   /** key = cwd|windowDays|catalogDescriptionMaxLength -> { at, promise } */
   const cache = new Map();
@@ -495,6 +507,7 @@ function createSkillsHost(ctx, config, paths) {
         windowDays,
         sessionSpanDays: usage.spanDays ?? 0,
         sessionsScanned: usage.sessionsScanned ?? 0,
+        cwd: cwd || undefined,
       },
       mtime,
       evolution,
@@ -551,8 +564,10 @@ function createSkillsHost(ctx, config, paths) {
           }
         : null,
     });
+    portfolio.lastApply = await readLastApply(lastApplyPath);
 
     await saveState(portfolio, reports);
+    await writeSnapshot(snapshotPath, portfolio, logWarn, { eligible: !cwd && windowDays === config.windowDays });
     logInfo(`skills-360: scanned ${reports.length} skills in ${usage.sessionsScanned} sessions`);
     return portfolio;
   }
@@ -719,7 +734,7 @@ function createSkillsHost(ctx, config, paths) {
     return fresh;
   }
 
-  async function applyOne(report, actionIds, portfolio) {
+  async function applyOne(report, actionIds, portfolio, { prune = true } = {}) {
     const { plan, actions } = await buildPlan(report, actionIds);
     if (actions.length === 0) {
       const reasons = (Array.isArray(plan.skipped) ? plan.skipped : [])
@@ -747,13 +762,15 @@ function createSkillsHost(ctx, config, paths) {
       const target = assertSafeRelPath(report.dir, relativePath);
       await ensureInsideReal(report.dir, target);
     }
-    try {
-      await pruneBackups(backupRoot, config.backupsKeep);
-    } catch (error) {
-      logWarn(`skills-360: cannot prune backups: ${(error && error.message) || String(error)}`);
-    }
+    if (prune) await pruneBackupsSafe(result?.backupId ? [result.backupId] : []);
     const beforeTotal = report.score?.total ?? null;
     const afterReport = await reanalyzeAfterWrite(report, portfolio);
+    const backupIds = result?.backupId ? [result.backupId] : [];
+    const effect = buildEffect({
+      surface: 'skills',
+      backupIds,
+      targets: [{ key: report.name, before: report, after: afterReport || report }],
+    });
     invalidate();
     return {
       backupId: result?.backupId ?? null,
@@ -764,10 +781,11 @@ function createSkillsHost(ctx, config, paths) {
       skippedActions: Array.isArray(plan.skipped) ? plan.skipped : [],
       beforeTotal,
       afterTotal: afterReport?.score?.total ?? null,
+      effect,
     };
   }
 
-  async function applyActions(name, actionIds) {
+  async function applyActions(name, actionIds, { prune = true } = {}) {
     return serial(async () => {
       const portfolio = await getPortfolio({});
       const report = findReport(portfolio, name);
@@ -780,7 +798,8 @@ function createSkillsHost(ctx, config, paths) {
           { code: 'invalid-argument', status: 400 },
         );
       }
-      const result = await applyOne(report, actionIds, portfolio);
+      const result = await applyOne(report, actionIds, portfolio, { prune });
+      if (result.effect) await writeLastApply(lastApplyPath, result.effect, logWarn);
       logInfo(`skills-360: applied ${result.actionIds.length} action(s) to ${name} (backup ${result.backupId})`);
       return {
         backupId: result.backupId,
@@ -790,6 +809,7 @@ function createSkillsHost(ctx, config, paths) {
         actionIds: result.actionIds,
         beforeTotal: result.beforeTotal,
         afterTotal: result.afterTotal,
+        effect: result.effect,
       };
     });
   }
@@ -806,6 +826,7 @@ function createSkillsHost(ctx, config, paths) {
       const applied = [];
       const skipped = [];
       const backupIds = [];
+      const effects = [];
       for (const report of targets) {
         const ids = eligibleActionIds(report, safeOnly);
         if (ids.length === 0) {
@@ -816,7 +837,7 @@ function createSkillsHost(ctx, config, paths) {
           continue;
         }
         try {
-          const result = await applyOne(report, ids, portfolio);
+          const result = await applyOne(report, ids, portfolio, { prune: false });
           applied.push({
             name: report.name,
             actionIds: result.actionIds,
@@ -825,6 +846,7 @@ function createSkillsHost(ctx, config, paths) {
             afterTotal: result.afterTotal,
             backupId: result.backupId,
           });
+          if (result.effect) effects.push(result.effect);
           if (result.backupId) backupIds.push(result.backupId);
         } catch (error) {
           skipped.push({
@@ -835,12 +857,20 @@ function createSkillsHost(ctx, config, paths) {
         }
       }
       invalidate();
+      try {
+        await pruneBackups(backupRoot, config.backupsKeep, backupIds);
+      } catch (error) {
+        logWarn(`skills-360: cannot prune backups: ${(error && error.message) || String(error)}`);
+      }
+      const effect = mergeEffects('skills', effects);
+      if (effect) await writeLastApply(lastApplyPath, effect, logWarn);
       logInfo(`skills-360: apply-all touched ${applied.length} skill(s), skipped ${skipped.length}`);
       return {
         applied,
         skipped,
         backupIds,
         backupId: backupIds.length > 0 ? backupIds[backupIds.length - 1] : null,
+        effect,
       };
     });
   }
@@ -850,7 +880,6 @@ function createSkillsHost(ctx, config, paths) {
       const ids = Array.isArray(backupIds) && backupIds.length > 0
         ? backupIds.slice().reverse()
         : [backupId ?? null];
-      const backups = [];
       for (const id of ids) {
         if (id !== null && id !== undefined) {
           if (typeof id !== 'string' || !BACKUP_ID.test(id) || id.includes('..')) {
@@ -860,6 +889,22 @@ function createSkillsHost(ctx, config, paths) {
             });
           }
         }
+      }
+      // Validate the whole batch before restoring anything: a missing id must
+      // not leave a half-undone optimization behind.
+      const requested = ids.filter((id) => id !== null && id !== undefined);
+      if (requested.length > 0) {
+        const existing = new Set((await listBackups(backupRoot)).map((item) => item.id));
+        const missing = requested.filter((id) => !existing.has(id));
+        if (missing.length > 0) {
+          throw new HarnessError(`Unknown backup id(s): ${missing.join(', ')}. Nothing was restored.`, {
+            code: 'not-found',
+            status: 404,
+          });
+        }
+      }
+      const backups = [];
+      for (const id of ids) {
         try {
           backups.push(await undoBackup({ backupRoot, backupId: id ?? undefined }));
         } catch (error) {
@@ -867,6 +912,8 @@ function createSkillsHost(ctx, config, paths) {
         }
       }
       invalidate();
+      await writeLastApply(lastApplyPath, null, logWarn);
+      await clearSnapshotLastApply(snapshotPath, logWarn);
       const restored = backups.flatMap((item) => item.restored || []);
       const removed = backups.flatMap((item) => item.removed || []);
       const last = backups[0] || null;
@@ -878,6 +925,27 @@ function createSkillsHost(ctx, config, paths) {
         removed,
       };
     });
+  }
+
+  async function recordLastApply(effect) {
+    if (!effect) return;
+    await writeLastApply(lastApplyPath, effect, logWarn);
+  }
+
+  async function pruneBackupsSafe(protectedIds = []) {
+    try {
+      // Keep the backups behind the visible "上次优化" card undoable until a
+      // newer optimization replaces it, even when retention is smaller than a
+      // batch.
+      const last = await readLastApply(lastApplyPath);
+      const protectedSet = new Set([
+        ...(Array.isArray(protectedIds) ? protectedIds : []),
+        ...(Array.isArray(last?.backupIds) ? last.backupIds : []),
+      ]);
+      await pruneBackups(backupRoot, config.backupsKeep, [...protectedSet]);
+    } catch (error) {
+      logWarn(`${label}-360: cannot prune backups: ${(error && error.message) || String(error)}`);
+    }
   }
 
   async function writeMarkdown(markdown) {
@@ -990,11 +1058,7 @@ function createSkillsHost(ctx, config, paths) {
         const target = assertSafeRelPath(report.dir, relativePath);
         await ensureInsideReal(report.dir, target);
       }
-      try {
-        await pruneBackups(backupRoot, config.backupsKeep);
-      } catch (error) {
-        logWarn(`skills-360: cannot prune backups: ${(error && error.message) || String(error)}`);
-      }
+      await pruneBackupsSafe(result?.backupId ? [result.backupId] : []);
       const beforeTotal = report.score?.total ?? null;
       const afterReport = await reanalyzeAfterWrite(report, portfolio);
       invalidate();
@@ -1017,6 +1081,10 @@ function createSkillsHost(ctx, config, paths) {
     backupRoot,
     reportDir,
     getPortfolio,
+    getSnapshot: () => readSnapshot(snapshotPath),
+    quickPortfolio: () => readSnapshot(snapshotPath),
+    recordLastApply,
+    pruneBackupsSafe,
     invalidate,
     getSkillDetail,
     applyActions,
@@ -1241,9 +1309,19 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
   try {
     if (effectiveMethod === 'GET') {
       if (route === '/scan') {
+        if (truthyQuery(searchParams, 'quick')) {
+          const snapshot = await host.quickPortfolio();
+          if (!snapshot) {
+            return failPayload(404, 'No snapshot yet: run a full scan first.', 'not-found');
+          }
+          return okPayload(snapshot);
+        }
         const refresh = truthyQuery(searchParams, 'refresh');
         const windowDays = optionalQueryInteger(searchParams, 'windowDays', host.config.windowDays);
         const portfolio = await host.getPortfolio({ windowDays, refresh });
+        // The panel asks for `view=list`: the same list snapshot shape as the
+        // quick path, but fresh. Bodies/findings/suggestions stay on /skill.
+        if (searchParams.get('view') === 'list') return okPayload(toSnapshot(portfolio));
         return okPayload(portfolio);
       }
       if (route === '/skill') {
@@ -1420,8 +1498,8 @@ function optionalBackupIds(value) {
       status: 400,
     });
   }
-  if (value.length > 30) {
-    throw new HarnessError('Argument "backupIds" accepts at most 30 ids.', {
+  if (value.length > 200) {
+    throw new HarnessError('Argument "backupIds" accepts at most 200 ids.', {
       code: 'invalid-argument',
       status: 400,
     });
@@ -1458,6 +1536,17 @@ function optionalToolNames(value, max = 200) {
   return names.length > 0 ? names : null;
 }
 
+/** Compact self-description for agent tool summaries (labels without prose). */
+function compactTaxonomy(taxonomy) {
+  if (!taxonomy || !Array.isArray(taxonomy.axes)) return null;
+  const axes = {};
+  for (const axis of taxonomy.axes) {
+    if (!axis || typeof axis.id !== 'string' || !Array.isArray(axis.values)) continue;
+    axes[axis.id] = Object.fromEntries(axis.values.map((value) => [value.id, value.label]));
+  }
+  return { version: taxonomy.version ?? null, axes };
+}
+
 function summaryPortfolio(portfolio) {
   const skills = Array.isArray(portfolio.skills) ? portfolio.skills : [];
   return {
@@ -1467,34 +1556,27 @@ function summaryPortfolio(portfolio) {
     usageAvailable: portfolio.usageAvailable ?? false,
     totals: portfolio.totals ?? null,
     deltaAvg: portfolio.deltaAvg ?? null,
+    taxonomy: compactTaxonomy(portfolio.taxonomy),
+    trend: portfolio.trend ?? null,
+    lastApply: portfolio.lastApply ?? null,
     skills: skills.map((report) => ({
       name: report.name,
-      total: report.score?.total ?? null,
       score: report.score?.total ?? null,
       grade: report.score?.grade ?? null,
-      confidence: report.score?.confidence ?? null,
+      delta: report.score?.delta ?? null,
       verdict: report.verdict?.code ?? null,
-      verdictCode: report.verdict?.code ?? null,
-      verdictLabel: report.verdict?.label ?? null,
-      usage: {
-        count: report.usage?.count ?? 0,
-        lastUsedAt: report.usage?.lastUsedAt ?? null,
-        perWeek: report.usage?.perWeek ?? null,
-        sufficient: report.usage?.sufficient ?? false,
-      },
+      usageCount: report.usage?.count ?? 0,
+      role: report.classification?.role?.id ?? null,
+      layer: report.classification?.layer?.id ?? null,
+      kind: report.classification?.kind?.id ?? null,
+      scope: report.classification?.scope?.id ?? null,
+      state: Array.isArray(report.classification?.state)
+        ? report.classification.state.map((entry) => (entry && typeof entry === 'object' ? entry.id : entry)).filter(Boolean)
+        : [],
+      summary: report.classification?.summary ?? null,
       topFinding: topFindingOf(report),
-      evolution: {
-        applicable: report.evolution?.applicable ?? false,
-        lessons: report.evolution?.lessons?.count ?? 0,
-        linked: report.evolution?.lessons?.linked ?? false,
-        pendingScore: report.evolution?.pending?.score ?? 0,
-        hasUnclosed: report.evolution?.pending?.hasUnclosed ?? false,
-        lastSignalAt: report.evolution?.pending?.lastSignalAt ?? null,
-        draft: report.evolution?.pending?.draft ?? null,
-      },
     })),
-    overlaps: Array.isArray(portfolio.overlaps) ? portfolio.overlaps : [],
-    quickWins: Array.isArray(portfolio.quickWins) ? portfolio.quickWins : [],
+    quickWins: Array.isArray(portfolio.quickWins) ? portfolio.quickWins.slice(0, 5) : [],
   };
 }
 
@@ -1610,6 +1692,7 @@ export function createSkillsSurface({ ctx, config, paths }) {
 
     const applied = [];
     const backupIds = [];
+    const effects = [];
     for (const report of targets) {
       const ids = requestedIds
         ? requestedIds.filter((id) => suggestionsOf(report).some((item) => item.id === id))
@@ -1619,7 +1702,7 @@ export function createSkillsSurface({ ctx, config, paths }) {
         continue;
       }
       try {
-        const result = await host.applyActions(report.name, ids);
+        const result = await host.applyActions(report.name, ids, { prune: false });
         applied.push({
           name: report.name,
           actionIds: result.actionIds,
@@ -1628,6 +1711,7 @@ export function createSkillsSurface({ ctx, config, paths }) {
           afterTotal: result.afterTotal,
           backupId: result.backupId,
         });
+        if (result.effect) effects.push(result.effect);
         if (result.backupId) backupIds.push(result.backupId);
       } catch (error) {
         skipped.push({
@@ -1637,12 +1721,16 @@ export function createSkillsSurface({ ctx, config, paths }) {
         });
       }
     }
+    await host.pruneBackupsSafe(backupIds);
+    const effect = mergeEffects('skills', effects);
+    if (effect) await host.recordLastApply(effect);
     return lossless({
       dryRun: false,
       applied,
       skipped,
       backupIds,
       backupId: backupIds.length > 0 ? backupIds[backupIds.length - 1] : null,
+      effect,
     });
   }
 
@@ -1711,6 +1799,7 @@ export function createSkillsSurface({ ctx, config, paths }) {
     routes: [{ kind: 'prefix', path: ROUTE_PREFIX, handler: createRouteHandler(ctx, host) }],
     // INTERFACE §4 contract.
     scan: scanSurface,
+    quickPortfolio: () => host.getSnapshot(),
     detail: ({ name } = {}) => host.getSkillDetail(name),
     apply: (name, actionIds) => host.applyActions(name, actionIds),
     applyAll: (opts = {}) => host.applyAll(opts),

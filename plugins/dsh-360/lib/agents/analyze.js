@@ -15,6 +15,7 @@ import { createSimilarityModel } from '../similarity.js';
 import { buildEvolution, parseLessons, LESSONS_BLOCK } from './evolution.js';
 import { subjectId, scopeForInstruction } from './collect.js';
 import { normalizeInjectionPath } from '../usage.js';
+import { classifyAgent, classificationTags, taxonomyCatalog } from '../taxonomy.js';
 
 export const RUBRIC_VERSION = '1.0';
 const DAY_MS = 86_400_000;
@@ -354,6 +355,16 @@ export function analyzeSubject(input) {
     })),
     body,
   };
+  // Classification (TAXONOMY-SPEC §3) is computed last: `kind` mirrors the
+  // subject kind, `scope` derives from the host attribution plus path, and
+  // `state` needs usage / evolution / findings. `input.conflicts` is the
+  // portfolio's conflict pass when the caller already ran it.
+  report.classification = classifyAgent(report, {
+    bodyText: body,
+    conflicts: Array.isArray(input.conflicts) ? input.conflicts : [],
+    cwd: options.cwd,
+    home: options.home,
+  });
   if (raw && kind === 'agent' && !frontmatter) report.rawError = 'frontmatter 解析失败，仅按正文分析';
   return report;
 }
@@ -366,6 +377,11 @@ export function buildPortfolio(reports, meta = {}) {
   const generatedAt = Number(meta.generatedAt) || Date.now();
   const options = meta.options || {};
   const list = reports.map((report) => ({ ...report, score: { ...report.score }, verdict: { ...report.verdict } }));
+  const taxonomy = taxonomyCatalog('agents');
+  // Invariant (TAXONOMY-SPEC §3): every subject carries a classification.
+  for (const report of list) {
+    if (!report.classification) report.classification = classifyAgent(report);
+  }
 
   const byId = new Map(list.map((report) => [report.id, report]));
   for (const report of list) {
@@ -384,7 +400,6 @@ export function buildPortfolio(reports, meta = {}) {
 
   const grades = { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
   const gradeCodes = {};
-  const byScope = {};
   const counts = { instructions: 0, agents: 0, presets: 0 };
   let residentTokens = 0;
   let staleRefsTotal = 0;
@@ -397,7 +412,6 @@ export function buildPortfolio(reports, meta = {}) {
     grades[letter] = (grades[letter] || 0) + 1;
     const code = report.score.grade || 'E-';
     gradeCodes[code] = (gradeCodes[code] || 0) + 1;
-    byScope[report.scope] = (byScope[report.scope] || 0) + 1;
     if (report.kind === 'instruction') {
       counts.instructions += 1;
       residentTokens += Number(report.injection.tokensPerInjection) || 0;
@@ -418,6 +432,30 @@ export function buildPortfolio(reports, meta = {}) {
   }
 
   const conflicts = detectConflicts(list).filter((conflict) => conflict.kind === 'contradiction' || conflict.ratio >= 0.6);
+  // Portfolio-level conflict badges (§2.4): detectConflicts needs the whole
+  // portfolio, so the state cannot be derived in analyzeSubject alone. Clone the
+  // classification so the caller's reports are never mutated.
+  const conflictState = taxonomy.axes
+    .find((axis) => axis.id === 'state')?.values
+    .find((value) => value.id === 'conflict');
+  if (conflictState) {
+    const conflictIds = new Set();
+    for (const conflict of conflicts) {
+      const ids = Array.isArray(conflict.subjects) ? conflict.subjects : [conflict.a, conflict.b];
+      for (const id of ids) if (id) conflictIds.add(id);
+    }
+    for (const report of list) {
+      const classification = report.classification;
+      if (!conflictIds.has(report.id) || !classification) continue;
+      if ((classification.state || []).some((state) => state.id === conflictState.id)) continue;
+      const enriched = {
+        ...classification,
+        state: [...(classification.state || []), { id: conflictState.id, label: conflictState.label }],
+      };
+      enriched.tags = classificationTags(enriched);
+      report.classification = enriched;
+    }
+  }
 
   const pairSeen = new Set();
   const overlapPairs = [];
@@ -473,6 +511,8 @@ export function buildPortfolio(reports, meta = {}) {
     .sort((a, b) => b.pendingScore - a.pendingScore || a.name.localeCompare(b.name))
     .slice(0, 10);
 
+  const deltaAvg = previous ? round1(avgScore - previous.avgScore) : null;
+
   return {
     generatedAt,
     rubricVersion: RUBRIC_VERSION,
@@ -480,6 +520,7 @@ export function buildPortfolio(reports, meta = {}) {
     sessionsScanned: Number(meta.sessionsScanned) || 0,
     usageAvailable: meta.usageAvailable !== false,
     roots: Array.isArray(meta.roots) ? meta.roots : [],
+    taxonomy,
     totals: {
       subjects: list.length,
       instructions: counts.instructions,
@@ -493,16 +534,72 @@ export function buildPortfolio(reports, meta = {}) {
       conflicts: conflicts.length,
       staleRefs: staleRefsTotal,
       secrets: secretsTotal,
-      byScope,
+      byRole: axisCounts(list, taxonomy, 'role'),
+      byKind: axisCounts(list, taxonomy, 'kind'),
+      byScope: axisCounts(list, taxonomy, 'scope'),
     },
     previous,
-    deltaAvg: previous ? round1(avgScore - previous.avgScore) : null,
+    deltaAvg,
+    trend: buildTrend(list, previous, generatedAt, deltaAvg),
     subjects: list,
     conflicts,
     overlaps: overlapPairs,
     quickWins: quickWins.slice(0, 8),
     evolution: evolutionList,
     issues: { zeroInject, staleRefs, secrets: secretsList, conflicts },
+  };
+}
+
+/**
+ * Count one classification axis in catalog order (zero buckets dropped), so
+ * key order stays stable regardless of report order.
+ * @param {object[]} list
+ * @param {object} taxonomy
+ * @param {'role'|'kind'|'scope'} axisId
+ */
+function axisCounts(list, taxonomy, axisId) {
+  const axis = (taxonomy.axes || []).find((entry) => entry.id === axisId);
+  const counts = {};
+  if (!axis) return counts;
+  for (const value of axis.values) counts[value.id] = 0;
+  for (const report of list) {
+    const value = report.classification && report.classification[axisId];
+    const id = value && typeof value === 'object' ? value.id : null;
+    if (id && counts[id] !== undefined) counts[id] += 1;
+  }
+  const out = {};
+  for (const value of axis.values) if (counts[value.id] > 0) out[value.id] = counts[value.id];
+  return out;
+}
+
+/**
+ * Portfolio trend from per-item `score.delta` plus previous meta (§3).
+ *
+ * No comparable previous scan (first scan, or a rubric-version reset) means no
+ * trend: `null` fields, never a fake "0 changed". Items without a numeric
+ * delta (null when no previous total was supplied) are skipped.
+ */
+function buildTrend(list, previous, generatedAt, deltaAvg) {
+  if (!previous) {
+    return { generatedAt, previousGeneratedAt: null, avgDelta: null, itemsChanged: null };
+  }
+  let sum = 0;
+  let counted = 0;
+  let itemsChanged = 0;
+  for (const report of list) {
+    const raw = report.score ? report.score.delta : null;
+    if (raw == null) continue;
+    const delta = Number(raw);
+    if (!Number.isFinite(delta)) continue;
+    sum += delta;
+    counted += 1;
+    if (delta !== 0) itemsChanged += 1;
+  }
+  return {
+    generatedAt,
+    previousGeneratedAt: previous.generatedAt != null ? previous.generatedAt : null,
+    avgDelta: counted > 0 ? round1(sum / counted) : deltaAvg,
+    itemsChanged: counted > 0 ? itemsChanged : 0,
   };
 }
 

@@ -27,6 +27,16 @@ import { applyPlan, listBackups, planFixes, pruneBackups, undoBackup } from './a
 import { LESSONS_REL } from './agents/evolution.js';
 import { renderMarkdown } from './agents/report.js';
 import { collectUsage } from './usage.js';
+import {
+  buildEffect,
+  clearSnapshotLastApply,
+  mergeEffects,
+  readLastApply,
+  readSnapshot,
+  toSnapshot,
+  writeLastApply,
+  writeSnapshot,
+} from './client-cache.js';
 
 const ROUTE_PREFIX = '/api/dsh-360/agents';
 const MAX_BODY_BYTES = 256 * 1024;
@@ -498,6 +508,8 @@ function createAgentsHost(ctx, config, paths) {
   const reportDir = paths.reportDir;
   const sessionsDir = join(paths.home, 'sessions');
   const profilesDir = join(paths.home, 'profiles');
+  const snapshotPath = join(paths.dataDir, 'cache', 'agents-portfolio.json');
+  const lastApplyPath = join(paths.dataDir, 'cache', 'agents-last-apply.json');
 
   /** key = cwd|windowDays -> { at, promise } */
   const cache = new Map();
@@ -850,8 +862,10 @@ function createAgentsHost(ctx, config, paths) {
         catalogDescriptionMaxLength: config.catalogDescriptionMaxLength,
       },
     });
+    portfolio.lastApply = await readLastApply(lastApplyPath);
 
     await saveState(portfolio, reports);
+    await writeSnapshot(snapshotPath, portfolio, logWarn, { eligible: !cwd && windowDays === config.windowDays });
     logInfo(`agents-360: scanned ${reports.length} subjects in ${digest.sessionsScanned} sessions`);
     return portfolio;
   }
@@ -1034,7 +1048,7 @@ function createAgentsHost(ctx, config, paths) {
     return fresh;
   }
 
-  async function applyOne(report, actionIds, portfolio) {
+  async function applyOne(report, actionIds, portfolio, { prune = true } = {}) {
     const { plan, actions } = await buildPlan(report, actionIds);
     if (actions.length === 0) {
       const reasons = (Array.isArray(plan.skipped) ? plan.skipped : [])
@@ -1062,13 +1076,15 @@ function createAgentsHost(ctx, config, paths) {
       const target = assertSafeRelPath(report.dir, relativePath, toPosix(relative(report.dir, report.path)));
       await ensureInsideReal(report.dir, target);
     }
-    try {
-      await pruneBackups(backupRoot, config.backupsKeep);
-    } catch (error) {
-      logWarn(`agents-360: cannot prune backups: ${(error && error.message) || String(error)}`);
-    }
+    if (prune) await pruneBackupsSafe(result?.backupId ? [result.backupId] : []);
     const beforeTotal = report.score?.total ?? null;
     const afterReport = await reanalyzeAfterWrite(report, portfolio);
+    const backupIds = result?.backupId ? [result.backupId] : [];
+    const effect = buildEffect({
+      surface: 'agents',
+      backupIds,
+      targets: [{ key: report.id, before: report, after: afterReport || report }],
+    });
     invalidate();
     return {
       backupId: result?.backupId ?? null,
@@ -1079,10 +1095,11 @@ function createAgentsHost(ctx, config, paths) {
       skippedActions: Array.isArray(plan.skipped) ? plan.skipped : [],
       beforeTotal,
       afterTotal: afterReport?.score?.total ?? null,
+      effect,
     };
   }
 
-  async function applyActions(id, actionIds) {
+  async function applyActions(id, actionIds, { prune = true } = {}) {
     return serial(async () => {
       const portfolio = await getPortfolio({});
       const report = findReport(portfolio, id);
@@ -1095,7 +1112,8 @@ function createAgentsHost(ctx, config, paths) {
           { code: 'invalid-argument', status: 400 },
         );
       }
-      const result = await applyOne(report, actionIds, portfolio);
+      const result = await applyOne(report, actionIds, portfolio, { prune });
+      if (result.effect) await writeLastApply(lastApplyPath, result.effect, logWarn);
       logInfo(`agents-360: applied ${result.actionIds.length} action(s) to ${id} (backup ${result.backupId})`);
       return {
         backupId: result.backupId,
@@ -1105,6 +1123,7 @@ function createAgentsHost(ctx, config, paths) {
         actionIds: result.actionIds,
         beforeTotal: result.beforeTotal,
         afterTotal: result.afterTotal,
+        effect: result.effect,
       };
     });
   }
@@ -1121,6 +1140,7 @@ function createAgentsHost(ctx, config, paths) {
       const applied = [];
       const skipped = [];
       const backupIds = [];
+      const effects = [];
       for (const report of targets) {
         const ids = eligibleActionIds(report, safeOnly);
         if (ids.length === 0) {
@@ -1131,7 +1151,7 @@ function createAgentsHost(ctx, config, paths) {
           continue;
         }
         try {
-          const result = await applyOne(report, ids, portfolio);
+          const result = await applyOne(report, ids, portfolio, { prune: false });
           applied.push({
             id: report.id,
             actionIds: result.actionIds,
@@ -1140,6 +1160,7 @@ function createAgentsHost(ctx, config, paths) {
             afterTotal: result.afterTotal,
             backupId: result.backupId,
           });
+          if (result.effect) effects.push(result.effect);
           if (result.backupId) backupIds.push(result.backupId);
         } catch (error) {
           skipped.push({
@@ -1150,12 +1171,20 @@ function createAgentsHost(ctx, config, paths) {
         }
       }
       invalidate();
+      try {
+        await pruneBackups(backupRoot, config.backupsKeep, backupIds);
+      } catch (error) {
+        logWarn(`agents-360: cannot prune backups: ${(error && error.message) || String(error)}`);
+      }
+      const effect = mergeEffects('agents', effects);
+      if (effect) await writeLastApply(lastApplyPath, effect, logWarn);
       logInfo(`agents-360: apply-all touched ${applied.length} subject(s), skipped ${skipped.length}`);
       return {
         applied,
         skipped,
         backupIds,
         backupId: backupIds.length > 0 ? backupIds[backupIds.length - 1] : null,
+        effect,
       };
     });
   }
@@ -1165,7 +1194,6 @@ function createAgentsHost(ctx, config, paths) {
       const ids = Array.isArray(backupIds) && backupIds.length > 0
         ? backupIds.slice().reverse()
         : [backupId ?? null];
-      const backups = [];
       for (const id of ids) {
         if (id !== null && id !== undefined) {
           if (typeof id !== 'string' || !BACKUP_ID.test(id) || id.includes('..')) {
@@ -1175,6 +1203,20 @@ function createAgentsHost(ctx, config, paths) {
             });
           }
         }
+      }
+      const requested = ids.filter((id) => id !== null && id !== undefined);
+      if (requested.length > 0) {
+        const existing = new Set((await listBackups(backupRoot)).map((item) => item.id));
+        const missing = requested.filter((id) => !existing.has(id));
+        if (missing.length > 0) {
+          throw new HarnessError(`Unknown backup id(s): ${missing.join(', ')}. Nothing was restored.`, {
+            code: 'not-found',
+            status: 404,
+          });
+        }
+      }
+      const backups = [];
+      for (const id of ids) {
         try {
           backups.push(await undoBackup({ backupRoot, backupId: id ?? undefined }));
         } catch (error) {
@@ -1182,6 +1224,8 @@ function createAgentsHost(ctx, config, paths) {
         }
       }
       invalidate();
+      await writeLastApply(lastApplyPath, null, logWarn);
+      await clearSnapshotLastApply(snapshotPath, logWarn);
       const restored = backups.flatMap((item) => item.restored || []);
       const removed = backups.flatMap((item) => item.removed || []);
       const last = backups[0] || null;
@@ -1193,6 +1237,27 @@ function createAgentsHost(ctx, config, paths) {
         removed,
       };
     });
+  }
+
+  async function recordLastApply(effect) {
+    if (!effect) return;
+    await writeLastApply(lastApplyPath, effect, logWarn);
+  }
+
+  async function pruneBackupsSafe(protectedIds = []) {
+    try {
+      // Keep the backups behind the visible "上次优化" card undoable until a
+      // newer optimization replaces it, even when retention is smaller than a
+      // batch.
+      const last = await readLastApply(lastApplyPath);
+      const protectedSet = new Set([
+        ...(Array.isArray(protectedIds) ? protectedIds : []),
+        ...(Array.isArray(last?.backupIds) ? last.backupIds : []),
+      ]);
+      await pruneBackups(backupRoot, config.backupsKeep, [...protectedSet]);
+    } catch (error) {
+      logWarn(`${label}-360: cannot prune backups: ${(error && error.message) || String(error)}`);
+    }
   }
 
   async function writeMarkdown(markdown) {
@@ -1306,11 +1371,7 @@ function createAgentsHost(ctx, config, paths) {
         const target = assertSafeRelPath(report.dir, relativePath, toPosix(relative(report.dir, report.path)));
         await ensureInsideReal(report.dir, target);
       }
-      try {
-        await pruneBackups(backupRoot, config.backupsKeep);
-      } catch (error) {
-        logWarn(`agents-360: cannot prune backups: ${(error && error.message) || String(error)}`);
-      }
+      await pruneBackupsSafe(result?.backupId ? [result.backupId] : []);
       const beforeTotal = report.score?.total ?? null;
       const afterReport = await reanalyzeAfterWrite(report, portfolio);
       invalidate();
@@ -1334,6 +1395,10 @@ function createAgentsHost(ctx, config, paths) {
     reportDir,
     getPortfolio,
     filterPortfolio,
+    getSnapshot: () => readSnapshot(snapshotPath),
+    quickPortfolio: () => readSnapshot(snapshotPath),
+    recordLastApply,
+    pruneBackupsSafe,
     invalidate,
     getSubjectDetail,
     applyActions,
@@ -1569,13 +1634,24 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
   try {
     if (effectiveMethod === 'GET') {
       if (route === '/scan') {
-        const refresh = truthyQuery(searchParams, 'refresh');
-        const windowDays = optionalQueryInteger(searchParams, 'windowDays', host.config.windowDays);
         const kind = searchParams.get('kind') || null;
         if (kind && !SUBJECT_KINDS.has(kind)) {
           return failPayload(400, 'Query parameter "kind" must be one of instruction, agent, preset.', 'invalid-argument');
         }
+        if (truthyQuery(searchParams, 'quick')) {
+          const snapshot = await host.quickPortfolio();
+          if (!snapshot) {
+            return failPayload(404, 'No snapshot yet: run a full scan first.', 'not-found');
+          }
+          return okPayload(host.filterPortfolio(snapshot, kind));
+        }
+        const refresh = truthyQuery(searchParams, 'refresh');
+        const windowDays = optionalQueryInteger(searchParams, 'windowDays', host.config.windowDays);
         const portfolio = await host.getPortfolio({ windowDays, refresh });
+        if (searchParams.get('view') === 'list') {
+          const snapshot = toSnapshot(portfolio);
+          return okPayload(snapshot ? host.filterPortfolio(snapshot, kind) : snapshot);
+        }
         return okPayload(host.filterPortfolio(portfolio, kind));
       }
       if (route === '/subject') {
@@ -1752,8 +1828,8 @@ function optionalBackupIds(value) {
       status: 400,
     });
   }
-  if (value.length > 30) {
-    throw new HarnessError('Argument "backupIds" accepts at most 30 ids.', {
+  if (value.length > 200) {
+    throw new HarnessError('Argument "backupIds" accepts at most 200 ids.', {
       code: 'invalid-argument',
       status: 400,
     });
@@ -1790,6 +1866,17 @@ function optionalToolSubjectIds(value, max = 200) {
   return ids.length > 0 ? ids : null;
 }
 
+/** Compact self-description for agent tool summaries (labels without prose). */
+function compactTaxonomy(taxonomy) {
+  if (!taxonomy || !Array.isArray(taxonomy.axes)) return null;
+  const axes = {};
+  for (const axis of taxonomy.axes) {
+    if (!axis || typeof axis.id !== 'string' || !Array.isArray(axis.values)) continue;
+    axes[axis.id] = Object.fromEntries(axis.values.map((value) => [value.id, value.label]));
+  }
+  return { version: taxonomy.version ?? null, axes };
+}
+
 function summaryPortfolio(portfolio) {
   const subjects = Array.isArray(portfolio.subjects) ? portfolio.subjects : [];
   return {
@@ -1799,39 +1886,27 @@ function summaryPortfolio(portfolio) {
     usageAvailable: portfolio.usageAvailable ?? false,
     totals: portfolio.totals ?? null,
     deltaAvg: portfolio.deltaAvg ?? null,
+    taxonomy: compactTaxonomy(portfolio.taxonomy),
+    trend: portfolio.trend ?? null,
+    lastApply: portfolio.lastApply ?? null,
     subjects: subjects.map((report) => ({
       id: report.id,
       name: report.name,
-      kind: report.kind,
-      total: report.score?.total ?? null,
       score: report.score?.total ?? null,
       grade: report.score?.grade ?? null,
-      confidence: report.score?.confidence ?? null,
+      delta: report.score?.delta ?? null,
       verdict: report.verdict?.code ?? null,
-      verdictCode: report.verdict?.code ?? null,
-      verdictLabel: report.verdict?.label ?? null,
-      usage: {
-        sessions: report.usage?.sessions ?? 0,
-        lastUsedAt: report.usage?.lastUsedAt ?? null,
-        sufficient: report.usage?.sufficient ?? false,
-        sessionsInjected: report.injection?.sessionsInjected ?? null,
-        sessionsSeen: report.injection?.sessionsSeen ?? null,
-        subagentRuns: report.usage?.subagentRuns ?? null,
-        presetSessions: report.usage?.presetSessions ?? null,
-      },
+      usageSessions: report.usage?.sessions ?? 0,
+      role: report.classification?.role?.id ?? null,
+      kind: report.classification?.kind?.id ?? report.kind,
+      scope: report.classification?.scope?.id ?? null,
+      state: Array.isArray(report.classification?.state)
+        ? report.classification.state.map((entry) => (entry && typeof entry === 'object' ? entry.id : entry)).filter(Boolean)
+        : [],
+      summary: report.classification?.summary ?? null,
       topFinding: topFindingOf(report),
-      evolution: {
-        applicable: report.evolution?.applicable ?? false,
-        lessons: report.evolution?.lessons?.count ?? 0,
-        linked: report.evolution?.lessons?.linked ?? false,
-        pendingScore: report.evolution?.pending?.score ?? 0,
-        hasUnclosed: report.evolution?.pending?.hasUnclosed ?? false,
-        lastSignalAt: report.evolution?.pending?.lastSignalAt ?? null,
-        draft: report.evolution?.pending?.draft ?? null,
-      },
     })),
-    conflicts: Array.isArray(portfolio.conflicts) ? portfolio.conflicts : [],
-    quickWins: Array.isArray(portfolio.quickWins) ? portfolio.quickWins : [],
+    quickWins: Array.isArray(portfolio.quickWins) ? portfolio.quickWins.slice(0, 5) : [],
   };
 }
 
@@ -1938,6 +2013,7 @@ export function createAgentsSurface({ ctx, config, paths }) {
 
     const applied = [];
     const backupIds = [];
+    const effects = [];
     for (const report of targets) {
       const targetIds = requestedActionIds
         ? requestedActionIds.filter((id) => suggestionsOf(report).some((item) => item.id === id))
@@ -1947,7 +2023,7 @@ export function createAgentsSurface({ ctx, config, paths }) {
         continue;
       }
       try {
-        const result = await host.applyActions(report.id, targetIds);
+        const result = await host.applyActions(report.id, targetIds, { prune: false });
         applied.push({
           id: report.id,
           actionIds: result.actionIds,
@@ -1956,6 +2032,7 @@ export function createAgentsSurface({ ctx, config, paths }) {
           afterTotal: result.afterTotal,
           backupId: result.backupId,
         });
+        if (result.effect) effects.push(result.effect);
         if (result.backupId) backupIds.push(result.backupId);
       } catch (error) {
         skipped.push({
@@ -1965,12 +2042,16 @@ export function createAgentsSurface({ ctx, config, paths }) {
         });
       }
     }
+    await host.pruneBackupsSafe(backupIds);
+    const effect = mergeEffects('agents', effects);
+    if (effect) await host.recordLastApply(effect);
     return lossless({
       dryRun: false,
       applied,
       skipped,
       backupIds,
       backupId: backupIds.length > 0 ? backupIds[backupIds.length - 1] : null,
+      effect,
     });
   }
 
@@ -2040,6 +2121,7 @@ export function createAgentsSurface({ ctx, config, paths }) {
     routes: [{ kind: 'prefix', path: ROUTE_PREFIX, handler: createRouteHandler(ctx, host) }],
     // INTERFACE §4 contract.
     scan: scanSurface,
+    quickPortfolio: () => host.getSnapshot(),
     detail: ({ id } = {}) => host.getSubjectDetail(id),
     apply: (id, actionIds) => host.applyActions(id, actionIds),
     applyAll: (opts = {}) => host.applyAll(opts),

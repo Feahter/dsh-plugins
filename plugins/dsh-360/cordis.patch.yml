@@ -16,6 +16,7 @@
         windowDays: 30         # 会话证据窗口（天）
         roots: []              # 空 = [cwd, ~/.agents, ~/.deepseek]；core 还会补扫 ~/.claude 与 ~/.dsh/agents
         maxDepth: 6            # 扫盘深度上限
+        warmup: true           # 启动 1.5s 后后台预扫，面板首开直接走快照
         evolution: true        # 挖会话信号并给出经验提案（false 时 evolution 维度不评分）
         backupsKeep: 20        # 备份保留份数
         catalogDescriptionMaxLength: 500  # skills surface 的 catalog 描述上限

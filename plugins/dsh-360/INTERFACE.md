@@ -87,7 +87,7 @@ export async function collectUsage({ sessionsDir, windowDays = 30, now = Date.no
 import { gradeFor, gradeCode, compareGrades, GRADE_CODES, GRADE_LETTERS } from './grade.js';
 ```
 
-`lib/util.js` / `similarity.js` / `frontmatter.js` 直接复用 skills-360 版本（agents 需要的
+`lib/taxonomy.js`（四轴分类，v0.2）与 `lib/client-cache.js`（快照/效果，v0.2）是新增共享模块；`lib/util.js` / `similarity.js` / `frontmatter.js` 直接复用 skills-360 版本（agents 需要的
 `parseSkillMarkdown`、`overlapTokens`、`jaccard` 已覆盖）；如需补 helpers 只允许新增导出。
 
 ## 4. Surface 宿主契约（host 实现）
@@ -122,7 +122,7 @@ export function createAgentsSurface({ ctx, config, paths }) // -> AgentsSurface
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
-| `dsh360_scan` | `{ surface?: 'skills'\|'agents'\|'both'=both, windowDays?, refresh?, cwd?, detail?: 'summary'\|'full', kind? }` | 返回 `{ surfaces: { skills?: Payload, agents?: Payload } }`，每个 Payload 为该 surface 的 totals + subjects（summary 精简）+ conflicts/overlaps/quickWins |
+| `dsh360_scan` | `{ surface?: 'skills'\|'agents'\|'both'=both, windowDays?, refresh?, cwd?, detail?: 'summary'\|'full', kind? }` | 返回 `{ surfaces: { skills?: Payload, agents?: Payload } }`，每个 Payload 为该 surface 的 totals + subjects（summary 精简：role/kind/scope/state + summary，不含 tags/明细）+ quickWins；conflicts/overlaps 的**计数**在 totals，明细只在 detail="full" 与报告中 |
 | `dsh360_report` | `{ surface=both, names?, ids?, detail?, save? }` | 中文 Markdown；两 surface 分节；save=true 落 `<data>/reports/dsh-360-<stamp>.md` |
 | `dsh360_optimize` | `{ surface: 'skills'\|'agents', names?, ids?, actionIds?, safeOnly=true, dryRun=true }` | dryRun 默认 true；写盘前备份 |
 | `dsh360_evolve` | `{ surface, names?, ids?, name?, id?, lesson?: {trigger,rule,evidence?}, dryRun=true }` | dryRun 返回待闭环提案（≤10/面） |
@@ -140,7 +140,7 @@ export function createAgentsSurface({ ctx, config, paths }) // -> AgentsSurface
 
 ## 7. 仓库登记（packaging）
 
-- `package.json`：name `dsh-360`、version `0.1.0`、`dsh.bundle.patch`、`dsh.client`（platform web、immediately、三个 client 依赖）、`files` 覆盖 index.js/client.js/lib 等。
+- `package.json`：name `dsh-360`、version `0.2.0`、`dsh.bundle.patch`、`dsh.client`（platform web、immediately、三个 client 依赖）、`files` 覆盖 index.js/client.js/lib 等。
 - `cordis.patch.yml`：`insert: [{ id: dsh-360, name: 'dsh-360', config: {...} }]`。
 - `README.md`：两个 surface 的能力、18 档等级表、安装、工具/路由、写入边界、局限。
 - `RUBRIC.md`：合并两套 rubric（skills 六维 / agents 六维）+ §1 等级表 + verdict 规则。
@@ -162,3 +162,61 @@ node --check index.js && node --check client.js
 # 侧栏「360 体检」；两个 tab 各自出数
 # 工具：dsh360_scan / dsh360_report / dsh360_optimize / dsh360_evolve
 ```
+
+## 9. v0.2 增量（分类标签 / 秒开 / 效果）
+
+v0.2 不破坏 v1 契约，只增字段与路由参数。
+
+### 9.1 分类（`lib/taxonomy.js` 单一来源）
+
+每个 skill report / agent subject 增加：
+
+```js
+classification: {
+  role:  { id, label, confidence, evidence },   // 10 个职责 id，见 TAXONOMY-SPEC.md
+  layer: { id, label, confidence, evidence },   // skills only：meta | task
+  kind:  { id, label },                         // skills: layered|scripted|routing|prose；agents: instruction|agent|preset
+  scope: { id, label },                         // bundled|global|project|skill|profile|custom
+  state: [{ id, label }],                       // active|idle|unobserved|pending|overlap|critical|stale-ref|conflict
+  summary: string,                              // ≤60 字人话
+  tags: string[]                                // axis:value，稳定 id
+}
+```
+
+portfolio 增加 `taxonomy: { version, axes[] }`、`totals.byRole/byLayer/byKind/byScope`、`trend: { generatedAt, previousGeneratedAt, avgDelta, itemsChanged }`。
+`tags` 与 `classification` 同源；client 不得自行推断标签。
+
+### 9.2 列表视图 `GET /scan?view=list` / 快照 `GET /scan?quick=1`
+
+返回最近一次扫描的**列表快照**（`stale: true`、`cachedAt`），不含 body/findings/suggestions/metrics/dimensions（冲突/重叠最多各 60 条）；详情仍走 `/skill` 或 `/subject`。
+没有快照时返回 404 `not-found`。这是面板首屏路径：先画快照，再请求 `?view=list` 的新鲜列表并替换。
+`view=list` 与快照同形（allow-list，不含 body/findings/suggestions/metrics），但 `stale` 不置位；详情仍走 `/skill` 或 `/subject`。
+不带这两个参数的 `/scan` 保持 v1 的全量 portfolio，供工具与兼容调用方使用。
+
+### 9.3 apply / apply-all / optimize(dryRun=false)
+
+响应增加：
+
+```js
+effect: {
+  surface, at, items,
+  scoreBefore, scoreAfter, delta,
+  tokensBefore, tokensAfter, tokensSaved,   // 可为负：抽取引用后常驻 token 略增时如实显示
+  gradeUps, verdictChanges,
+  targets: [{ key, before, after, delta, gradeBefore, gradeAfter }]
+}
+```
+
+效应同时落到 `<data>/cache/<surface>-last-apply.json`；下一次 `/scan` 在 portfolio 上带 `lastApply`，撤销后清空。
+快照写在 `<data>/cache/<surface>-portfolio.json`，只含列表字段（allow-list，见 `lib/client-cache.js`）。
+
+### 9.4 Client
+
+- 挂载只请求当前 tab 的 surface；另一面在首次切换时请求。
+- 每个 surface 先 `?quick=1` 画快照（带「更新于 X / 正在刷新」），随后全量替换；404 时直接全量。
+- 分类筛选按轴分组（职责/类型/范围/等级），标签文案取自 `taxonomy`，不得写死。
+- 效果卡展示 `effect` 或 `lastApply`：分数 before→after、delta、token 变化（负值显示为「增加」）、可撤销。
+
+### 9.5 性能
+
+`lib/usage.js` 的 `collectUsage` 进程内单飞 + 30s TTL（两 surface 共用一次解析）；冲突检测预计算，见 README「性能」。

@@ -42,6 +42,15 @@ const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CORRECTION_RE = /不对|错了|不是这个|不是这样|我是说|我说的是|应该是|重新做|重来|别这样|搞错|纠正|actually|that's not|not what I|wrong|instead/i;
 const INJECTION_RE = /Instructions from:\s*([^\s\n]+)/g;
 
+// Types the line loop actually interprets. Everything else can only
+// contribute to the `startedAt` fallback (see the fast path in collectUsage).
+const RELEVANT_ENTRY_TYPES = new Set([
+  'session', 'agent-preset/selected', 'request/header', 'subagent/catalog',
+  'system/message', 'user/message', 'developer/message',
+  'tool/call', 'tool/result', 'turn/end',
+]);
+const FAST_TYPE_RE = /^\{"type":"([^"\\]*)"/;
+
 const HOME = homedir();
 
 /** Expand `~/…` to an absolute path; leave absolute paths untouched. */
@@ -202,7 +211,8 @@ async function listSessionFiles(root, depth = 0) {
 }
 
 /**
- * Scan the session log once and return the union digest shared by both surfaces.
+ * Uncached scan. Callers should use {@link collectUsage}, which shares one
+ * in-flight scan between concurrent callers and keeps the digest for 30s.
  * @param {{sessionsDir:string, windowDays?:number, now?:number}} options
  * @returns {Promise<{
  *   sessionsScanned:number, spanDays:number, available:boolean, skipped:number,
@@ -210,7 +220,7 @@ async function listSessionFiles(root, depth = 0) {
  *   signalsByPath: object, byPreset: object, catalog: object
  * }>}
  */
-export async function collectUsage({ sessionsDir, windowDays = 30, now = Date.now() }) {
+async function collectUsageUncached({ sessionsDir, windowDays = 30, now = Date.now() }) {
   const empty = {
     sessionsScanned: 0, spanDays: 0, available: false, skipped: 0,
     sessions: [],
@@ -281,6 +291,17 @@ export async function collectUsage({ sessionsDir, windowDays = 30, now = Date.no
     let lastUserMessage = null;
 
     for (const line of text.split('\n')) {
+      // Most lines (step/start, job/*, assistant/message, …) can only affect
+      // the `startedAt` fallback, which is already settled once any entry
+      // carried a timestamp. Recognize the type from the compact JSON prefix
+      // and skip the full parse for those lines; until startedAt is known,
+      // fall back to the exact JSON.parse path so the fallback stays identical.
+      const fastType = FAST_TYPE_RE.exec(line);
+      if (fastType && startedAt !== 0 && !RELEVANT_ENTRY_TYPES.has(fastType[1])) {
+        sawRecord = true;
+        continue;
+      }
+
       let entry;
       try {
         entry = JSON.parse(line);
@@ -519,4 +540,43 @@ export async function collectUsage({ sessionsDir, windowDays = 30, now = Date.no
     byPreset,
     catalog,
   };
+}
+
+// Both surfaces read the same digest. Sharing one in-flight scan means opening
+// both tabs no longer parses/decompresses every session log twice, and a quick
+// refresh within the TTL reuses the previous read. The digest is returned by
+// reference: callers treat it as read-only (both hosts only read it).
+const USAGE_CACHE_TTL_MS = 30_000;
+const USAGE_CACHE_MAX_ENTRIES = 8;
+const usageCache = new Map();
+
+/** Drop every cached digest and in-flight scan (tests, benchmarks). */
+export function clearUsageCache() {
+  usageCache.clear();
+}
+
+/**
+ * Scan the session log once and return the union digest shared by both
+ * surfaces. Concurrent calls with the same `sessionsDir` + `windowDays` share
+ * one scan; a resolved digest is reused for 30s. Failures are never cached.
+ * @param {{sessionsDir:string, windowDays?:number, now?:number}} options
+ * @returns {Promise<object>}
+ */
+export function collectUsage(options) {
+  const { sessionsDir, windowDays = 30 } = options || {};
+  const key = `${sessionsDir == null ? '' : String(sessionsDir)}|${windowDays}`;
+  const at = Date.now();
+  const cached = usageCache.get(key);
+  if (cached && at - cached.at < USAGE_CACHE_TTL_MS) return cached.promise;
+
+  const entry = { at, promise: null };
+  entry.promise = collectUsageUncached(options || {}).catch((error) => {
+    if (usageCache.get(key) === entry) usageCache.delete(key);
+    throw error;
+  });
+  usageCache.set(key, entry);
+  while (usageCache.size > USAGE_CACHE_MAX_ENTRIES) {
+    usageCache.delete(usageCache.keys().next().value);
+  }
+  return entry.promise;
 }

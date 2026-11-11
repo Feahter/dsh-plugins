@@ -43,6 +43,66 @@ function quickWinIndex(portfolio) {
 }
 
 /**
+ * One compact Chinese classification line: 职责 · 层级 · 形态 · 范围 · 状态.
+ * Labels always come from `report.classification` (taxonomy.js), never from
+ * the path or the UI.
+ */
+function classificationLine(report) {
+  const classification = report.classification;
+  if (!classification || !classification.role) return null;
+  const parts = [
+    classification.role.label,
+    classification.layer?.label,
+    classification.kind?.label,
+    classification.scope?.label,
+  ].filter(Boolean);
+  const states = (classification.state || []).map((state) => state.label).filter(Boolean);
+  if (states.length > 0) parts.push(states.join('、'));
+  return `分类：${parts.join(' · ')}`;
+}
+
+/**
+ * Short 分类分布 section: role table with counts (from totals.byRole) plus a
+ * compact kind/scope line. Labels come from portfolio.taxonomy, so a surface
+ * with a different kind label (形态 vs 类型) renders correctly.
+ */
+function classificationSection(portfolio) {
+  const taxonomy = portfolio.taxonomy;
+  const totals = portfolio.totals || {};
+  const axes = taxonomy && Array.isArray(taxonomy.axes) ? taxonomy.axes : [];
+  const roleAxis = axes.find((axis) => axis.id === 'role');
+  const byRole = totals.byRole || {};
+  const rows = [];
+  if (roleAxis) {
+    for (const value of roleAxis.values) {
+      const count = byRole[value.id] || 0;
+      if (count > 0) rows.push([value.label, count, value.description || '—']);
+    }
+  }
+  if (rows.length === 0) return [];
+  rows.sort((a, b) => b[1] - a[1]);
+
+  const lines = ['## 分类分布', ''];
+  lines.push(table(['职责', '数量', '说明'], rows));
+  lines.push('');
+  const countMaps = {
+    layer: totals.byLayer || {},
+    kind: totals.byKind || {},
+    scope: totals.byScope || {},
+  };
+  for (const axis of axes) {
+    const counts = countMaps[axis.id];
+    if (!counts) continue;
+    const parts = axis.values
+      .filter((value) => (counts[value.id] || 0) > 0)
+      .map((value) => `${value.label} ${counts[value.id]}`);
+    if (parts.length > 0) lines.push(`${axis.label}：${parts.join(' · ')}`);
+  }
+  lines.push('');
+  return lines;
+}
+
+/**
  * @param {object} portfolio
  * @param {{detail?:boolean}} options
  */
@@ -89,6 +149,8 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
     lines.push('来源分布：' + Object.entries(totals.bySource).map(([source, count]) => `${source} ${count}`).join(' · '));
     lines.push('');
   }
+
+  lines.push(...classificationSection(portfolio));
 
   lines.push('## 优先级总表（分数从低到高）');
   lines.push('');
@@ -163,6 +225,8 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
       lines.push(`### ${index + 1}. \`${report.name}\` — ${report.score.total} 分（${report.score.grade}）· ${report.verdict.label}`);
       lines.push('');
       lines.push(`- 来源：${report.source} · 置信度 ${pct(report.score.confidence)}${report.score.delta != null ? ` · 较上次 ${report.score.delta >= 0 ? '+' : ''}${report.score.delta}` : ''}`);
+      const taxonomyLine = classificationLine(report);
+      if (taxonomyLine) lines.push(`- ${taxonomyLine}`);
       if (report.path) lines.push(`- 路径：\`${report.path}\``);
       lines.push(`- 结论：${report.verdict.reason}`);
       lines.push('');
@@ -247,6 +311,7 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
   lines.push('## 口径与局限');
   lines.push('');
   lines.push('- 分数是启发式体检，不是内容正确性证明；每条扣分都应能在报告里找到证据。');
+  lines.push('- 分类（职责/层级/形态/范围/状态）由名称与描述的关键词加权命中 + 结构推导，置信度与命中词只出现在 JSON 里；它用于分面筛选，不是精确语义判定。');
   lines.push('- 评分口径自 Rubric 2.0 起改为六维（按需加载 / 渐进披露 / 可执行性 / 边界 / 卫生 / 持续进化），与 v1.x 的五维分数不可直接比较；组合对比遇版本变化自动清空历史对比。');
   lines.push('- 使用统计只覆盖 `skill` 工具的加载调用；用户通过 `/name` 直接唤起、或宿主不经工具注入的路径未计入。');
   lines.push('- “持续进化”维在窗口内没有按需加载样本时不评分，其余五维按 90 分折算为 100。');

@@ -1,8 +1,8 @@
 {
   "name": "dsh-360",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "private": true,
-  "description": "One plugin, two surfaces of health checks — DeepSeek Harness skills, plus agent configuration (instruction files, subagent definitions, agent presets), scored on one shared S~E 18-bucket grade scale, with a single sidebar panel, four dsh360_* tools, backups and undo. 一个插件两面体检：技能 + agent 说明书/子代理/预设，统一 S~E 18 档等级制，单面板双 tab，写入有备份可撤销。",
+  "description": "One plugin, two surfaces of health checks — DeepSeek Harness skills, plus agent configuration (instruction files, subagent definitions, agent presets), scored on one shared S~E 18-bucket grade scale, with a four-axis classification (role/kind/scope/state, plus a meta-skill layer for skills), a snapshot-first sidebar panel, four dsh360_* tools, backups and undo. 一个插件两面体检：技能 + agent 说明书/子代理/预设，统一 S~E 18 档等级制，四轴分类 + 元技能层级，单面板双 tab 秒开，写入有备份可撤销。",
   "license": "MIT",
   "author": "Feahter",
   "type": "module",
@@ -19,7 +19,8 @@
     "RUBRIC.md",
     "INTERFACE.md",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "TAXONOMY-SPEC.md"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.4",
