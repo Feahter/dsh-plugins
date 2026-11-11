@@ -179,7 +179,7 @@ body[data-ds-dark-theme] .mc-root{ color-scheme: dark; }
 .mc-menu-check{ margin-left: auto; color: var(--accent); }
 
 .mc-swatches{
-  position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 20;
+  position: absolute; top: 58px; left: 50%; transform: translateX(-50%); z-index: 20;
   display: flex; gap: 6px; padding: 7px 9px; border-radius: 999px; background: var(--card);
   border: .5px solid var(--line-strong); box-shadow: var(--dsw-elevation-prominent, 0 18px 44px rgb(0 0 0 / .22));
   animation: mc-pop .14s var(--ease);

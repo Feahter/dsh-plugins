@@ -249,6 +249,12 @@ try {
   await page.getByRole('button', { name: '换颜色' }).click()
   await page.waitForSelector('.mc-swatches', { timeout: 3000 })
   check('色板给出全部 6 个可选项', await page.locator('.mc-swatch').count() === 6, `${await page.locator('.mc-swatch').count()} 个`)
+  const swatchBox = await page.locator('.mc-swatches').boundingBox()
+  const barBox = await page.locator('.mc-toolbar').boundingBox()
+  check('色板浮层没有被工具条裁掉（完整在工具条下方）',
+    Boolean(swatchBox && barBox) && swatchBox.y >= barBox.y + barBox.height - 2 && swatchBox.height > 20,
+    JSON.stringify({ swatchY: Math.round(swatchBox?.y ?? 0), barBottom: Math.round((barBox?.y ?? 0) + (barBox?.height ?? 0)), h: Math.round(swatchBox?.height ?? 0) }))
+  await shot('08-color-open.png')
   await page.locator('.mc-swatch[data-tone="c"]').click()
   await page.waitForTimeout(250)
   const toneNow = await page.evaluate(() => document.querySelector('.mc-node.is-selected')?.dataset.tone)

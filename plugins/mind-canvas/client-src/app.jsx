@@ -1075,7 +1075,8 @@ export function MindCanvasPage(props) {
       ),
 
       selectedNode
-        ? h('div', { className: 'mc-toolbar' },
+        ? h(React.Fragment, null,
+          h('div', { className: 'mc-toolbar' },
           h('span', { className: 'mc-toolbar-hint' }, `${format(t('nodes'), { n: stats.nodes })} · ${format(t('depth'), { n: stats.depth })}`),
           h('button', {
             type: 'button', className: 'mc-btn', onClick: () => addNode(selectedNode.id, '', null),
@@ -1089,6 +1090,14 @@ export function MindCanvasPage(props) {
             'aria-expanded': menu === 'tone',
             onClick: () => setMenu(menu === 'tone' ? null : 'tone'),
           }, t('color')),
+
+          h('button', {
+            type: 'button', className: 'mc-btn', onClick: () => setEditingId(selectedNode.id),
+          }, icons.edit, t('edit')),
+          h('button', {
+            type: 'button', className: 'mc-btn is-danger', onClick: deleteSelected,
+          }, icons.trash, t('deleteNode')),
+          ),
           menu === 'tone'
             ? h('div', { className: 'mc-swatches', role: 'radiogroup', 'aria-label': t('colorTitle') },
               TONES.map(tone => h('button', {
@@ -1104,12 +1113,6 @@ export function MindCanvasPage(props) {
                 onClick: () => setTone(tone),
               })))
             : null,
-          h('button', {
-            type: 'button', className: 'mc-btn', onClick: () => setEditingId(selectedNode.id),
-          }, icons.edit, t('edit')),
-          h('button', {
-            type: 'button', className: 'mc-btn is-danger', onClick: deleteSelected,
-          }, icons.trash, t('deleteNode')),
         )
         : null,
 
