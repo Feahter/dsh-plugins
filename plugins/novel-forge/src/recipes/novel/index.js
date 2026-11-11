@@ -662,6 +662,9 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       skip: (project) => (project?.params?.autoReview === false ? '未开启自动审校' : false),
       async run(ctx) {
         const item = ctx.item ?? {}
+        if (!ctx.has(`review/${item.id}`)) {
+          return { artifacts: {}, note: `${item.id} 尚未审校，跳过修订` }
+        }
         const review = jsonOr(ctx, `review/${item.id}`, null)
         const actionable = (review?.findings ?? []).filter(
           (finding) => finding.severity === 'block' || finding.severity === 'warn',

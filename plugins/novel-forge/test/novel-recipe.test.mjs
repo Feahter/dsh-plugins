@@ -754,6 +754,20 @@ test('revise stage：无 block/warn 时跳过，不调模型', async () => {
   assert.equal(ctx.calls.length, 0)
 })
 
+test('revise stage：review 缺失时不冒充“无问题”', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const ctx = createFakeCtx({
+    items: [{ id: 'ch01', title: '起' }],
+    item: { id: 'ch01', title: '起' },
+    artifacts: {},
+  })
+  const out = await stageOf(recipe, 'revise').run(ctx)
+  assert.deepEqual(out.artifacts, {})
+  assert.match(out.note, /尚未审校/)
+  assert.equal(ctx.calls.length, 0)
+})
+
 test('revise stage：有 block 时重写 draft + summary，findings 传入 prompt', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
