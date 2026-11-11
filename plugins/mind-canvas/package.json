@@ -17,7 +17,8 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "src"
+    "src",
+    "docs"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.4"
