@@ -257,8 +257,10 @@ export function Workbench({ projectId, onBack, notify }) {
   const loadProject = React.useCallback(async () => {
     const data = await getProject(projectId)
     setProject(data.project)
-    setArtifacts(data.artifacts ?? {})
-    const keys = Object.keys(data.artifacts ?? {})
+    // GET /projects/:id 返回 { project, run, runs }，产物清单在 project.artifacts 里。
+    const artifactMap = data.project?.artifacts ?? data.artifacts ?? {}
+    setArtifacts(artifactMap)
+    const keys = Object.keys(artifactMap)
     const [briefArtifact, outlineArtifact] = await Promise.all([
       keys.includes('brief') ? getArtifact(projectId, 'brief').catch(() => null) : null,
       keys.includes('outline') ? getArtifact(projectId, 'outline').catch(() => null) : null,
@@ -311,6 +313,18 @@ export function Workbench({ projectId, onBack, notify }) {
             setEvents(previous => mergeEvents(previous, next.events))
           }
           if (next.status !== 'running') {
+            // 收尾补一次全量拉取：run-end 常在最后一次增量之后才落盘，
+            // 只靠增量轮询会漏掉它，抽屉停在「已完成」。
+            getRun(projectId, 0)
+              .then(payload => {
+                if (!alive || !payload?.run) return
+                setRun(payload.run)
+                setEvents(payload.run.events ?? [])
+                seqRef.current = payload.run.events?.length
+                  ? Math.max(...payload.run.events.map(event => event.seq ?? 0))
+                  : seqRef.current
+              })
+              .catch(() => {})
             setArtifactVersion(value => value + 1)
             loadProject().catch(() => {})
             if (next.status === 'error') setRunError(next.error?.message ?? '运行中断')
@@ -368,12 +382,13 @@ export function Workbench({ projectId, onBack, notify }) {
 
   const onContinue = () => {
     const from = project?.pendingReview?.nextStages?.[0] ?? resumeStage(project)
-    begin({ stages: STAGES.map(stage => stage.id), from, autoApprove: !project?.params?.reviewGate }, '已开炉，继续炼')
+    // 引擎明确要求 stages 与 from/to 二选一；只传 from 让它跑到底。
+    begin({ from, autoApprove: !project?.params?.reviewGate }, '已开炉，继续炼')
   }
 
   const onRerun = () => {
     if (selected === 'overview') return
-    begin({ stages: [selected], from: selected, to: selected, force: true, autoApprove: !project?.params?.reviewGate },
+    begin({ from: selected, to: selected, force: true, autoApprove: !project?.params?.reviewGate },
       `重跑「${STAGE_BY_ID[selected]?.title ?? selected}」`)
   }
 

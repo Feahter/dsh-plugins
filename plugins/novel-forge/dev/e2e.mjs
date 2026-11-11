@@ -224,16 +224,16 @@ async function main() {
       `draftArtifacts=${events.filter(event => event.type === 'artifact' && event.data?.key?.startsWith('draft/')).length}`,
     )
 
-    // 5. UI 完成态
+    // 5. UI 完成态。运行中的增量轮询可能在 run-end 落盘前就看到 done 并停表，
+    //    所以先确认「已完成 / 24 / 24」，读完大纲与草稿后再回书架重开取全量事件。
     await page.waitForFunction(
-      () => (document.querySelector('.nf-drawer')?.innerText ?? '').includes('收炉 · 全部完成'),
+      () => (document.querySelector('.nf-drawer')?.innerText ?? '').includes('已完成'),
       null,
       { timeout: 30000 },
     )
-    const drawerText = await page.locator('.nf-drawer').innerText()
-    assert('UI 事件流显示 run-end/完成', drawerText.includes('收炉 · 全部完成'))
-    assert('UI 进度不是 NaN', !drawerText.includes('NaN'), drawerText.split('\n').find(line => line.includes('/')) ?? '')
-    assert('引擎进度也不是 NaN', Number.isFinite(final?.progress?.done) && Number.isFinite(final?.progress?.total), `${final?.progress?.done}/${final?.progress?.total}`)
+    const doneDrawer = await page.locator('.nf-drawer').innerText()
+    assert('UI 进度不是 NaN', !doneDrawer.includes('NaN'), doneDrawer.split('\n').find(line => line.includes('/')) ?? '')
+    assert('UI 显示 24/24 进度', /24\s*\/\s*24/.test(doneDrawer), doneDrawer.split('\n').find(line => line.includes('/')) ?? '')
 
     // 6. 卷章大纲：真数据经 API 进入 UI
     const outlineRail = page.locator('.nf-rail-item', { hasText: '卷章大纲' })
@@ -263,11 +263,31 @@ async function main() {
     await page.screenshot({ path: SCREEN, fullPage: false })
     ok('截图已写入', fs.existsSync(SCREEN) && fs.statSync(SCREEN).size > 10000, path.relative(ROOT, SCREEN))
 
+    // 9. 回书架重开：首屏 after=0 取全量事件，补上轮询可能漏掉的 run-end。
+    await page.locator('.nf-main-top button', { hasText: '书架' }).click()
+    const card = page.locator('.nf-card', { hasText: '长夜将明' })
+    await card.waitFor({ state: 'visible', timeout: 10000 })
+    await card.getByRole('button', { name: '打开' }).click()
+    await page.locator('.nf-drawer').waitFor({ state: 'visible', timeout: 10000 })
+    await page.waitForFunction(
+      () => (document.querySelector('.nf-drawer')?.innerText ?? '').includes('收炉 · 全部完成'),
+      null,
+      { timeout: 20000 },
+    )
+    const drawerText = await page.locator('.nf-drawer').innerText()
+    const overviewText = (await page.locator('.nf-main').innerText()).replace(/\s+/g, ' ')
+    assert('总览已写章节为 6/6', /6\s*\/\s*6\s*章/.test(overviewText), overviewText.slice(0, 160))
+    assert('总览正文字数非 0', !/正文\s*0\s*字/.test(overviewText), overviewText.slice(0, 160))
+    assert('UI 事件流显示 run-end/完成', drawerText.includes('收炉 · 全部完成'))
+    assert('重开后 UI 进度没有 NaN', !drawerText.includes('NaN'), drawerText.split('\n').find(line => line.includes('/')) ?? '')
+    assert('引擎进度也不是 NaN', Number.isFinite(final?.progress?.done) && Number.isFinite(final?.progress?.total), `${final?.progress?.done}/${final?.progress?.total}`)
+
     assert('console error 为 0', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
     assert('pageerror 为 0', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 
     console.log(`\nrun ${runId} status=${final?.status} progress=${final?.progress?.done}/${final?.progress?.total} events=${events.length}`)
   } catch (error) {
+    if (failures.length === 0) failures.push('未捕获异常')
     console.error(`\n端到端失败：${error?.stack ?? error}`)
     if (apiErrors.length) console.error(`API 错误：\n${apiErrors.join('\n')}`)
     if (consoleErrors.length) console.error(`console errors:\n${consoleErrors.join('\n')}`)

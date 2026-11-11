@@ -186,6 +186,12 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
   assert.ok(ledger.content.facts.length >= 1)
   assert.ok(ledger.content.threads.some((thread) => thread.text.includes('名册')))
 
+  // 领域统计：recipe.stats 钩子应把已写章节/字数写回 project.stats
+  const afterStats = await engine.getProject(project.id)
+  assert.equal(afterStats.stats?.drafted, 6)
+  assert.ok((afterStats.stats?.words ?? 0) > 0, `words=${afterStats.stats?.words}`)
+  assert.equal(afterStats.stats?.chapters, 6)
+
   // 导出 Markdown
   const exported = await engine.exportProject(project.id, 'md')
   const markdown = await readFile(exported.path, 'utf8')

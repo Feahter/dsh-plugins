@@ -728,6 +728,34 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
     stages,
 
+    /** 领域统计：已写字数/已写章节，供引擎写进 project.stats、UI 展示。 */
+    stats(project, read) {
+      let total = clampInt(project?.params?.chapters, paramsDefaults.chapters, 6, 120)
+      try {
+        if (read.has('outline')) {
+          const listed = chaptersOf(read.json('outline'))
+          if (listed.length) total = listed.length
+        }
+      } catch {
+        // 大纲还没落盘或格式未定：退回 params
+      }
+      let drafted = 0
+      let words = 0
+      for (const key of Object.keys(project?.artifacts || {})) {
+        if (!key.startsWith('draft/')) continue
+        let text = ''
+        try {
+          text = read.text(key)
+        } catch {
+          continue
+        }
+        if (!text) continue
+        drafted += 1
+        words += text.replace(/\s+/g, '').length
+      }
+      return { chapters: total, drafted, words }
+    },
+
     estimate(params = {}) {
       const merged = { ...paramsDefaults, ...params }
       const chapters = clampInt(merged.chapters, paramsDefaults.chapters, 6, 120)

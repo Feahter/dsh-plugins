@@ -463,6 +463,7 @@ export class ForgeEngine {
         const stage = stages[i]
         const remaining = stages.slice(i + 1).map((item) => item.id)
         const result = await this.#runStage(live, stage, remaining)
+        this.#syncStats(live, recipe)
         if (result === 'cancelled') {
           outcome = 'cancelled'
           break
@@ -524,6 +525,22 @@ export class ForgeEngine {
     run.current = { stage: null, item: null, label: null }
     await this.store.saveProject(project).catch(() => {})
     await this.#emit(live, EVENT.RUN_ERROR, { message: fe.message, code: fe.code }).catch(() => {})
+  }
+
+  /**
+   * recipe 可声明 `stats(project, read)` 汇报领域统计（如已写字数/已写章节）。
+   * 展示信息，失败不影响运行。
+   */
+  #syncStats(live, recipe) {
+    if (typeof recipe?.stats !== 'function') return
+    try {
+      const extra = recipe.stats(live.project, this.#readApi(live.cache))
+      if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+        live.project.stats = { ...(live.project.stats || {}), ...extra }
+      }
+    } catch {
+      // 忽略：统计失败不应让整本书失败
+    }
   }
 
   async #runStage(live, stage, remainingIds) {
