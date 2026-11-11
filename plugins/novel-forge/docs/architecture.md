@@ -643,6 +643,7 @@ export default {
 15. **`GET /projects/:id` 返回 `project.artifacts` 摘要**；`GET /projects/:id/run` 在无 activeRunId 时回退到最近一次 run 的**完整**视图（含 events），否则完成后的首次打开会看到空事件流。
 16. **侧栏 id 必须等于 `main` 的 key**：宿主点击侧栏项时按 id 去选 main panel。曾把侧栏 id 写成 `novel-forge.panel`、main key 写成 `novel-forge`，只有真实宿主会报 `main panel "novel-forge.panel" is not registered`（假 harness 不校验）。两处统一用 `novel-forge`。
 17. **`GET /recipes` 兼容 `engine.recipes` 是 Map**：引擎把 recipe 存在 `Map<id, recipe>`，此前直接 `.map()` 在真宿主 500；路由层先取 `[...recipes.values()]`。
+18. **修订不猜“没问题”**：`revise` 先看 `review/<id>` 是否存在；审校没跑完（模型失败/跳过）时返回「尚未审校，跳过修订」，绝不把「没读到审校」当成「没有 block/warn」。
 
 ---
 
