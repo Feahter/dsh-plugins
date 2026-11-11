@@ -82,6 +82,16 @@ test('stripPrefix 只认自己的前缀', () => {
   assert.equal(stripPrefix('/novel-forge-x'), null)
 })
 
+test('GET /recipes 兼容 engine.recipes 是 Map', async () => {
+  const engine = makeFakeEngine()
+  delete engine.listRecipes
+  engine.recipes = new Map([['novel', { id: 'novel', title: '长篇小说', stages: [] }]])
+  const result = await call(engine, 'GET', '/recipes')
+  assert.equal(result.status, 200)
+  assert.equal(result.body.recipes.length, 1)
+  assert.equal(result.body.recipes[0].id, 'novel')
+})
+
 test('POST /estimate 不需要项目，透传参数给 recipe', async () => {
   const engine = makeFakeEngine()
   const result = await call(engine, 'POST', '/estimate', { body: { recipeId: 'novel', params: { chapters: 12, wordsPerChapter: 2000 } } })

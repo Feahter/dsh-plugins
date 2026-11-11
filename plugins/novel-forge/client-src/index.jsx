@@ -8,7 +8,8 @@ import { zh, en } from './strings.js'
 
 const NS = 'novel-forge'
 const PANEL_KEY = 'novel-forge'
-const PANEL_ID = 'novel-forge.panel'
+// 侧栏 id 必须与 main 的 key 完全一致：宿主点击侧栏时按 id 去选 main panel。
+const PANEL_ID = PANEL_KEY
 
 export const inject = ['slots', 'locale']
 

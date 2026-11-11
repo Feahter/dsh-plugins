@@ -38,7 +38,10 @@ function runView(run, after = 0) {
 
 function listRecipes(engine) {
   if (typeof engine.listRecipes === 'function') return engine.listRecipes()
-  return engine.recipes ?? []
+  // engine.recipes 是 Map<id, recipe>，直接 .map 会炸；兼容数组与 Map 两种形状。
+  const recipes = engine.recipes
+  if (recipes instanceof Map) return [...recipes.values()]
+  return Array.isArray(recipes) ? recipes : []
 }
 
 async function getRunForProject(engine, project, after) {

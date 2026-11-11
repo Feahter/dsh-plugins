@@ -694,8 +694,8 @@ async function main() {
     await page.waitForSelector('text=雾港旧案', { timeout: 10000 })
 
     const slots = await page.evaluate(() => window.__slots)
-    check('侧栏注册 novel-forge.panel / order 55 / 墨炉',
-      slots.some(item => item.id === 'novel-forge.panel' && item.order === 55 && item.label === '墨炉'),
+    check('侧栏注册 novel-forge / order 55 / 墨炉',
+      slots.some(item => item.id === 'novel-forge' && item.order === 55 && item.label === '墨炉'),
       JSON.stringify(slots))
     check('主面板注册 key=novel-forge', slots.some(item => item.key === 'novel-forge'))
 

@@ -641,6 +641,8 @@ export default {
 13. **空文本自动加预算**：`LLM_EMPTY` 时网关把 `maxTokens` 逐次加倍（1000→2000→4000…上限 16000）再重试。真模型冒烟发现推理模型会把预算烧在 reasoning 上，导致空 `text-delta`；这条对任何 recipe 都成立。review 阶段另把预算从 2600 提到 4000。
 14. **`blurb` 出口是 Markdown**：提示词写给人的封面文案（`# 《书名》`/一句话卖点/`## 简介`/`## 标签`），recipe 用 `parseBlurbMarkdown` 解析回 `{title,tagline,blurb,tags}` 再按 `blurbSchema` 校验。真模型冒烟最初按 JSON 解析，必然 `LLM_PARSE`；这是提示词与 recipe 的契约错位，不是模型问题。
 15. **`GET /projects/:id` 返回 `project.artifacts` 摘要**；`GET /projects/:id/run` 在无 activeRunId 时回退到最近一次 run 的**完整**视图（含 events），否则完成后的首次打开会看到空事件流。
+16. **侧栏 id 必须等于 `main` 的 key**：宿主点击侧栏项时按 id 去选 main panel。曾把侧栏 id 写成 `novel-forge.panel`、main key 写成 `novel-forge`，只有真实宿主会报 `main panel "novel-forge.panel" is not registered`（假 harness 不校验）。两处统一用 `novel-forge`。
+17. **`GET /recipes` 兼容 `engine.recipes` 是 Map**：引擎把 recipe 存在 `Map<id, recipe>`，此前直接 `.map()` 在真宿主 500；路由层先取 `[...recipes.values()]`。
 
 ---
 
