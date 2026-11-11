@@ -23,6 +23,8 @@
 
 ![工作台](docs/screens/workbench.png)
 
+![真实宿主里的墨炉](docs/screens/live-host.png)
+
 ## 用
 
 面板：
