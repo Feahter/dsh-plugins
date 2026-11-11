@@ -63,6 +63,7 @@ Markdown 就是纯文本，JSON 就是普通 JSON，随时可以直接看、直�
 - **确定性检查**：字数、段落、对话比、AI 腔黑名单、POV 越界在代码里查，不靠模型自觉。
 - **可暂停、可改、可续跑**：所有阶段产物都在磁盘上；改完再跑会跳过已完成的部分，`force` 才重跑。
 - **通用引擎**：stage 只有 `id/title/each/produces/review/run`，引擎只管顺序、事件、存储、取消、暂停。配方负责一切创作语义。
+- **站在成熟库上**：Markdown 渲染用 `marked`，EPUB 打包用 `epub-gen-memory`，模型 JSON 用 `zod` 校验；没有自造解析器或压缩器。DSH 自带的 `@deepseek-ai/dsh-experimental-forge` 是变更请求 / Git worktree 面板，不是内容流水线，因此引擎在这里自建（约 1k 行，含测试）。
 
 ## 开发
 
