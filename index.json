@@ -495,6 +495,59 @@
           }
         }
       ]
+    },
+    {
+      "name": "dsh-novel-forge",
+      "title": {
+        "en": "Ink Furnace — novel forge",
+        "zh": "墨炉 · 小说炼炉"
+      },
+      "description": {
+        "en": "A full novel pipeline behind one premise: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages are resumable per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. A female lead is never rewritten as him: gender is canon, pronoun tables are injected into every writing prompt, and a deterministic check flags pronoun drift.",
+        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。"
+      },
+      "icon": "plugins/novel-forge/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/novel-forge",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/novel-forge"
+      },
+      "metadata": {
+        "category": "creative",
+        "keywords": [
+          "novel",
+          "long-form",
+          "writing",
+          "pipeline",
+          "outline",
+          "continuity",
+          "epub",
+          "side-panel",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794460984
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794460984,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "26272bced265ef4392eaa5be00a7caeab14f317f",
+            "path": "plugins/novel-forge"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
     }
   ]
 }

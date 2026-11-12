@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Seven plugins live side by side under [`plugins/`](./plugins).
+Eight plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -64,6 +64,13 @@ A sidebar panel that answers "what am I running, and is there anything newer?" �
 
 - Requirements: DSH `>= 0.2.1-rc.4`. Opening the Web UI in a plain browser has no preload bridge; the panel says so and degrades the button to a download link.
 
+### [Ink Furnace — novel forge](./plugins/novel-forge)
+
+One premise in, a finished novel out: premise → world bible → characters → emotional spine → outline → per-chapter beats → prose → continuity review → revision → Markdown/EPUB. A generic stage engine drives the novel recipe, so every stage is resumable per item and a run can be stopped and continued at chapter granularity. Continuity review findings survive malformed model JSON (salvage instead of discard), summaries are written in the same call as the prose they belong to (78 → 54 calls and −27% input on a 12×3000-word book), failed attempts are still counted in the run's real cost, and the writing prompts carry a per-character pronoun table so a female lead is never rewritten as "him".
+
+- Requirements: DSH `>= 0.2.1-rc.4`. Data lives in `~/.dsh/novel-forge/`; projects export to Markdown or EPUB.
+- Optional: a configured model is required to run the pipeline — a missing key fails fast with a config hint instead of retrying three times.
+
 ## Install manually
 
 The market index pins an exact commit for every version. The equivalent manual installs:
@@ -76,6 +83,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/mind-canvas"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/task-ledger"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/update-check"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/novel-forge"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.
