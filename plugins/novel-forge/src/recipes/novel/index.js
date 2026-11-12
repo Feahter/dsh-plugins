@@ -90,7 +90,7 @@ const paramsSchema = {
       type: 'integer',
       minimum: 4000,
       maximum: 30000,
-      description: '写一章的提示词预算（字符）。第 N 章的写作材料和第 1 章一样大，不随章号增长',
+      description: '写一章的提示词预算（字符）。材料上限不随章号增长：各分片有固定 cap，包永远 ≤ 这个值',
     },
     pov: { type: 'string', enum: POVS },
     tone: { type: 'string', maxLength: 200 },
@@ -749,27 +749,43 @@ function requireChapter() {
 }
 
 /** chapter.js 的 read 契约：json → 对象，md → 字符串，没有 → null。 */
-// 本轮窗口（§7）：缺章名单必须在 run 开头定一次，不能边写边算——
+// 本轮窗口（§7）：候选名单必须在 run 开头定一次，不能边写边算——
 // 边写边算会让名单越来越短，每章都落在窗口第 0 位，window 等于失效。
+//
+// 候选 = 本轮确实要写正文的章：没写过 / force 重写 / 草稿是占位回声。
+// 只收「没有 draft」会把 force 与占位重写漏在窗口外：它们不占名额、也永不 defer，
+// window 就被绕过（window=2 实际写 4 章）。已写且不 stale 的章不进候选，
+// 交给引擎的「已完成」判定跳过，否则正常续跑会重写。
 const RUN_WINDOWS = new Map()
+
+/** 这一章本轮要不要写正文：没写过、草稿是占位回声，或本轮 force 全量重写。 */
+function needsDraft(ctx, id) {
+  if (!has(ctx, `draft/${id}`)) return true
+  return isPlaceholderText(textOf(ctx, `draft/${id}`))
+}
 
 function outsideWindow(ctx, id, outline) {
   const size = Number(ctx.run?.options?.window) || 0
   if (size <= 0) return false
-  const key = String(ctx.run?.id ?? 'run')
-  let pending = RUN_WINDOWS.get(key)
-  if (!pending) {
-    pending = new Set(
-      chaptersOf(outline)
-        .filter((chapter) => chapter?.id && !has(ctx, `draft/${chapter.id}`))
-        .map((chapter) => String(chapter.id)),
-    )
+  const run = ctx.run ?? {}
+  const force = run.options?.force === true
+  const requested = Array.isArray(run.options?.items) ? new Set(run.options.items.map(String)) : null
+  const key = String(run.id ?? 'run')
+  let window = RUN_WINDOWS.get(key)
+  // force/window 变了说明不是同一轮（正常 startRun 每次都是新 run id）；
+  // 命中旧的 run id 时宁可重算，也不能拿过期名单。
+  if (!window || window.force !== force || window.size !== size) {
+    const candidates = chaptersOf(outline)
+      .map((chapter) => String(chapter?.id ?? ''))
+      .filter((chapterId) => chapterId && (!requested || requested.has(chapterId)))
+      .filter((chapterId) => force || needsDraft(ctx, chapterId))
+    window = { force, size, candidates }
     if (RUN_WINDOWS.size > 64) RUN_WINDOWS.clear()
-    RUN_WINDOWS.set(key, pending)
+    RUN_WINDOWS.set(key, window)
   }
-  const list = [...pending]
-  const position = list.indexOf(String(id))
-  return position >= size
+  // 不在候选里（已写且不 stale）→ -1，不 defer；它该由引擎跳过，不该被窗口卡住。
+  const position = window.candidates.indexOf(String(id))
+  return position >= window.size
 }
 
 function readerOf(ctx, overrides = {}) {
@@ -1532,7 +1548,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       const volumePlans = plan.volumeCount(chapters, perVolumeOf(merged))
 
       // §12 成本模型：固定 6 段 + 每章 3.5 次（细纲 1、草稿 1、摘要/正典补丁摊 0.5、审校 1 + 修订摊薄）
-      // + 卷纲每卷 1 次。关键性质：第 N 章的写作材料和第 1 章一样大，成本随章数线性增长。
+      // + 卷纲每卷 1 次。关键性质：每章都是同一份 ≤ contextBudget 的 packet，成本随章数线性增长。
       const perChapter = autoReview ? 3.5 : 2.5
       const calls = Math.ceil(6 + chapters * perChapter + volumePlans)
 
@@ -1540,7 +1556,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       const fixedOut = 10177
       const prose = (ratio) => Math.round(wordsPerChapter * ratio)
       // 草稿/修订的输入就是 packet，因此按 contextBudget 估，而不是按章号累加：
-      // 第 N 章的写作材料和第 1 章一样大。
+      // 每章都是一份 ≤ contextBudget 的包，成本随章数线性增长。
       const budget = clampInt(merged.contextBudget, paramsDefaults.contextBudget, 4000, 30000)
       const perChapterIn =
         budget + // 草稿 packet（硬上限）
@@ -1561,7 +1577,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         estTokensOut,
         note:
           `约 ${calls} 次模型调用；${chapters} 章 × ${wordsPerChapter} 字，约 ${volumePlans} 卷（每卷约 ${Math.ceil(chapters / Math.max(1, volumePlans))} 章）；` +
-          `第 N 章的写作材料和第 1 章一样大（每章 ${perChapter} 次调用 + 一份固定上限的 packet）；` +
+          `每章材料是一份固定上限的 packet（${perChapter} 次调用），不随章号增长；` +
           `预计输入约 ${estTokensIn} tokens、输出约 ${estTokensOut} tokens` +
           (autoReview ? '（含自动审校+修订）' : '（不含审校）'),
       }

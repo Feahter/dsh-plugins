@@ -202,10 +202,22 @@ export function mergeVolumeChapters(outline, volumeIdValue, chapters) {
     outline,
     perVolume.reduce((sum, list) => sum + list.length, 0),
   )
+  // 卷首章号与 volumePromptContext 的 startChapter 对齐：前面的卷若还没物化，
+  // 按 targetChapters 占位；已物化则用实际章数。这样卷可以乱序展开，先展开
+  // v09 仍发 ch241…，不会把后面的章节挤到开头。
+  const starts = []
+  let cursor = 0
+  for (let index = 0; index < volumes.length; index += 1) {
+    starts.push(cursor)
+    const materialized = perVolume[index].length
+    cursor += materialized > 0
+      ? materialized
+      : Math.max(0, Math.floor(Number(volumes[index]?.targetChapters) || 0))
+  }
   const nextChapters = []
   const nextVolumes = volumes.map((volume, index) => {
     const list = perVolume[index]
-    const start = nextChapters.length
+    const start = starts[index]
     const merged = list.map((chapter, offset) => {
       const globalIndex = start + offset
       return {
@@ -254,6 +266,8 @@ function chunk(list, size) {
 
 function v1Chapter(chapter) {
   return {
+    // v1 章 id 是草稿的落盘键：迁移必须原样保留，不能按 params.chapters 重算宽度。
+    id: text(chapter?.id),
     title: text(chapter?.title),
     goal: text(chapter?.goal),
     conflict: text(chapter?.conflict),
@@ -267,8 +281,9 @@ function v1Chapter(chapter) {
 }
 
 /**
- * v1 outline → v2（幂等）。v1 章表按原顺序重新发号；卷归属优先沿用
- * `volumes[].chapters`，没有归属时按 effectivePerVolume 均分。
+ * v1 outline → v2（幂等）。v1 已有的章 id 原样保留（草稿按 id 落盘）；
+ * 只有原本没有 id 的章才发号。卷归属优先沿用 `volumes[].chapters`，
+ * 没有归属时按 effectivePerVolume 均分。
  * @param {object} outline
  * @param {{params?:object}} [options]
  * @returns {object} outline v2
@@ -311,6 +326,11 @@ export function migrateOutline(outline, { params = {} } = {}) {
 
   const plannedTotal = toCount(params?.chapters)
   const total = plannedTotal > 0 ? Math.max(plannedTotal, rawChapters.length) : rawChapters.length
+  // v1 outline 里已有 id 的章原样沿用（草稿按 id 落盘）；只有 v2 才展开出来的新章
+  // 需要发新号，这时才用 total 决定宽度。整份 v1 outline 都没有 id 时按实际章数
+  // 生成（max(2, 位数)），避免 params 与实际章数不一致时把 ch01… 写成 ch001…。
+  const hasAnyId = rawChapters.some((chapter) => text(chapter?.id))
+  const fallbackTotal = hasAnyId ? total : rawChapters.length
 
   const chapters = []
   const volumes = groups.map((group, index) => {
@@ -319,10 +339,10 @@ export function migrateOutline(outline, { params = {} } = {}) {
     const merged = normalized.map((chapter, offset) => {
       const globalIndex = start + offset
       return {
-        id: chapterId(globalIndex, total),
+        ...chapter,
+        id: chapter.id || chapterId(globalIndex, fallbackTotal),
         index: globalIndex + 1,
         volume: volumeId(index + 1),
-        ...chapter,
         title: chapter.title || `第 ${globalIndex + 1} 章`,
       }
     })

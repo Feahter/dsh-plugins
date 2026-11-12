@@ -398,3 +398,117 @@ test('canon：5000 facts + 2000 notes 下 queryCanon 仍在毫秒级', () => {
   assert.equal(slice.truncated, true)
   console.log(`# canon 性能：5000 facts + 2000 notes queryCanon = ${elapsed}ms`)
 })
+
+// ---------------------------------------------------------------- 分节预算回归（T3）
+
+function crowdedSlice() {
+  const facts = Array.from({ length: 200 }, (_, i) => ({
+    id: `f${String(i + 1).padStart(4, '0')}`,
+    s: `人物${i + 1}`,
+    p: '状态',
+    o: `第${i + 1}章的旧伤与线索`,
+    chapter: chapterId(i + 1),
+  }))
+  const threads = [1, 2, 3].map((i) => ({
+    id: `t0${i}`,
+    text: `账册第${i + 2}页的名字`,
+    opened: chapterId(i),
+    status: 'open',
+    closedIn: null,
+    payoff: i === 1 ? '已在祠堂对账' : '',
+  }))
+  return { facts, threads }
+}
+
+test('canon：200 条事实挤不掉未回收线索，总长仍 ≤ maxChars', () => {
+  const slice = crowdedSlice()
+  const text = formatCanon(slice, { maxChars: 3200 })
+  assert.ok(text.includes('【已确立事实】'), '事实区块仍应存在')
+  assert.ok(text.includes('【未回收线索】'), '线索区块不能被事实挤掉')
+  const threadLines = text.split('\n').filter((line) => line.startsWith('- t0'))
+  assert.ok(threadLines.length >= 2, `至少要进 2 条线索，实际 ${threadLines.length}`)
+  assert.ok(text.includes('账册第3页的名字'), '线索正文要能读到')
+  assert.ok(text.includes('[ch0001]'), '线索要带开启章号')
+  assert.ok(text.includes('payoff：已在祠堂对账'), '有 payoff 时要带上')
+  assert.ok(text.length <= 3200, `总长 ${text.length} 超出 3200`)
+  // 事实仍占大头：事实行数明显多于线索行数。
+  const factLines = text.split('\n').filter((line) => line.startsWith('- [ch'))
+  assert.ok(factLines.length > threadLines.length * 3, `事实 ${factLines.length} 行 / 线索 ${threadLines.length} 行`)
+
+  // 承诺的下限是 1200：这个额度下也要有区块 + 至少 2 条正文。
+  const tight = formatCanon(slice, { maxChars: 1200 })
+  assert.ok(tight.includes('【未回收线索】'), '1200 额度下线索区块不能丢')
+  assert.ok(
+    tight.split('\n').filter((line) => line.startsWith('- t0')).length >= 2,
+    '1200 额度下至少要进 2 条线索正文',
+  )
+  assert.ok(tight.length <= 1200, `1200 额度下总长 ${tight.length}`)
+})
+
+test('canon：没有未回收线索时不出现线索标题，短切片输出与旧格式一致', () => {
+  const { facts } = crowdedSlice()
+  const text = formatCanon({ facts }, { maxChars: 3200 })
+  assert.ok(!text.includes('【未回收线索】'), '无线索不能留空标题')
+  assert.ok(text.length <= 3200)
+
+  // 全装得下时逐字节保持旧格式（标题 + 每条一行，按原顺序）。
+  const short = { facts: facts.slice(0, 2) }
+  const expected = [
+    '【已确立事实】',
+    '- [ch0001] 人物1｜状态｜第1章的旧伤与线索',
+    '- [ch0002] 人物2｜状态｜第2章的旧伤与线索',
+  ].join('\n')
+  assert.equal(formatCanon(short, { maxChars: 3200 }), expected)
+})
+
+test('canon：maxChars=300 极小额度不崩且硬性不超长', () => {
+  const { facts, threads } = crowdedSlice()
+  const text = formatCanon({ facts, threads }, { maxChars: 300 })
+  assert.equal(typeof text, 'string')
+  assert.ok(text.length <= 300, `总长 ${text.length} 超出 300`)
+  // 极小额度下不要求 2 条线索，但绝不能崩。
+  assert.ok(text.startsWith('【'), '应至少保留一个区块')
+
+  // 单行超长（连「标题 + 一行」都放不下）也不能返回空串。
+  const longLine = formatCanon(
+    { facts: [{ s: '甲', p: '状态', o: '长'.repeat(400), chapter: 'ch0001' }] },
+    { maxChars: 50 },
+  )
+  assert.ok(longLine.length > 0 && longLine.length <= 50, `兜底截断异常：${longLine.length}`)
+})
+
+// ---------------------------------------------------------------- 时间切片（防剧透）
+
+test('queryCanon：atChapter 之前看不到后面才确立的事实 / 线索 / 时间线', () => {
+  const canon = mergeCanon(emptyCanon(), {
+    facts: [
+      { s: '沈砚', p: '左手', o: '有旧伤' },
+      { s: '沈砚', p: '结局', o: '在第两百章死去' },
+    ],
+    threads: [
+      { id: 't-early', text: '母亲失踪的去向', opened: 'ch003' },
+      { id: 't-late', text: '第三卷才开的伏笔', opened: 'ch200' },
+    ],
+    timeline: [
+      { chapter: 'ch003', when: '第一天', what: '进殡仪馆' },
+      { chapter: 'ch200', when: '第九十九天', what: '终局' },
+    ],
+  }, { chapter: 'ch001' })
+  // 手工把两条事实的落章点分开：mergeCanon 默认盖当前章，这里模拟不同章写入。
+  canon.facts[0].chapter = 'ch001'
+  canon.facts[1].chapter = 'ch200'
+
+  const early = queryCanon(canon, { atChapter: 'ch005' })
+  assert.equal(early.facts.length, 1, '第 5 章只该看到第 1 章的事实')
+  assert.ok(!early.facts.some(f => f.o.includes('死去')), '第 5 章不该看到第 200 章的结局')
+  assert.ok(!early.threads.some(t => t.id === 't-late'), '第 5 章不该看到第 200 章才开的线索')
+  assert.ok(!early.timeline.some(t => t.chapter === 'ch200'), '第 5 章不该看到第 200 章的时间线')
+
+  const late = queryCanon(canon, { atChapter: 'ch250' })
+  assert.equal(late.facts.length, 2, '第 250 章两条事实都该在')
+  assert.ok(late.threads.some(t => t.id === 't-late'), '第 250 章应看到第 200 章的线索')
+
+  // 章号缺失/写不清的条目一律保留，宁可多给也不误删。
+  canon.facts.push({ s: '陈婆', p: '身份', o: '守夜人' })
+  assert.ok(queryCanon(canon, { atChapter: 'ch005' }).facts.some(f => f.s === '陈婆'), '没有章号的事实应保留')
+})

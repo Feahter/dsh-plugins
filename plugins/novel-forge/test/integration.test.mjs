@@ -367,3 +367,62 @@ test('window：一轮最多推进 N 章，没排到的章 defer 成 pending，�
   assert.equal(drafts.length, 6, '窗口大于剩余章数时一次补齐')
   assert.equal(afterThird.stages.draft.status, 'done')
 })
+
+test('window + force：force 重跑也受窗口限制，只重写候选章的前 N 个', async (t) => {
+  const { engine, llm, project } = await setup(t)
+  const boot = await engine.startRun(project.id, { stages: ['premise', 'bible', 'characters', 'spine', 'outline'] })
+  await waitRun(engine, boot.id)
+
+  // 先按窗口写完 4 章，后 2 章留到下一轮。
+  const first = await engine.startRun(project.id, { stages: ['draft'], window: 4 })
+  await waitRun(engine, first.id)
+  const afterFirst = await engine.getProject(project.id)
+  assert.deepEqual(
+    Object.keys(afterFirst.artifacts).filter(key => key.startsWith('draft/')).sort(),
+    ['draft/ch01', 'draft/ch02', 'draft/ch03', 'draft/ch04'],
+    '先写完 4 章',
+  )
+
+  // force 会把 6 章全塞进 work；候选章仍按章序取前 window 个，不能因为「已有草稿」就永不 defer。
+  const proseBefore = llm.calls.filter((call) => call.phase === 'prose').length
+  const forced = await engine.startRun(project.id, { stages: ['draft'], force: true, window: 2 })
+  const run = await waitRun(engine, forced.id)
+  const rewritten = llm.calls.filter((call) => call.phase === 'prose').length - proseBefore
+  assert.equal(rewritten, 2, `force + window=2 应只重写 2 章，实际 ${rewritten} 章`)
+
+  const after = await engine.getProject(project.id)
+  assert.equal(after.stages.draft.status, 'partial', '还有候选章没写，阶段不能标 done')
+  assert.equal(after.stages.draft.items.ch03, 'pending', '第 3 个候选章 defer 成 pending')
+  assert.equal(run.status, 'done', 'run 本身正常结束，窗口只影响阶段完成度')
+  assert.equal(after.stages.draft.items.ch04, 'done', '推迟后就停手，ch04 保持上一轮的结果')
+})
+
+test('window + 占位草稿：占位章算候选，同样受窗口限制', async (t) => {
+  const { engine, llm, project } = await setup(t)
+  const boot = await engine.startRun(project.id, { stages: ['premise', 'bible', 'characters', 'spine', 'outline'] })
+  await waitRun(engine, boot.id)
+  const first = await engine.startRun(project.id, { stages: ['draft'], window: 2 })
+  await waitRun(engine, first.id)
+
+  // 历史行为会把模型回声写进 draft/*；isStale 视其为未完成，这一章必须重写。
+  await engine.writeArtifact(project.id, 'draft/ch01', {
+    kind: 'md',
+    content: '正文缺失，无法修订。请重写。',
+  })
+
+  const proseBefore = llm.calls.filter((call) => call.phase === 'prose').length
+  const second = await engine.startRun(project.id, { stages: ['draft'], window: 2 })
+  await waitRun(engine, second.id)
+  const rewritten = llm.calls.filter((call) => call.phase === 'prose').length - proseBefore
+  // 候选按章序是 [ch01(占位), ch03, ch04, …]：占位章也占窗口名额，不能白嫖成第 3 章。
+  assert.equal(rewritten, 2, `占位章应和缺章一起占窗口，实际写了 ${rewritten} 章`)
+
+  const after = await engine.getProject(project.id)
+  assert.deepEqual(
+    Object.keys(after.artifacts).filter(key => key.startsWith('draft/')).sort(),
+    ['draft/ch01', 'draft/ch02', 'draft/ch03'],
+    '本轮只补占位 ch01 与缺章 ch03',
+  )
+  assert.equal(after.stages.draft.status, 'partial')
+  assert.equal(after.stages.draft.items.ch04, 'pending', '第 3 个候选章 defer 成 pending')
+})

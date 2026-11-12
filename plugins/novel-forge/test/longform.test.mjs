@@ -252,12 +252,19 @@ test('上下文恒定：第 1 章与第 300 章材料包都 ≤ 12000，差额�
 
   assert.ok(a <= 12000, `第 1 章材料包应 ≤ 12000，实际 ${a}`)
   assert.ok(b <= 12000, `第 300 章材料包应 ≤ 12000，实际 ${b}`)
-  // 第 300 章比第 1 章多出的只可能是 previous/recent/digest/style 四片（cap 合计 4200），
-  // 且第 300 章没有「下一章目标」可扣；超过 4200 就说明有随章号增长的内容。
+  // 第 300 章比第 1 章多出的只能来自两类、都有硬上限：
+  //   1) previous/recent/digest/style 四片（cap 合计 4200）——第 1 章天然没有；
+  //   2) 正典分片随「已经写到的事实」变多而变满（cap 3200）——第 1 章只有第 1 章的事实。
+  // 两类相加 7400 是理论上限；超过就说明有真正随章号无限增长的内容。
   assert.ok(
-    delta <= 4200,
-    `两章包体差应 ≤ 四个相邻章分片上限 4200，实际 ${delta}（ch001=${a}、ch300=${b}）`,
+    delta <= 7400,
+    `两章包体差应 ≤ 4200（相邻章分片）+ 3200（正典），实际 ${delta}（ch001=${a}、ch300=${b}）`,
   )
+  const canonSlice = (packet) => (packet.report.slices ?? []).find(slice => slice.name === 'canon')
+  for (const [label, packet] of [['ch001', first.packet], ['ch300', last.packet]]) {
+    const slice = canonSlice(packet)
+    if (slice) assert.ok((slice.chars ?? 0) <= 3200, `${label} 的正典分片应 ≤ cap 3200，实际 ${slice.chars}`)
+  }
   assert.equal(first.packet.report.used, a, `report.used 应等于 text.length：${first.packet.report.used} vs ${a}`)
   assert.equal(last.packet.report.used, b, `report.used 应等于 text.length：${last.packet.report.used} vs ${b}`)
   // 常驻分片：细纲/出场人物逐字相同；正典按行集合相同。
@@ -270,15 +277,10 @@ test('上下文恒定：第 1 章与第 300 章材料包都 ≤ 12000，差额�
       `第 1 章与第 300 章的「${title}」分片应逐字相同（实际长度 ${sectionOf(first.packet.text, title).length} vs ${sectionOf(last.packet.text, title).length}）`,
     )
   }
-  const canonLines = (text) => sectionOf(text, '正典').split('\n').filter(Boolean).sort()
-  assert.deepEqual(
-    canonLines(first.packet.text),
-    canonLines(last.packet.text),
-    '第 1 章与第 300 章的正典分片行集合应相同（顺序可因相关度打分不同）',
-  )
-  // 两章都拿到了同一份正典事实（第 5 章写入的沈砚旧伤），证明长程上下文没被截掉。
-  assert.ok(first.packet.text.includes('沈砚｜左手｜有旧伤'), '第 1 章材料包应包含正典里的沈砚旧伤')
-  assert.ok(last.packet.text.includes('沈砚｜左手｜有旧伤'), '第 300 章材料包应包含正典里的沈砚旧伤')
+  // 正典不再是「同一份全量」：queryCanon 按 atChapter 过滤，第 1 章看不见第 5 章才写入的旧伤。
+  // 这既防剧透，也防 agent 写出「第 1 章就知道第 5 章的事」。
+  assert.ok(!first.packet.text.includes('沈砚｜左手｜有旧伤'), '第 1 章不该看到第 5 章才确立的事实')
+  assert.ok(last.packet.text.includes('沈砚｜左手｜有旧伤'), '第 300 章应能检索到第 5 章的确立的事实')
 
   say(`上下文恒定：ch001=${a}、ch300=${b}、差=${delta}（预算 ${last.packet.report.budget}；差额全部来自 previous/recent/digest/style）`)
 })
@@ -307,8 +309,10 @@ test('上下文恒定：第 1 章与第 300 章的常驻分片逐片一致，总
   const b = last.packet.text.length
   const sliceOf = (packet, name) => (packet.report.slices ?? []).find(slice => slice.name === name) ?? null
   say(`上下文恒定（冷启动对照）：ch001=${a}、ch300=${b}、差 ${Math.abs(a - b)}`)
-  // 常驻分片：本章细纲 / 正典 / 人物速查。这三片跟章号无关，必须一样大。
-  for (const name of ['beats', 'canon', 'cast']) {
+  // 常驻分片里，本章细纲与人物速查跟章号无关，必须一样大；
+  // 正典不同：第 1 章还不知道第 2 章以后的事实（queryCanon 按 atChapter 过滤），
+  // 所以它随章号单调变满，上限是 cap 3200，而不是与第 300 章等长。
+  for (const name of ['beats', 'cast']) {
     const left = sliceOf(first.packet, name)
     const right = sliceOf(last.packet, name)
     assert.ok(left && right, `两包都应有 ${name} 分片`)
@@ -319,8 +323,14 @@ test('上下文恒定：第 1 章与第 300 章的常驻分片逐片一致，总
       `${name} 分片应与章号无关：ch001=${left.chars}、ch300=${right.chars}`,
     )
   }
-  // 总长差只能来自 previous/recent/digest/style 四片（cap 合计 4200）+ 下一章目标 300。
-  assert.ok(Math.abs(a - b) <= 4500, `两包总长差应 ≤ 相邻章分片上限 4500，实际 ${Math.abs(a - b)}（ch001=${a}、ch300=${b}）`)
+  const canonGap = (sliceOf(last.packet, 'canon')?.chars ?? 0) - (sliceOf(first.packet, 'canon')?.chars ?? 0)
+  assert.ok(canonGap >= 0, `第 300 章的正典不应少于第 1 章：${canonGap}`)
+  assert.ok((sliceOf(last.packet, 'canon')?.chars ?? 0) <= 3200, '正典分片不超过 cap 3200')
+  // 总长差 = previous/recent/digest/style 四片（4200）+ 正典增长（≤3200）+ 下一章目标（300）。
+  assert.ok(
+    Math.abs(a - b) <= 7700,
+    `两包总长差应 ≤ 7700，实际 ${Math.abs(a - b)}（ch001=${a}、ch300=${b}）`,
+  )
 })
 
 // ---------------------------------------------------------------- 4. 正典只增不减

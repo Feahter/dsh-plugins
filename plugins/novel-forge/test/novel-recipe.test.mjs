@@ -166,7 +166,7 @@ test('estimate：调用数按 v2 成本模型（每章 3.5 次 + 每卷卷纲）
   assert.ok(withReview.estTokensIn > 0)
   assert.ok(withReview.estTokensOut > 0)
   assert.match(withReview.note, /6 章 × 1200 字/)
-  assert.match(withReview.note, /第 N 章的写作材料和第 1 章一样大/)
+  assert.match(withReview.note, /每章材料是一份固定上限的 packet/)
 
   const withoutReview = novelRecipe.estimate({ ...paramsDefaults, chapters: 6, autoReview: false })
   assert.equal(withoutReview.calls, 22) // 不开审校：每章只剩细纲 + 草稿 + 摘要/正典补丁

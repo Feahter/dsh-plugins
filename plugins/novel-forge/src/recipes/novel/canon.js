@@ -465,10 +465,18 @@ export function queryCanon(canon, { cast, keywords, location, atChapter, limit }
   const keywordTerms = normalizeTerms(keywords)
   const locationText = norm(location)
   const max = Number.isFinite(limit) && limit >= 0 ? Math.floor(limit) : DEFAULT_LIMIT
+  // 只把「已经写到」的条目放进切片：第 5 章不该看见第 200 章才确立的事实/才开的线索。
+  // 边界写不清章号的条目（undefined / 自由文本）一律保留，宁可多给也不误删。
+  const at = chapterNumber(atChapter)
+  const beyond = (chapter) => {
+    const n = chapterNumber(chapter)
+    return at >= 0 && n >= 0 && n > at
+  }
 
   const facts = []
   for (const fact of Array.isArray(safe.facts) ? safe.facts : []) {
     if (!fact || typeof fact !== 'object') continue
+    if (beyond(fact.chapter)) continue
     const subject = norm(fact.s)
     const haystack = `${subject} ${norm(fact.p)} ${norm(fact.o)}`
     const relational =
@@ -485,6 +493,7 @@ export function queryCanon(canon, { cast, keywords, location, atChapter, limit }
   const notes = []
   for (const note of Array.isArray(safe.notes) ? safe.notes : []) {
     if (!note || typeof note !== 'object') continue
+    if (beyond(note.chapter)) continue
     const text = norm(note.text)
     const hit = tagsHit(note.tags, castTerms) || tagsHit(note.tags, keywordTerms) || textHit(text, keywordTerms)
     let score = hit ? 8 : 0
@@ -496,6 +505,7 @@ export function queryCanon(canon, { cast, keywords, location, atChapter, limit }
   const threads = []
   for (const thread of Array.isArray(safe.threads) ? safe.threads : []) {
     if (!thread || typeof thread !== 'object') continue
+    if (beyond(thread.opened)) continue
     const open = norm(thread.status) !== 'closed'
     // 未回收线索基础分 +5；opened 离当前章越远加分越多，避免长期伏笔被淹没（§4.2 规则 3）。
     // 只对「当前章之前已开启」的线索计年龄：还没写到的远期线索一律按新线索处理，
@@ -527,6 +537,7 @@ export function queryCanon(canon, { cast, keywords, location, atChapter, limit }
   const allTimeline = Array.isArray(safe.timeline) ? safe.timeline : []
   allTimeline.forEach((entry, index) => {
     if (!entry || typeof entry !== 'object') return
+    if (beyond(entry.chapter)) return
     let score = 0
     if (isRecent(entry.chapter, atChapter)) score += 4
     timeline.push({ score, index, entry })
@@ -579,6 +590,57 @@ function clip(text, maxChars) {
   return `${value.slice(0, room)}${TRUNCATED_TEXT}`
 }
 
+// 分节预算：先保底再按权重分，最后把没用掉的额度补给还没放完的节。
+// 保底只做两件事：硬规则/不可违背各留一小块；有未回收线索时留出「标题 + 至少 2 条正文」。
+// 这样第 500 章事实再多，线索区块也不会被事实挤掉（§4 承诺 open threads 进 packet）。
+const SECTION_WEIGHTS = {
+  rules: 0.2,
+  invariants: 0.2,
+  facts: 6,
+  notes: 1,
+  threads: 2,
+  entities: 1.2,
+  timeline: 0.8,
+}
+// 没放完的额度按此顺序补给；事实优先保持「占大头」，线索紧随其后。
+const SECTION_REFILL_ORDER = ['facts', 'threads', 'notes', 'entities', 'timeline', 'rules', 'invariants']
+// 小于这个额度时不再保证 2 条线索正文，只按比例分。
+const THREAD_GUARANTEE_CHARS = 1200
+const THREAD_GUARANTEE_LINES = 2
+// 硬规则/不可违背的保底占比上限：规则通常很短，这里只防止它们被事实挤没。
+const RULES_FLOOR_RATIO = 0.12
+
+/** 一节完整文本的长度（含标题与换行）；空行列表记 0。 */
+function sectionCost(title, lines) {
+  if (!lines.length) return 0
+  let cost = title.length + 1
+  for (let i = 0; i < lines.length; i += 1) cost += lines[i].length + (i ? 1 : 0)
+  return cost
+}
+
+/** 在 budget 内尽量多地取行（整行取，不切半行）；放不下第一行就整节省略。 */
+function takeSection(title, lines, budget) {
+  if (!lines.length || budget <= title.length + 1) return []
+  const out = []
+  let used = title.length + 1
+  for (const line of lines) {
+    const cost = line.length + (out.length ? 1 : 0)
+    if (used + cost > budget) break
+    out.push(line)
+    used += cost
+  }
+  return out
+}
+
+/** 线索保底额度：标题 + 前 2 条正文；小额度下退化为按比例。 */
+function threadFloor(title, lines, limit) {
+  const head = takeSection(title, lines.slice(0, THREAD_GUARANTEE_LINES), limit)
+  if (!head.length) return 0
+  const cost = sectionCost(title, head)
+  if (limit >= THREAD_GUARANTEE_CHARS) return cost
+  return Math.min(cost, Math.floor(limit * 0.35))
+}
+
 function factLine(fact) {
   const chapter = norm(fact.chapter) || '—'
   return `- [${chapter}] ${norm(fact.s)}｜${norm(fact.p)}｜${norm(fact.o)}`
@@ -596,72 +658,165 @@ function entityLine(name, entity) {
 }
 
 /**
- * 切片 → prompt 文本（带【】小标题）。超 maxChars 从尾部截断并标「…（已截断）」。
+ * 切片 → prompt 文本（带【】小标题）。
+ * 分节预算：有未回收线索且额度够（≥1200）时，先保底「标题 + 2 条正文」，
+ * 再把剩余额度按权重分给各节、最后回填；事实仍占大头，但不再能挤掉线索。
+ * 全部装得下时与旧实现逐字节一致；真的裁掉了才在末尾标「…（已截断）」。
  * 空切片返回空串（调用方据此省略整个分片）。
  */
 export function formatCanon(slice, { maxChars = 3200 } = {}) {
   if (!slice || typeof slice !== 'object') return ''
-  const lines = []
 
-  const rules = uniqueStrings(slice.rules)
-  if (rules.length) {
-    lines.push('【硬规则】')
-    for (const rule of rules) lines.push(`- ${rule}`)
+  const sections = []
+  const push = (key, title, lines) => {
+    if (lines.length) sections.push({ key, title, lines })
   }
 
-  const invariants = uniqueStrings(slice.invariants)
-  if (invariants.length) {
-    lines.push('【不可违背】')
-    for (const rule of invariants) lines.push(`- ${rule}`)
-  }
+  push('rules', '【硬规则】', uniqueStrings(slice.rules).map((rule) => `- ${rule}`))
+  push('invariants', '【不可违背】', uniqueStrings(slice.invariants).map((rule) => `- ${rule}`))
 
   const facts = Array.isArray(slice.facts) ? slice.facts : []
-  if (facts.length) {
-    lines.push('【已确立事实】')
-    for (const fact of facts) lines.push(factLine(fact))
-  }
+  push(
+    'facts',
+    '【已确立事实】',
+    facts.filter((fact) => fact && typeof fact === 'object').map(factLine),
+  )
 
   const notes = Array.isArray(slice.notes) ? slice.notes : []
-  if (notes.length) {
-    lines.push('【连续性注记】')
-    for (const note of notes) {
-      const chapter = norm(note.chapter) || '—'
-      lines.push(`- [${chapter}] ${norm(note.text)}`)
-    }
-  }
+  push(
+    'notes',
+    '【连续性注记】',
+    notes
+      .filter((note) => note && typeof note === 'object')
+      .map((note) => `- [${norm(note.chapter) || '—'}] ${norm(note.text)}`),
+  )
 
   const threads = (Array.isArray(slice.threads) ? slice.threads : []).filter(
     (thread) => thread && norm(thread.status) !== 'closed',
   )
-  if (threads.length) {
-    lines.push('【未回收线索】')
-    for (const thread of threads) {
+  push(
+    'threads',
+    '【未回收线索】',
+    threads.map((thread) => {
       const opened = norm(thread.opened) || '—'
-      lines.push(`- ${norm(thread.id)} [${opened}] ${norm(thread.text)}`)
-    }
-  }
+      const payoff = norm(thread.payoff)
+      const closedIn = norm(thread.closedIn)
+      // 章号必带；payoff / 回收章有就带上，方便 agent 判断这条线值不值得接。
+      const tail = payoff
+        ? `（payoff：${payoff}${closedIn ? ` @${closedIn}` : ''}）`
+        : closedIn
+          ? `（回收于：${closedIn}）`
+          : ''
+      return `- ${norm(thread.id)} [${opened}] ${norm(thread.text)}${tail}`
+    }),
+  )
 
   const entities = Array.isArray(slice.entities) ? slice.entities : []
-  if (entities.length) {
-    lines.push('【人物状态】')
-    for (const entity of entities) {
-      const name = norm(entity.name)
-      if (name) lines.push(entityLine(name, entity))
-    }
-  }
+  push(
+    'entities',
+    '【人物状态】',
+    entities
+      .filter((entity) => entity && norm(entity.name))
+      .map((entity) => entityLine(norm(entity.name), entity)),
+  )
 
   const timeline = Array.isArray(slice.timeline) ? slice.timeline : []
-  if (timeline.length) {
-    lines.push('【时间线】')
-    for (const entry of timeline) {
-      const chapter = norm(entry.chapter) || '—'
-      const when = norm(entry.when) || '—'
-      lines.push(`- ${chapter}｜${when}｜${norm(entry.event)}`)
+  push(
+    'timeline',
+    '【时间线】',
+    timeline
+      .filter((entry) => entry && typeof entry === 'object')
+      .map((entry) => `- ${norm(entry.chapter) || '—'}｜${norm(entry.when) || '—'}｜${norm(entry.event)}`),
+  )
+
+  if (!sections.length) return ''
+
+  const render = (section, lines) => `${section.title}\n${lines.join('\n')}`
+
+  // maxChars 非正/非有限：沿用旧行为，不裁剪。
+  if (!Number.isFinite(maxChars) || maxChars <= 0) {
+    return sections.map((section) => render(section, section.lines)).join('\n')
+  }
+
+  const limit = Math.floor(maxChars)
+  const full = sections.reduce(
+    (sum, section) => sum + sectionCost(section.title, section.lines),
+    0,
+  )
+  // 全部装得下：与旧实现逐字节一致，且不出现截断标记。
+  if (full <= limit) return sections.map((section) => render(section, section.lines)).join('\n')
+
+  const totalWeight =
+    sections.reduce((sum, section) => sum + (SECTION_WEIGHTS[section.key] ?? 1), 0) || 1
+
+  // 第一轮：保底（线索 2 条 / 规则小块），剩余额度按权重分。
+  const alloc = new Map()
+  let reserved = 0
+  for (const section of sections) {
+    let floor = 0
+    if (section.key === 'threads') {
+      floor = threadFloor(section.title, section.lines, limit)
+    } else if (section.key === 'rules' || section.key === 'invariants') {
+      floor = Math.min(
+        sectionCost(section.title, section.lines),
+        Math.floor(limit * RULES_FLOOR_RATIO),
+      )
+    }
+    alloc.set(section.key, floor)
+    reserved += floor
+  }
+  const pool = Math.max(0, limit - reserved)
+  for (const section of sections) {
+    const weight = SECTION_WEIGHTS[section.key] ?? 1
+    alloc.set(
+      section.key,
+      alloc.get(section.key) + Math.floor((pool * weight) / totalWeight),
+    )
+  }
+
+  const chosen = new Map()
+  let used = 0
+  for (const section of sections) {
+    const lines = takeSection(section.title, section.lines, alloc.get(section.key))
+    chosen.set(section.key, lines)
+    used += sectionCost(section.title, lines)
+  }
+
+  // 第二轮：把没用掉的额度回填给还没放完的节；循环到没有进展为止。
+  let leftover = limit - used
+  let progressed = true
+  while (leftover > 0 && progressed) {
+    progressed = false
+    for (const key of SECTION_REFILL_ORDER) {
+      const section = sections.find((item) => item.key === key)
+      if (!section) continue
+      const current = chosen.get(key)
+      if (current.length >= section.lines.length) continue
+      const currentCost = sectionCost(section.title, current)
+      const next = takeSection(section.title, section.lines, currentCost + leftover)
+      if (next.length <= current.length) continue
+      const nextCost = sectionCost(section.title, next)
+      chosen.set(key, next)
+      leftover -= nextCost - currentCost
+      used += nextCost - currentCost
+      progressed = true
     }
   }
 
-  if (!lines.length) return ''
-  return clip(lines.join('\n'), maxChars)
+  const parts = []
+  let dropped = false
+  for (const section of sections) {
+    const lines = chosen.get(section.key)
+    if (lines.length < section.lines.length) dropped = true
+    if (lines.length) parts.push(render(section, lines))
+  }
+  // 额度小到连「标题 + 一行」都放不下：退回旧的整串截断，至少让首行露出来。
+  if (!parts.length) {
+    return clip(sections.map((section) => render(section, section.lines)).join('\n'), limit)
+  }
+  const body = parts.join('\n')
+  if (!dropped) return clip(body, limit)
+  return clip(`${body}\n${TRUNCATED_TEXT}`, limit)
 }
 
 // ---------------------------------------------------------------- 自检

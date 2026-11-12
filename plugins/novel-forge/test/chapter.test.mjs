@@ -168,6 +168,16 @@ test('splitInline：CANON 是数组时按 facts 处理', () => {
   assert.deepEqual(split.canonPatch, { facts: [{ s: '陈婆', p: '知道', o: '账本在殡仪馆' }] })
 })
 
+test('splitInline：正文行内出现字面 <<<SUMMARY>>> 不算分隔符', () => {
+  const body = '他盯着纸页，慢慢写下那三个符号：<<<SUMMARY>>> 在句中。\n\n然后他把笔放下了。'
+  const split = splitInline(`${body}\n\n<<<SUMMARY>>>\n他认出了纸页上的三个符号。`)
+  assert.equal(split.body, body)
+  assert.equal(split.summary, '他认出了纸页上的三个符号。')
+  assert.equal(split.hadSummary, true)
+  assert.equal(split.hadCanon, false)
+  assert.equal(split.parseError, null)
+})
+
 test('splitInline：没有尾块时原样返回正文', () => {
   const split = splitInline(cleanProse())
   assert.equal(split.body, cleanProse())

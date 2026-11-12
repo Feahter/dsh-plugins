@@ -21,7 +21,7 @@ v0.2 的答案不是加阶段，是**换分工**。
 ## 1. 三条设计原则
 
 1. **状态在盘上，脚本负责搬运。** 一切可判定的东西（卷章数量、章节 id、预算、去重、冲突检测、进度、下一步该干什么）都由确定性代码完成，不花模型调用。
-2. **单章上下文是一个硬预算包（packet）。** 写作前由脚本按固定优先级、固定上限拼装，总长硬性 ≤ `contextBudget`；超了按优先级裁，并留下可核对的分片报告。**第 5 章和第 500 章的包一样大**，区别只在检索到什么。
+2. **单章上下文是一个硬预算包（packet）。** 写作前由脚本按固定优先级、固定上限拼装，总长硬性 ≤ `contextBudget`；超了按优先级裁，并留下可核对的分片报告。**包的大小不随章号增长**：常驻分片（本章细纲 / 正典 / 人物速查）逐片固定上限，第 5 章和第 500 章这几片一样大；只有「上一章 / 近几章摘要 / 文风样本」在开头几章还不存在，所以第 1 章会比第 300 章短（实测 3509 vs 8781，差 5272 字；理论边界 = 相邻四片 4200 + 正典增长 3200）。区别只在检索到什么。
 3. **一份契约，两个调用方。** 章节工作单元（`chapter.js`）同时服务于批量流水线（`novel_run`）和交互式 agent（`novel_context`/`novel_commit`）。两条路拼出同一份材料、写同一份盘、过同一套检查——不可能出现"自动跑的"和"agent 写的"两套口径。
 
 ## 2. 长篇分层：部 → 卷 → 章
@@ -315,15 +315,15 @@ export function audit({ chapters, canon, outline, params })  // 全书确定性�
 
 > 以下每条都在这台机器上跑过，数字是实测值，不是目标值。
 
-1. **`npm test` 全绿**：343 tests / 343 pass / 0 fail（约 3.0s）。新增用例：
-   - `test/canon.test.mjs`（24）：合并/去重/冲突/迁移/检索排序/死亡判定；5000 条事实 + 2000 条备注下 `queryCanon` 15–27ms。
+1. **`npm test` 全绿**：356 tests / 356 pass / 0 fail（约 3.5s）。新增用例：
+   - `test/canon.test.mjs`（28）：合并/去重/冲突/迁移/检索排序/死亡判定/时间切片（atChapter 之后的事实、线索、时间线不进切片）；5000 条事实 + 2000 条备注下 `queryCanon` 15–27ms。
    - `test/packet.test.mjs`（21）：任意 budget 下 `text.length ≤ budget`；4000/8000/12000/20000 实测 4000/5778/5778/5778（分片 cap 之和是上限，不是承诺）；required 优先、低优先级先被裁、determinism、`sum(chars)+sep*(kept-1)===used`。
-   - `test/plan.test.mjs`（22）：3000 章 → 40 卷 × 75 章（0.379ms）；章 id 宽度 = `max(2, 总章数位数)`；骨架 0 次模型；惰性展开幂等；v1 24 章迁移 id 不变。
+   - `test/plan.test.mjs`（23）：3000 章 → 40 卷 × 75 章（0.379ms）；章 id 宽度 = `max(2, 总章数位数)`；骨架 0 次模型；惰性展开幂等、乱序展开不重排章号；v1 迁移保留原 id（99 章 + params 120 仍 ch01…ch99）。
    - `test/consistency.test.mjs`（25）：8 条规则各一正一反（含"不误报"用例）。
-   - `test/chapter.test.mjs`（32）：prepare/commit/inspect/splitInline 的依赖注入契约。
-   - `test/tools-v2.test.mjs`（21）：13 个工具、`window` 透传、`novel_commit` 写 review、`novel_audit` 的 auditedAt 语义（干净写、有 block 不写）、`novel_plan` 在上一卷未写完时 `skipped` 且不启动 run。
+   - `test/chapter.test.mjs`（33）：prepare/commit/inspect/splitInline 的依赖注入契约；正文行内出现字面 `<<<SUMMARY>>>` 不算分隔符。
+   - `test/tools-v2.test.mjs`（23）：13 个工具、`window` 透传、`novel_commit` 写 review、`novel_audit` 的 auditedAt 语义（干净写、有 block 不写）、`novel_plan` 在上一卷未写完时 `skipped` 且不启动 run、300 章新项目 `novel_context {chapter:'5'}` 解析成 ch005 且只展开目标卷、未知章 commit 404 零落盘。
    - `test/longform.test.mjs`（11）：300 章 mock —— 骨架 5.2ms；ch001 包 6269 字 / ch300 8781 字；第 100 章与第 300 章包体差 0.43%；40 章 commit 后 facts 2→80、threads 1→40 全在（单调递增）；第 250 章仍能检索到第 5 章的「沈砚·左手有旧伤」；植入的死亡人物出场 → `dead-character(block)`，干净正文 0 误报；300 章 + 900 条事实全量 audit 272ms；分片账在 4000 预算下丢掉 style、保住 beats/canon。
-2. **向后兼容**：v1 项目（`ledger.json` + v1 outline）能直接打开并续跑；`novel_status`/`novel_read` 正常；v1 断言适配后仍全绿（`test/novel-recipe.test.mjs` 72、`test/integration.test.mjs` 4（含 window/defer 回归：6 章项目 window=2 三轮 2+2+2 写完，中途阶段 `partial`、被推迟章 `pending`）、`test/host.test.mjs` 23）。
+2. **向后兼容**：v1 项目（`ledger.json` + v1 outline）能直接打开并续跑；`novel_status`/`novel_read` 正常；v1 断言适配后仍全绿（`test/novel-recipe.test.mjs` 72、`test/integration.test.mjs` 6（window/defer 三轮 2+2+2；force 与占位草稿同样受 window 限制）、`test/host.test.mjs` 23）。
 3. **`node dev/verify.mjs` 通过**：侧栏注册、书架、新建预估、工作台（九段轨 + 事件流 + 正典入口）、章节四标签、草稿编辑、运行中取消；`console error 0 / page error 0`，截图落 `test/screens/`。
 4. **文档**：本文件 + `README.md`（agent-first 用法与 13 工具表）+ `docs/prompts.md`（12 个 builder 契约）。
 5. **v1 项目冒烟**（Lead 手动）：v1 fixture 在 9 段轨下能打开、能读 ledger、能续跑（旧 outline 迁移在内存完成，不写盘）。
@@ -382,3 +382,22 @@ export function audit({ chapters, canon, outline, params })  // 全书确定性�
 两段都可缺省；缺省时由引擎用独立小调用补齐。
 
 `BUDGET` 常量表：`draft` / `revise` 条目不再使用（预算归 packet）；其余保留并按 v0.2 需要微调。新增 `volumeChapters`（user ≤ 9000）与 `canonPatch`（user ≤ 1600）条目。
+
+## 13. T3 对抗审查：发现与处置（2026-11-12）
+
+独立审查者对 v0.2 做了一次「证明它没达成目标」的攻击，提出 4 个 block、4 个 warn、2 个 note。**全部已处理**，每条都补了回归用例：
+
+| # | 发现 | 处置 |
+|---|---|---|
+| 1 | ≥100 章新项目 `novel_context {chapter:'5'}` 打不开：章号宽度只从草稿推，得到 `ch05`，而卷表发的是 `ch005`；重试还会顺序展开 180 章 | `tools.js` 的宽度改用 `max(2, 大纲总章数位数, draft 位数)`；`ensureVolume` 支持点名卷，只展开目标章所在卷（实测 llm 2 次） |
+| 2 | 第 500 章材料包 0 条未回收线索：`formatCanon` 先拼事实再整串 clip，事实吃满 3200 | 分节预算 + 线索保底（≥2 条 / 1200 字），事实仍占大头；实测 ch500 进 8 条线索、总长 4578 |
+| 3 | `window` 在 `force` 或占位草稿下不封顶（写 4 章而不是 2 章） | 候选名单 = 全章序里「没草稿 / force / 草稿是占位」的章，window 限制候选前 N 个 |
+| 4 | `novel_commit` 接受不存在的章并落盘 canon/review | tools 层在写任何产物前校验章在 outline 里，否则 404 `CHAPTER_NOT_FOUND` |
+| 5 | 「死里逃生 + 下章出场」被误判 `dead-character(block)` | 放行词先于判死词（死里逃生/九死一生/诈死/未死…），补齐 遇害/殒命 等死亡词 |
+| 6 | v1 项目 `params.chapters ≥ 100` 但只有 99 章时，迁移按新宽度发 `ch001`，99 个草稿失联 | v1 迁移保留原章 id 字面值，新章才用新宽度 |
+| 7 | 文档宣称「第 5 章和第 500 章一样大」不成立 | 改为「常驻分片逐片固定上限」，并写清第 1 章天然短（实测差 5272） |
+| 8 | 正文含行内 `<<<SUMMARY>>>` 时被当分隔符，正文被静默截断 | 标记只认独立成行（`^<<<SUMMARY>>>$`），行内保留为正文 |
+| 9 | `atChapter` 只影响线索年龄，未来章节的事实会漏进当章材料包（剧透 + 角色提前知情） | `queryCanon` 过滤 `chapter/opened > atChapter` 的条目；章号缺失的条目保留 |
+| 10 | 1000 章 / 5000 facts 合并 14.9s、canon.json 659KB | 未改：这是累计 1000 次 commit 的总耗时（≈15ms/次），书级规模可接受；3000 章未实测 |
+
+审查脚本留在 `/tmp/t3_*.mjs`（临时文件，不属于仓库）。

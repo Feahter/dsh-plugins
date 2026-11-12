@@ -32,6 +32,9 @@ import { ForgeError } from '../../forge/errors.js'
 
 const SUMMARY_MARKER = '<<<SUMMARY>>>'
 const CANON_MARKER = '<<<CANON>>>'
+// 标记只有独立成行才算协议分隔符；行内出现是正文（角色可能就在写这三个符号）。
+const SUMMARY_LINE = /^<<<SUMMARY>>>\s*$/m
+const CANON_LINE = /^<<<CANON>>>\s*$/m
 const PLACEHOLDER_TEXT = /正文缺失|无法修订|无法摘要/
 const DEFAULT_PROMPT_MAX_TOKENS = 4096
 const FALLBACK_MAX_TOKENS = 16000
@@ -392,8 +395,10 @@ export function splitInline(text) {
   if (!raw.trim()) return result
 
   try {
-    const summaryAt = raw.indexOf(SUMMARY_MARKER)
-    const canonAt = raw.indexOf(CANON_MARKER)
+    const summaryMatch = SUMMARY_LINE.exec(raw)
+    const canonMatch = CANON_LINE.exec(raw)
+    const summaryAt = summaryMatch ? summaryMatch.index : -1
+    const canonAt = canonMatch ? canonMatch.index : -1
     if (summaryAt < 0 && canonAt < 0) return result
 
     result.hadSummary = summaryAt >= 0
@@ -652,7 +657,22 @@ function normalizeVolumeRows(rows, volume) {
 export async function ensureVolume({ outline, params = {}, read, llm, language }, ...rest) {
   const options = rest[0] ?? {}
   const current = outlineV2(outline, params)
-  const target = unplannedVolume(current)
+  // options.volume 可以点名展开某一卷（novel_context 直接取第 250 章时只展开 v09，
+  // 不把前面的卷一起拉进来）。点名卷已计划/不存在时返回 created:false，不退回顺序展开。
+  const requested = options?.volume !== undefined ? options.volume : null
+  let target = null
+  if (requested !== null) {
+    const wanted = String(requested)
+    const matched = (current.volumes ?? []).find(
+      (volume) => volume && (volume.id === wanted || String(volume.index) === wanted),
+    )
+    if (!matched || matched.planned || !(Number(matched.targetChapters) > 0)) {
+      return { outline: current, calls: 0, created: false }
+    }
+    target = matched
+  } else {
+    target = unplannedVolume(current)
+  }
   if (!target) return { outline: current, calls: 0, created: false }
   if (!llm || typeof llm.generate !== 'function') {
     throw new ForgeError('BAD_RECIPE', 'ensureVolume 需要注入 llm.generate')

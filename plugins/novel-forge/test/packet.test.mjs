@@ -4,6 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { assemble } from '../src/forge/budget.js'
+import { emptyCanon, mergeCanon, queryCanon, formatCanon } from '../src/recipes/novel/canon.js'
 import {
   SLICE_SPEC,
   buildPacket,
@@ -365,4 +366,49 @@ test('buildPacket：sections 与正文块逐字一致、report 可核对', () =>
   for (const row of report.slices) {
     if (row.chars > 0) assert.ok(sections[row.name].length === row.chars)
   }
+})
+
+// ---------------------------------------------------------------- canon 分节预算（T3）
+
+test('buildPacket：第 500 章仍带未回收线索，且总长 ≤ budget', () => {
+  let canon = emptyCanon()
+  for (let ch = 1; ch <= 500; ch += 1) {
+    const id = `ch${String(ch).padStart(3, '0')}`
+    canon = mergeCanon(
+      canon,
+      {
+        facts: [
+          { s: `人物${ch % 40}`, p: '状态', o: `在第${ch}章留下的旧伤`, chapter: id, tags: ch % 9 === 0 ? ['沈砚'] : [] },
+          { s: `物件${ch % 30}`, p: '位置', o: `第${ch}章被移动过`, chapter: id },
+        ],
+      },
+      { chapter: id },
+    )
+  }
+  canon = mergeCanon(
+    canon,
+    {
+      threads: Array.from({ length: 8 }, (_, i) => ({
+        text: `线索${i + 1}：账册第${i + 3}页的名字`,
+        opened: `ch00${i + 1}`,
+        status: 'open',
+      })),
+    },
+    { chapter: 'ch500' },
+  )
+  const slice = queryCanon(canon, {
+    cast: ['沈砚', '陈婆'],
+    keywords: ['账册'],
+    atChapter: 'ch500',
+    limit: 120,
+  })
+  const canonText = formatCanon(slice, { maxChars: 3200 })
+  const input = bigFixture()
+  input.chapter = { ...input.chapter, id: 'ch0500', index: 500, title: '第五百章' }
+  input.canonText = canonText
+  input.params.contextBudget = 12000
+  const { text } = buildPacket(input)
+  assert.ok(text.includes('【未回收线索】'), 'ch500 的 canon 分片必须带线索区块')
+  assert.ok(text.includes('账册第3页'), '至少一条线索正文要进材料包')
+  assert.ok(text.length <= 12000, `ch500 packet ${text.length} 超出 12000`)
 })

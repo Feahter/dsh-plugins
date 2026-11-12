@@ -186,12 +186,17 @@ function parseWhen(value) {
   return Number.isFinite(number) ? number : null
 }
 
+// 「活着」语义优先于「死」：死里逃生、九死一生这类值里含「死」但结论是人还活着。
+// 顺序不能反：先放行、再判未卜、最后才判死，否则会被 /死|亡/ 误杀。
+const ALIVE_STATE = /复活|存活|活着|生还|未死|没死|还活着|活下来|^活$|死里逃生|九死一生|死而复生|险死还生|劫后余生|诈死|假死/
+const DEATH_STATE = /死|亡|遇害|殒命|丧命|毙命|遇刺|被杀/
+
 function deathState(value) {
   const text = String(value ?? '').trim()
   if (!text) return null
-  if (/复活|存活|活着|生还|未死|没死|还活着|活下来|^活$/.test(text)) return 'alive'
-  if (/假死|生死未卜|生死不明/.test(text)) return null
-  if (/死|亡/.test(text)) return 'death'
+  if (ALIVE_STATE.test(text)) return 'alive'
+  if (/生死未卜|生死不明/.test(text)) return null
+  if (DEATH_STATE.test(text)) return 'death'
   return null
 }
 

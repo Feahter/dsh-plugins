@@ -58,27 +58,34 @@ function fmtDate(value) {
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-/**
- * 章 id 补零宽度跟随项目里实际的产物 key（outline 章数 >99 时是 ch005…ch120）。
- * 没有写过的章（没有 draft/chNNN 之类 key）时退回两位。
- */
-function chapterIdWidth(keys = []) {
-  let width = 0
+/** 章 id 补零宽度跟随项目规模（大纲总章数）与已落盘的产物 key。新项目没有草稿时，
+ *  300 章的项目也要按 ch005 解析，不能退回两位。 */
+function outlineChapterTotal(outline, params = {}) {
+  const chapters = Array.isArray(outline?.chapters) ? outline.chapters.length : 0
+  return Math.max(
+    Number(params?.chapters) || 0,
+    Number(outline?.totalChapters) || 0,
+    chapters,
+  )
+}
+
+function chapterIdWidth(keys = [], total = 0) {
+  let width = Math.max(2, String(Math.max(0, Math.floor(Number(total) || 0))).length)
   for (const key of keys) {
     const matched = String(key ?? '').match(/^draft\/ch(\d+)$/)
     if (matched) width = Math.max(width, matched[1].length)
   }
-  return width || 2
+  return width
 }
 
-function chapterIdOf(raw, keys = []) {
+function chapterIdOf(raw, keys = [], total = 0) {
   const match = String(raw ?? '').match(/(\d+)/)
   if (!match) return null
-  return `ch${String(Number(match[1])).padStart(chapterIdWidth(keys), '0')}`
+  return `ch${String(Number(match[1])).padStart(chapterIdWidth(keys, total), '0')}`
 }
 
 /** 先按大纲里的章 id / 序号定位，再退回补零推断（v1 项目没有 volume 章表时也能用）。 */
-function resolveChapterId(raw, outline, keys = []) {
+function resolveChapterId(raw, outline, keys = [], params = {}) {
   const input = String(raw ?? '').trim()
   if (!input) return null
   const chapters = Array.isArray(outline?.chapters) ? outline.chapters : []
@@ -90,7 +97,7 @@ function resolveChapterId(raw, outline, keys = []) {
   if (byIndex?.id) return byIndex.id
   const byOrder = chapters[num - 1]
   if (byOrder?.id) return byOrder.id
-  return chapterIdOf(input, keys)
+  return chapterIdOf(input, keys, outlineChapterTotal(outline, params))
 }
 
 /** 第一条未展开的卷里，第一章的 id 大概长什么样（还没落卷表时给 novel_context 一个目标）。 */
@@ -275,37 +282,55 @@ function stageLines(project) {
     .join('  ')
 }
 
+/** 章号 → 所在卷。章还没落表时按各卷 targetChapters 累加定位（与 merge 的预留章号一致）。 */
+function volumeForChapterId(outline, chapterId) {
+  const chapter = (outline?.chapters ?? []).find(item => item?.id === chapterId)
+  if (chapter) return volumeOfChapter(outline, chapterId)
+  const matched = String(chapterId ?? '').match(/(\d+)/)
+  const num = matched ? Number(matched[1]) : 0
+  if (!num) return null
+  let before = 0
+  for (const volume of outline?.volumes ?? []) {
+    const span = Math.max(0, Math.floor(Number(volume?.targetChapters) || 0))
+    if (num > before && num <= before + span) return volume
+    before += span
+  }
+  return null
+}
+
 /**
- * 卷纲懒展开：chapter.js 的 ensureVolume 只能从第一条未展开的卷开始，
- * 而且不返回 outline，所以这里自己循环并逐次落盘（不落盘的话下次还得重算）。
+ * 卷纲懒展开：只展开目标章所在的那一卷，不把前面的卷一起拉进 outline。
+ * ensureVolume 支持点名卷（options.volume），展开后立刻落盘，下次不用重算。
  */
 async function expandVolumeFor(engine, project, read, outline, chapterId, params) {
   const llm = engine.llm
-  let current = outline
-  let calls = 0
-  let persisted = false
-  for (let guard = 0; guard < 6; guard += 1) {
-    const chapter = (current.chapters ?? []).find(item => item?.id === chapterId)
-    const volume = chapter ? volumeOfChapter(current, chapterId) : null
-    if (chapter && volume?.planned) break
-    const pending = (current.volumes ?? []).find(item => item && !item.planned && Number(item.targetChapters) > 0)
-    if (!pending) break
-    if (!llm || typeof llm.generate !== 'function') {
-      throw httpError(
-        409,
-        'VOLUME_NOT_PLANNED',
-        `第 ${chapterId} 章所在卷还没展开，而当前没有可用模型。先用 novel_plan 展开卷纲（会调引擎的模型），再用 novel_context 取材料。`,
-      )
-    }
-    const result = await ensureVolume({ outline: current, params, read, llm, language: params.language || 'zh' })
-    calls += Number(result.calls) || 0
-    if (!result.created) break
-    current = result.outline
-    await engine.writeArtifact(project.id, 'outline', { kind: 'json', content: current }, { stage: 'agent' })
-    read.put('outline', current)
-    persisted = true
+  const chapter = (outline?.chapters ?? []).find(item => item?.id === chapterId)
+  const volume = volumeForChapterId(outline, chapterId)
+  const empty = { outline, calls: 0, persisted: false, expandedVolumes: 0, volume: volume?.id ?? null }
+  if (!volume || volume.planned) return { ...empty, chapterReady: Boolean(chapter) }
+  if (!llm || typeof llm.generate !== 'function') {
+    throw httpError(
+      409,
+      'VOLUME_NOT_PLANNED',
+      `第 ${chapterId} 章所在卷还没展开，而当前没有可用模型。先用 novel_plan 展开卷纲（会调引擎的模型），再用 novel_context 取材料。`,
+    )
   }
-  return { outline: current, calls, persisted }
+  const result = await ensureVolume(
+    { outline, params, read, llm, language: params.language || 'zh' },
+    { volume: volume.id },
+  )
+  const calls = Number(result.calls) || 0
+  if (!result.created) return { ...empty, calls }
+  await engine.writeArtifact(project.id, 'outline', { kind: 'json', content: result.outline }, { stage: 'agent' })
+  read.put('outline', result.outline)
+  return {
+    outline: result.outline,
+    calls,
+    persisted: true,
+    expandedVolumes: 1,
+    volume: volume.id,
+    chapterReady: (result.outline?.chapters ?? []).some(item => item?.id === chapterId),
+  }
 }
 
 export function createTools(engine) {
@@ -348,7 +373,7 @@ export function createTools(engine) {
           genre: { type: 'string', description: '类型：悬疑/奇幻/科幻/都市/历史/言情/恐怖/武侠/通用。' },
           chapters: { type: 'number', description: '章数，6–3000，默认 24。超过 60 章按卷惰性展开。' },
           chaptersPerVolume: { type: 'number', description: '每卷章数，10–60，默认 30；卷数超过 40 时脚本会自动抬高。' },
-          contextBudget: { type: 'number', description: '单章写作材料包的字数预算，默认 12000。长篇不必调大：第 5 章和第 500 章的包一样大。' },
+          contextBudget: { type: 'number', description: '单章写作材料包的字数预算，默认 12000。长篇不必调大：各分片有固定上限，包不会越写越长。' },
           wordsPerChapter: { type: 'number', description: '每章字数，800–8000，默认 3000。' },
           pov: { type: 'string', description: '第一人称/第三人称限知/第三人称全知。' },
           tone: { type: 'string', description: '文风关键词，如“冷、克制、潮湿的温情”。' },
@@ -477,7 +502,7 @@ export function createTools(engine) {
         }
         const knownKeys = Object.keys(project.artifacts ?? {})
         let chapterId = args.chapter
-          ? resolveChapterId(args.chapter, outline, knownKeys)
+          ? resolveChapterId(args.chapter, outline, knownKeys, params)
           : null
         if (args.chapter && !chapterId) throw httpError(400, 'BAD_PARAMS', `看不懂章节号：${args.chapter}`)
         if (!chapterId) {
@@ -546,7 +571,12 @@ export function createTools(engine) {
           canon: { stats: canonStats(prepared.canon), conflicts },
           nextActions: actions,
           calls: expanded.calls + prepared.calls,
-          persisted: { outline: expanded.persisted, beats: beatsPersisted },
+          persisted: {
+            outline: expanded.persisted,
+            beats: beatsPersisted,
+            volume: expanded.volume,
+            expandedVolumes: expanded.expandedVolumes,
+          },
         }
       },
       {
@@ -599,8 +629,19 @@ export function createTools(engine) {
         const read = await preloadProject(engine, project, { prefixes: [] })
         const outline = outlineOf(read, params)
         const knownKeys = Object.keys(project.artifacts ?? {})
-        const chapterId = resolveChapterId(args.chapter, outline, knownKeys)
+        const chapterId = resolveChapterId(args.chapter, outline, knownKeys, params)
         if (!chapterId) throw httpError(400, 'BAD_PARAMS', `看不懂章节号：${args.chapter ?? '（未给）'}；给 chapter，如 ch03 或 3。`)
+        // 显式章号必须已经在大纲里（v1 会在 outlineOf 里内存迁移成 v2）。否则允许落盘等于
+        // 把正文写进一本还没有这章的书：novel_next / 正典 / 审校全都对不上。
+        const inOutline = (outline?.chapters ?? []).some(chapter => chapter?.id === chapterId)
+        if (!inOutline) {
+          throw httpError(
+            404,
+            'CHAPTER_NOT_FOUND',
+            `大纲里没有第 ${chapterId} 章；先 novel_plan 展开所在卷，再提交。`,
+            { chapter: chapterId },
+          )
+        }
         await read.load([`beats/${chapterId}`])
 
         const result = commitChapter({

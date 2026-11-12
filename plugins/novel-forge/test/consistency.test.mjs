@@ -93,6 +93,34 @@ test('dead-character：死亡人物的别名出现在正文/cast 也能抓住', 
   assert.match(hits[0].issue, /陈婆/)
 })
 
+test('dead-character：「死里逃生」不是死亡，下章出场不报', () => {
+  const canon = baseCanon({
+    entities: { 沈砚: { kind: 'character' } },
+    facts: [{ s: '沈砚', p: '状态', o: '死里逃生', chapter: 'ch003', status: 'canon' }],
+  })
+  const findings = checkChapter({
+    text: '沈砚推开停尸间的门。沈砚在名册上找到第三行。',
+    canon,
+    chapter: { id: 'ch004', cast: ['沈砚'] },
+  })
+  assert.deepEqual(ofKind(findings, 'dead-character'), [])
+})
+
+test('dead-character：「已死」仍判死，下章出场照报 block', () => {
+  const canon = baseCanon({
+    entities: { 沈砚: { kind: 'character' } },
+    facts: [{ s: '沈砚', p: '状态', o: '已死', chapter: 'ch003', status: 'canon' }],
+  })
+  const findings = checkChapter({
+    text: '沈砚推开停尸间的门。沈砚在名册上找到第三行。',
+    canon,
+    chapter: { id: 'ch004', cast: ['沈砚'] },
+  })
+  const hits = ofKind(findings, 'dead-character')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'block')
+})
+
 // 2. timeline-regress -------------------------------------------------------
 
 test('timeline-regress：本章「第 3 天」早于上一章「第 5 天」→ warn', () => {

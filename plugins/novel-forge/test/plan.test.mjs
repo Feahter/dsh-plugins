@@ -248,6 +248,28 @@ test('migrateOutline：v1 无卷归属时按 effectivePerVolume 均分', () => {
   )
 })
 
+test('migrateOutline：v1 99 章 + params.chapters=120 时保留 ch01…ch99', () => {
+  const old = Array.from({ length: 99 }, (_, i) => v1Chapter(i))
+  const v1 = {
+    volumes: [
+      { title: '第一卷', purpose: 'p1', chapters: old.slice(0, 50) },
+      { title: '第二卷', purpose: 'p2', chapters: old.slice(50) },
+    ],
+    chapters: old,
+    totalChapters: 99,
+  }
+  const v2 = migrateOutline(v1, { params: { chapters: 120, chaptersPerVolume: 60 } })
+  assert.equal(v2.totalChapters, 120)
+  assert.equal(v2.chapters.length, 99)
+  assert.equal(v2.chapters[0].id, 'ch01')
+  assert.equal(v2.chapters[98].id, 'ch99')
+  assert.deepEqual(
+    v2.chapters.map((chapter) => chapter.id),
+    old.map((chapter) => chapter.id),
+  )
+  assert.deepEqual(v2.volumes.map((volume) => volume.chapterIds.length), [50, 49])
+})
+
 test('migrateOutline 对 v2 幂等（原样返回）', () => {
   const skeleton = buildOutlineSkeleton({ chapters: 300, chaptersPerVolume: 30 })
   assert.equal(migrateOutline(skeleton, { params: {} }), skeleton)

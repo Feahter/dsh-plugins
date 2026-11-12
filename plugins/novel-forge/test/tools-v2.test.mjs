@@ -418,6 +418,38 @@ test('novel_context：目标章所在卷未展开 → 先展开卷纲并落盘 o
   assert.ok(files.has('beats/ch01'))
 })
 
+test('novel_context：300 章骨架 + 空草稿 → chapter:"5" 解析成 ch005，只展开第一卷', async () => {
+  const llm = fakeLlm(spec => ({
+    text: JSON.stringify(
+      String(spec.system).includes('卷纲展开')
+        ? { chapters: rowsFor(30, '长卷') }
+        : beatsPayload,
+    ),
+  }))
+  const { engine, files } = makeHarness({
+    outline: skeletonOutline({ chapters: 300, per: 30 }),
+    llm,
+    params: { chapters: 300 },
+  })
+  const { value } = await run(engine, 'novel_context', { chapter: '5' })
+
+  assert.equal(value.chapter.id, 'ch005')
+  assert.equal(value.chapter.index, 5)
+  assert.equal(llm.calls.length, 2)
+  assert.equal(value.calls, 2)
+  assert.equal(value.persisted.expandedVolumes, 1)
+  assert.equal(value.persisted.volume, 'v01')
+
+  const saved = files.get('outline').content
+  assert.equal(saved.chapters.length, 30)
+  assert.equal(saved.volumes.filter(volume => volume.planned).length, 1)
+  assert.equal(saved.volumes[0].planned, true)
+  assert.equal(saved.chapters[0].id, 'ch001')
+  assert.equal(saved.chapters.at(-1).id, 'ch030')
+  assert.ok(saved.volumes.slice(1).every(volume => volume.planned === false))
+  assert.ok(files.has('beats/ch005'))
+})
+
 // ---------------------------------------------------------------- novel_commit
 
 test('novel_commit：落 draft / summary / canon，正典增长，verdict=pass', async () => {
@@ -461,6 +493,23 @@ test('novel_commit：没给 chapter 且大纲里推不出 → 可读 400', async
     () => run(engine, 'novel_commit', { text: cleanProse() }),
     error => error.code === 'BAD_PARAMS' && error.status === 400,
   )
+})
+
+test('novel_commit：大纲里没有该章 → 404 CHAPTER_NOT_FOUND，不落任何产物', async () => {
+  const { engine, files, calls } = makeHarness({
+    outline: skeletonOutline({ chapters: 300, per: 30 }),
+    params: { chapters: 300 },
+  })
+  await assert.rejects(
+    () => run(engine, 'novel_commit', { chapter: 'ch05', text: cleanProse() }),
+    error =>
+      error.code === 'CHAPTER_NOT_FOUND' &&
+      error.status === 404 &&
+      /大纲里没有第 ch005 章/.test(error.message) &&
+      /novel_plan/.test(error.message),
+  )
+  assert.equal(calls.writeArtifact.length, 0)
+  assert.deepEqual([...files.keys()], ['outline'])
 })
 
 // ---------------------------------------------------------------- novel_audit
