@@ -20,6 +20,17 @@ DeepSeek Harness 侧栏里的一个无限画布脑图。一句话起根，`Tab` 
 
 **和自媒体工作台联动。** 「从灵感导入」只读 `~/.dsh/media-desk/state.json` 的标题级字段，把选中的灵感落成根节点；「AI 发散」用宿主当前默认模型给出 3–6 个具体子想法，没有可用模型时明确报错，不编数据。
 
+## 语音输入（v0.3）
+
+装了 [realtime-voice](../realtime-voice) 就能直接在画布里说话：
+
+- 空态输入框旁、以及任何正在编辑的节点卡片右下角，都有一个麦克风按钮；
+- 语音识别、自动排版、中→英翻译全交给 `voiceInput` 服务，画布只负责把文字插到当前光标处；
+- 一句话说完先攒住，等下一句一起排版（realtime-voice 的连句校正），所以断句偏了也能被接回来；
+- 没装 realtime-voice 时按钮不出现，画布行为与之前完全一致（可选依赖，不写死）。
+
+接入方式是公开 API：`ctx.get('voiceInput')` → `attach({ id, captureInsertion, insertText })`，见 [realtime-voice 的 INTEGRATION.md](../realtime-voice/docs/INTEGRATION.md)。任何带输入框的插件都能照这个模式接。
+
 ## 截图
 
 | 换颜色（6 色自选） | 导出（5 种格式） |

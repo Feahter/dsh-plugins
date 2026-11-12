@@ -84,6 +84,8 @@ export const zh = {
   collapsed: '{n} 个节点已收起',
   shortcuts: '快捷键',
   docsEmpty: '还没有脑图',
+  voiceStart: '语音输入',
+  voiceStop: '停止语音输入',
 }
 
 export const en = {
@@ -171,6 +173,8 @@ export const en = {
   collapsed: '{n} nodes hidden',
   shortcuts: 'Shortcuts',
   docsEmpty: 'No mind maps yet',
+  voiceStart: 'Voice input',
+  voiceStop: 'Stop voice input',
 }
 
 /** {name} 占位替换，缺变量就留着原样，方便发现漏传。 */

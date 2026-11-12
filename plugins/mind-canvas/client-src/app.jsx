@@ -1,4 +1,5 @@
 import React from 'react'
+import { VoiceButton, spliceAt } from './voice.jsx'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -188,16 +189,27 @@ const NodeCard = React.memo(function NodeCard(props) {
   }),
   h('div', { className: 'mc-card' },
     editing
-      ? h('textarea', {
-        ref: textareaRef,
-        className: 'mc-card-edit nodrag nopan',
-        value: draft,
-        placeholder: t('nodePlaceholder'),
-        rows: 3,
-        onKeyDown,
-        onChange: event => setDraft(event.target.value),
-        onBlur: commit,
-      })
+      ? h('div', { className: 'mc-card-editing' },
+        h('textarea', {
+          ref: textareaRef,
+          className: 'mc-card-edit nodrag nopan',
+          value: draft,
+          placeholder: t('nodePlaceholder'),
+          rows: 3,
+          onKeyDown,
+          onChange: event => setDraft(event.target.value),
+          onBlur: commit,
+        }),
+        h(VoiceButton, {
+          id: `canvas-node:${props.id}`,
+          getField: () => textareaRef.current,
+          insert: (text, span) => {
+            setDraft(current => spliceAt(current, span, text))
+            return true
+          },
+          t,
+        }),
+      )
       : h('div', {
         className: `mc-card-text${text ? '' : ' is-empty'}`,
         onDoubleClick: event => {
@@ -432,6 +444,7 @@ export function MindCanvasPage(props) {
   const historyRef = React.useRef({ past: [], future: [] })
   const docRef = React.useRef(null)
   const stageRef = React.useRef(null)
+  const emptyInputRef = React.useRef(null)
   const saveTimer = React.useRef(null)
   const savedRevRef = React.useRef(-1)
   const dirtyRef = React.useRef(false)
@@ -1139,6 +1152,7 @@ export function MindCanvasPage(props) {
               onSubmit: event => { event.preventDefault(); addNode(null, '', null) },
             },
             h('input', {
+              ref: emptyInputRef,
               className: 'mc-input',
               placeholder: t('emptyPlaceholder'),
               'aria-label': t('emptyTitle'),
@@ -1150,6 +1164,20 @@ export function MindCanvasPage(props) {
                 addNode(null, value, null)
                 event.currentTarget.value = ''
               },
+            }),
+            h(VoiceButton, {
+              id: 'canvas-topic',
+              getField: () => emptyInputRef.current,
+              insert: (text, span) => {
+                const element = emptyInputRef.current
+                if (!element) return false
+                const next = spliceAt(element.value, span, text)
+                element.value = next
+                element.dispatchEvent(new Event('input', { bubbles: true }))
+                element.focus()
+                return true
+              },
+              t,
             }),
             h('button', { type: 'submit', className: 'mc-btn is-primary' }, icons.plus, t('addChild')),
             ),

@@ -73,7 +73,45 @@ const layout = {
   },
 }
 
-const services = { locale, slots, layout }
+// 语音输入服务（realtime-voice 提供）：记录 attach/toggle，并允许测试直接驱动插入，
+// 这样「文字落到哪个输入框的哪个位置」这段逻辑不用真开麦克风也能验。
+const voiceLog = []
+const voiceSurfaces = {}
+const voiceInput = {
+  version: '0.3.0-harness',
+  attach(surface) {
+    voiceLog.push({ type: 'attach', id: surface.id })
+    voiceSurfaces[surface.id] = surface
+    return {
+      id: surface.id,
+      start() { voiceLog.push({ type: 'start', id: surface.id }) },
+      stop() { voiceLog.push({ type: 'stop', id: surface.id }) },
+      toggle() {
+        voiceLog.push({ type: 'toggle', id: surface.id })
+        window.__voiceToggle = (window.__voiceToggle || 0) + 1
+      },
+      detach() {
+        voiceLog.push({ type: 'detach', id: surface.id })
+        delete voiceSurfaces[surface.id]
+      },
+    }
+  },
+}
+
+window.__voice = {
+  log: voiceLog,
+  surface(id) { return voiceSurfaces[id] },
+  insert(id, text, span) {
+    const surface = voiceSurfaces[id]
+    return surface ? surface.insertText(text, span) : false
+  },
+  capture(id) {
+    const surface = voiceSurfaces[id]
+    return surface ? surface.captureInsertion() : null
+  },
+}
+
+const services = { locale, slots, layout, voiceInput }
 
 const ctx = {
   effect(factory) {

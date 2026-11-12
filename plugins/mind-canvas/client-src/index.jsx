@@ -1,6 +1,7 @@
 import React from 'react'
 import { MindCanvasPage, injectStylesOnce } from './app.jsx'
 import { en, zh } from './strings.js'
+import { bindVoiceApi } from './voice.jsx'
 
 const NS = 'mind-canvas'
 const PANEL_KEY = 'mind-canvas'
@@ -56,6 +57,17 @@ export function apply(ctx) {
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'mind-canvas: dictionaries')
+
+  // 语音输入是可选增强：realtime-voice 晚加载也能补上，最多等 30 秒。
+  ctx.effect(() => {
+    bindVoiceApi(ctx)
+    let tries = 0
+    const timer = setInterval(() => {
+      tries += 1
+      if (bindVoiceApi(ctx) || tries > 30) clearInterval(timer)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, 'mind-canvas: voice bridge')
   ctx.effect(() => injectStylesOnce(document), 'mind-canvas: styles')
   ctx.effect(() => () => {
     runtime = { t: key => key, lang: 'zh' }

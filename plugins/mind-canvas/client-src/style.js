@@ -143,6 +143,26 @@ body[data-ds-dark-theme] .mc-root{ color-scheme: dark; }
   border-radius: var(--r-sm); padding: 5px 6px; resize: vertical; min-height: 56px; outline: none;
 }
 .mc-card-edit:focus{ border-color: var(--accent); }
+.mc-card-editing{ position: relative; }
+.mc-card-editing .mc-voice{ position: absolute; right: 4px; bottom: 4px; }
+
+/* ---------------------------------------------------------------- 语音按钮 */
+.mc-voice{
+  display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+  width: 26px; height: 26px; padding: 0; border-radius: 999px; cursor: pointer;
+  color: var(--ink3); background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: .5px solid var(--line-strong); transition: color .15s var(--ease), background .15s var(--ease);
+  flex: none;
+}
+.mc-voice:hover{ color: var(--ink); background: var(--card); }
+.mc-voice.is-live{ color: #fff; background: var(--accent); border-color: transparent; animation: mc-voice-pulse 1.6s var(--ease) infinite; }
+.mc-voice.is-waiting{ color: var(--accent); }
+.mc-voice.is-error{ color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line-strong)); }
+.mc-voice-dots{ font-size: 11px; line-height: 1; }
+@keyframes mc-voice-pulse{
+  0%, 100%{ box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%{ box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
 .mc-node .react-flow__handle{
   width: 7px; height: 7px; background: var(--card); border: 1px solid color-mix(in srgb, var(--tone) 70%, var(--line-strong));
   opacity: 0; transition: opacity .15s var(--ease);

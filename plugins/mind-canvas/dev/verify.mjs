@@ -103,6 +103,15 @@ try {
   check('空态引导可见', await page.locator('.mc-empty-card').isVisible())
   check('空态也有可交互的画布（能双击新建）', await page.locator('.react-flow__pane').count() === 1)
 
+  // 0. 语音接入：服务在就出现按钮，点它转给 voiceInput，插入落到输入框光标处
+  check('空态输入框旁出现语音按钮', await page.locator('.mc-empty-card .mc-voice').count() === 1)
+  await page.locator('.mc-empty-card .mc-voice').click()
+  check('点语音按钮转给 voiceInput.toggle', await page.evaluate(() => (window.__voice.log ?? []).some(item => item.type === 'toggle' && item.id === 'canvas-topic')))
+  const insertedAtCaret = await page.evaluate(() => window.__voice.insert('canvas-topic', '语音选题', { from: 0, to: 0 }))
+  check('voiceInput 插入落到输入框的光标位置', insertedAtCaret === true && (await page.locator('.mc-empty-card input').inputValue()) === '语音选题',
+    await page.locator('.mc-empty-card input').inputValue())
+  await page.locator('.mc-empty-card input').fill('')
+
   // 1. 空态输入回车 → 第一个根节点
   await page.locator('.mc-empty-card input').fill('AI 工具怎么讲才不像广告')
   await page.locator('.mc-empty-card input').press('Enter')
@@ -124,6 +133,18 @@ try {
     { timeout: 2000 },
   ).then(() => true, () => false)
   check('焦点已经落在新节点的输入框里（不用再点一下）', focused)
+  const voiceNodeButton = await page.locator('.mc-card-editing .mc-voice').count()
+  check('编辑节点时卡片里出现语音按钮', voiceNodeButton === 1)
+  const nodeId = await page.locator('.react-flow__node').nth(1).getAttribute('data-id')
+  const nodeInsert = await page.evaluate(id => {
+    const surface = window.__voice.surface(`canvas-node:${id}`)
+    if (!surface) return 'no-surface'
+    const span = surface.captureInsertion()
+    return surface.insertText('语音改写的标题', span)
+  }, nodeId)
+  check('语音插入写进节点草稿', nodeInsert === true && (await page.locator('.mc-card-edit').inputValue()).includes('语音改写的标题'),
+    await page.locator('.mc-card-edit').inputValue())
+  await page.locator('.mc-card-edit').fill('')
   await page.keyboard.type('具体选题')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(120)
