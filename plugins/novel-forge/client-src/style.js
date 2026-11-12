@@ -439,6 +439,14 @@ body[data-ds-dark-theme] .nf-root{
 .nf-ledger li:last-child{ border-bottom: 0; }
 .nf-ledger li time{ flex: none; font-family: var(--nf-mono); font-size: 10px; color: var(--nf-ink-3); padding-top: 2px; }
 
+/* 正典 */
+.nf-canon{ display: flex; flex-direction: column; gap: 20px; }
+.nf-canon-stats{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--nf-line); border: 1px solid var(--nf-line); }
+.nf-canon-stat{ background: var(--nf-card); padding: 11px 14px; }
+.nf-canon-stat b{ display: block; font-family: var(--nf-serif); font-size: 18px; font-weight: 600; line-height: 1.2; }
+.nf-canon-stat span{ display: block; margin-top: 2px; font-size: 9.5px; letter-spacing: .14em; color: var(--nf-ink-3); }
+@media (max-width: 640px){ .nf-canon-stats{ grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 /* 正文（markdown） */
 .nf-prose{
   font-family: var(--nf-serif); font-size: 15.5px; line-height: 2; color: var(--nf-ink);
@@ -589,6 +597,10 @@ body[data-ds-dark-theme] .nf-root{
 @media (prefers-reduced-motion: reduce){
   .nf-root *, .nf-root *::before, .nf-root *::after{ animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* 正典入口：与 9 段阶段轨隔开，避免被当成第 10 步 */
+.nf-rail-sep{ height: 0; margin: 10px 18px; border-top: 1px dashed var(--nf-line); }
+.nf-rail-canon .nf-rail-title small{ color: var(--nf-ink-3); }
 `
 
 let injected = false

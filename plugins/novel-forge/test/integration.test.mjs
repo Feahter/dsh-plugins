@@ -15,9 +15,15 @@ const PREMISE = '殡仪馆夜班的新人发现，停尸柜里的亡者会在凌
 
 function fakePrompts() {
   const one = () => ({ system: '你是小说家。', user: '写。', maxTokens: 4000, temperature: 0.8 })
+  // §12 的 12 个 builder：v0.2 没有 outline（骨架由脚本搭）。
+  // 卷纲/细纲在 chapter.js 内部调用，不传 phase；用 user 前缀让假模型认得出阶段
+  // （同时验证 createNovelRecipe({ prompts }) 真的把这两个 builder 注入进去了）。
   return {
-    premise: one, bible: one, characters: one, spine: one, outline: one,
-    beats: one, draft: one, summary: one, review: one, revise: one, blurb: one,
+    premise: one, bible: one, characters: one, spine: one,
+    volumeChapters: () => ({ ...one(), user: '【卷纲】写。' }),
+    beats: () => ({ ...one(), user: '【细纲】写。' }),
+    draft: one, summary: one,
+    canonPatch: one, review: one, revise: one, blurb: one,
   }
 }
 
@@ -38,7 +44,9 @@ const PROSE = [
 
 function fakeLlm() {
   const calls = []
-  const outlineChapters = Array.from({ length: 7 }, (_, index) => ({
+  // 模型多给 1 章：v2 的卷纲展开仍按 targetChapters 截断。标题故意不带「第 N 章」，
+  // 让 normalizeProse 统一拼章头。
+  const chapterRows = Array.from({ length: 7 }, (_, index) => ({
     title: `第${index + 1}夜`,
     goal: `查清第 ${index + 1} 位亡者的遗愿`,
     conflict: '老周阻拦，名册被人改过',
@@ -49,6 +57,14 @@ function fakeLlm() {
     where: '殡仪馆灵堂',
     cast: ['沈砚', '老周'],
   }))
+
+  // chapter.js 的卷纲/细纲调用不带 phase：只能靠 prompt 文本认阶段。
+  const promptKind = (opts = {}) => {
+    const text = `${opts.system ?? ''}\n${opts.user ?? ''}`
+    if (text.includes('【卷纲】')) return 'volumeChapters'
+    if (text.includes('【细纲】')) return 'beats'
+    return null
+  }
 
   const payload = (opts) => {
     const phase = opts.phase ?? opts.label
@@ -62,8 +78,33 @@ function fakeLlm() {
         genreTags: ['悬疑', '民俗'],
       }
     }
-    if (phase === 'outline') {
-      return { volumes: [{ title: '卷一 夜班', purpose: '入职与第一桩怪事', chapters: outlineChapters }] }
+    if (phase === 'characters') {
+      return {
+        cast: [
+          { name: '沈砚', role: '主角', gender: '男', want: '查清名册真相', fear: '自己也在名册上', secret: '他能听见亡者说话', voice: '克制、短句', arc: '从旁观到承担' },
+          { name: '老周', role: '守夜人', gender: '男', want: '平安退休', fear: '旧事败露', secret: '名册是他改的', voice: '油滑、爱打岔', arc: '从阻拦到坦白' },
+        ],
+      }
+    }
+    if (phase === 'spine') {
+      // v0.2：spine 是 JSON，卷数与脚本的卷计划对齐（6 章 / 每卷 30 → 1 卷）。
+      return {
+        mainline: '沈砚从替亡者了结遗愿，走到承认自己也在名册上',
+        ending: '他在头七夜里烧掉名册，留下殡仪馆的钥匙',
+        volumes: [
+          {
+            title: '卷一 夜班',
+            goal: '入职并接下第一桩亡者遗愿',
+            arc: '从怕鬼到敢听亡者说话',
+            cast: ['沈砚', '老周'],
+            opens: ['名册第三行是谁改的'],
+            closes: [],
+          },
+        ],
+      }
+    }
+    if (phase === 'volumeChapters') {
+      return { chapters: chapterRows }
     }
     if (phase === 'beats') {
       return {
@@ -74,24 +115,25 @@ function fakeLlm() {
         ],
       }
     }
-    if (phase === 'review') {
+    if (phase === 'canonPatch') {
       return {
-        findings: [{ severity: 'note', kind: 'pacing', where: '中段', issue: '节奏略慢', fix: '压缩一句' }],
-        ledgerPatch: {
-          facts: [{ text: '名册第三行被人改过', chapter: 'ch01' }],
-          threads: [{ text: '谁改了名册', status: 'open' }],
-          characters: { 沈砚: { location: '灵堂', state: '警觉', knows: ['亡者会说话'] } },
-          timeline: [{ chapter: 'ch01', when: '凌晨三点', event: '老人开口' }],
-        },
-        verdict: 'pass',
+        facts: [{ s: '名册', p: '第三行', o: '被人改过' }],
+        threads: [{ text: '谁改了名册', status: 'open' }],
+        entities: { 沈砚: { location: '灵堂', state: '警觉', knows: ['亡者会说话'] } },
       }
     }
-    if (phase === 'characters') {
+    if (phase === 'review') {
+      // v0.2 写 canonPatch；ledgerPatch 只用于兼容旧工程。
       return {
-        cast: [
-          { name: '沈砚', role: '主角', want: '查清名册真相', fear: '自己也在名册上', secret: '他能听见亡者说话', voice: '克制、短句', arc: '从旁观到承担' },
-          { name: '老周', role: '守夜人', want: '平安退休', fear: '旧事败露', secret: '名册是他改的', voice: '油滑、爱打岔', arc: '从阻拦到坦白' },
-        ],
+        findings: [{ severity: 'note', kind: 'pacing', where: '中段', issue: '节奏略慢', fix: '压缩一句' }],
+        canonPatch: {
+          facts: [{ s: '名册', p: '第三行', o: '被人改过' }],
+          notes: [{ text: '名册第三行的墨迹是新的' }],
+          threads: [{ text: '谁改了名册', status: 'open' }],
+          entities: { 沈砚: { location: '灵堂', state: '警觉', knows: ['亡者会说话'] } },
+          timeline: [{ when: '凌晨三点', event: '老人开口' }],
+        },
+        verdict: 'pass',
       }
     }
     if (phase === 'blurb') {
@@ -105,12 +147,15 @@ function fakeLlm() {
   return {
     calls,
     async generate(opts) {
-      calls.push({ phase: opts.phase ?? opts.label, chars: (opts.user ?? '').length })
-      const phase = opts.phase ?? opts.label
-      if (phase === 'prose' || phase === 'revise' || phase === 'summary' || phase === 'bible' || phase === 'spine' || phase === 'blurb') {
-        return { text: payload(opts), chars: 1000, model: 'fake' }
+      const explicit = opts.phase ?? opts.label
+      const phase = explicit ?? promptKind(opts)
+      calls.push({ phase, chars: (opts.user ?? '').length })
+      const value = payload({ ...opts, phase })
+      // spine 在 v0.2 是 JSON；文本阶段只有正文/摘要/设定/简介。
+      if (phase === 'prose' || phase === 'revise' || phase === 'summary' || phase === 'bible' || phase === 'blurb') {
+        return { text: value, chars: 1000, model: 'fake' }
       }
-      return { text: JSON.stringify(payload(opts)), chars: 1000, model: 'fake' }
+      return { text: JSON.stringify(value), chars: 1000, model: 'fake' }
     },
     async info() {
       return { available: true, provider: 'fake', model: 'fake' }
@@ -154,26 +199,44 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
 
   assert.equal(final.status, 'done', JSON.stringify(final.error))
   assert.equal(final.options.autoReview, undefined) // 参数在 project.params 上
-  assert.ok(llm.calls.length >= 30)
 
   const saved = await engine.getProject(project.id)
   assert.equal(saved.stages.premise.status, 'done')
+  assert.equal(saved.stages.spine.status, 'done')
+  assert.equal(saved.stages.outline.status, 'done')
   assert.equal(saved.stages.draft.status, 'done')
   assert.equal(Object.keys(saved.stages.draft.items).length, 6)
+
+  // §3 的九段阶段表，一条流水线跑下来全部完成。
+  const STAGES = ['premise', 'bible', 'characters', 'spine', 'outline', 'draft', 'review', 'revise', 'blurb']
+  assert.deepEqual(Object.keys(saved.stages).sort(), [...STAGES].sort())
+  for (const id of STAGES) assert.equal(saved.stages[id].status, 'done', `${id} 应当完成`)
   assert.equal(saved.activeRunId, null)
   assert.equal(saved.pendingReview, null)
 
-  // 大纲裁剪：模型给 7 章，计划 6 章
+  // 大纲：脚本搭 6 章骨架，卷纲模型多给 1 章，按 targetChapters 截掉。
   const outline = await engine.getArtifact(project.id, 'outline')
+  assert.equal(outline.content.version, 2)
   assert.equal(outline.content.totalChapters, 6)
-  assert.equal(outline.content.trimmed, 1)
-  assert.equal(outline.content.chapters.at(-1).id, 'ch06')
+  assert.equal(outline.content.chapters.length, 6)
+  assert.deepEqual(outline.content.chapters.map((chapter) => chapter.id), ['ch01', 'ch02', 'ch03', 'ch04', 'ch05', 'ch06'])
+  assert.equal(outline.content.volumes.length, 1)
+  assert.equal(outline.content.volumes[0].id, 'v01')
+  assert.equal(outline.content.volumes[0].planned, true)
+  assert.equal(outline.content.volumes[0].targetChapters, 6)
 
-  if (!(await engine.getArtifact(project.id, 'review/ch01'))) {
-    console.log('STAGES', JSON.stringify(saved.stages, null, 2))
-    console.log('LOGS', (await engine.getRun(final.id)).events.filter(e => e.type === 'log' || e.type === 'stage-end' || e.type === 'stage-start').map(e => `${e.type}:${JSON.stringify(e.data)}`).join('\n'))
-  }
-  // 每章四件套齐全
+  // v2 的调用计数：8 个单次阶段之外，每章「细纲 + 正文 + 摘要 + 正典补丁 + 审校」。
+  const count = (phase) => llm.calls.filter((call) => call.phase === phase).length
+  assert.equal(count('volumeChapters'), 1, '短篇一次展开全部卷')
+  assert.equal(count('beats'), 6)
+  assert.equal(count('prose'), 6)
+  // 正文没带内联摘要/正典补丁时各补一次；命中 warn 的章还会被修订并重新摘要。
+  assert.ok(count('summary') >= 6, `summary=${count('summary')}`)
+  assert.equal(count('canonPatch'), 6)
+  assert.equal(count('review'), 6)
+  assert.ok(llm.calls.length >= 30, `calls=${llm.calls.length}`)
+
+  // 每章四件套齐全（细纲在 draft 阶段补，不再有独立 beats 阶段）
   for (const id of ['ch01', 'ch03', 'ch06']) {
     assert.ok(await engine.getArtifact(project.id, `beats/${id}`), `${id} beats`)
     const draft = await engine.getArtifact(project.id, `draft/${id}`)
@@ -182,10 +245,13 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
     assert.ok(await engine.getArtifact(project.id, `review/${id}`), `${id} review`)
   }
 
-  // 审校合并进了 ledger
-  const ledger = await engine.getArtifact(project.id, 'ledger')
-  assert.ok(ledger.content.facts.length >= 1)
-  assert.ok(ledger.content.threads.some((thread) => thread.text.includes('名册')))
+  // 审校补丁合并进了 canon.json（v1 的 ledger.json 不再写）
+  const canon = await engine.getArtifact(project.id, 'canon')
+  assert.equal(canon.content.version, 2)
+  assert.ok(canon.content.facts.some((fact) => fact.o === '被人改过'))
+  assert.ok(canon.content.notes.some((note) => note.text.includes('名册第三行')))
+  assert.ok(canon.content.threads.some((thread) => thread.text.includes('名册')))
+  assert.equal(await engine.getArtifact(project.id, 'ledger'), null)
 
   // 领域统计：recipe.stats 钩子应把已写章节/字数写回 project.stats
   const afterStats = await engine.getProject(project.id)
@@ -223,24 +289,33 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
 
 test('reviewGate：大纲与草稿后各停一次，continue 能续跑', async (t) => {
   const { engine, project } = await setup(t, { reviewGate: true })
-  const started = await engine.startRun(project.id)
-  const first = await waitRun(engine, started.id)
+  const gates = []
+  let run = await engine.startRun(project.id)
+  let final = null
+  for (let guard = 0; guard < 10; guard += 1) {
+    const result = await waitRun(engine, run.id)
+    if (result.status !== 'paused') {
+      final = result
+      break
+    }
+    const paused = await engine.getProject(project.id)
+    gates.push(paused.pendingReview.stage)
+    if (gates.length === 1) {
+      assert.equal(paused.pendingReview.stage, 'outline')
+      assert.deepEqual(paused.pendingReview.nextStages, ['draft', 'review', 'revise', 'blurb'])
+    }
+    if (gates.length === 2) {
+      assert.equal(paused.pendingReview.stage, 'draft')
+      assert.deepEqual(paused.pendingReview.nextStages, ['review', 'revise', 'blurb'])
+      assert.equal(Object.keys(paused.stages.draft.items).length, 6)
+    }
+    run = await engine.startRun(project.id, { stages: paused.pendingReview.nextStages })
+  }
 
-  assert.equal(first.status, 'paused')
-  const afterOutline = await engine.getProject(project.id)
-  assert.equal(afterOutline.pendingReview.stage, 'outline')
-  assert.deepEqual(afterOutline.pendingReview.nextStages, ['beats', 'draft', 'review', 'revise', 'blurb'])
-
-  const second = await engine.startRun(project.id, { stages: afterOutline.pendingReview.nextStages })
-  const secondRun = await waitRun(engine, second.id)
-  assert.equal(secondRun.status, 'paused')
-  const afterDraft = await engine.getProject(project.id)
-  assert.equal(afterDraft.pendingReview.stage, 'draft')
-  assert.deepEqual(afterDraft.pendingReview.nextStages, ['review', 'revise', 'blurb'])
-  assert.equal(Object.keys(afterDraft.stages.draft.items).length, 6)
-
-  const third = await engine.startRun(project.id, { stages: afterDraft.pendingReview.nextStages })
-  const final = await waitRun(engine, third.id)
+  // v2 的 gate 挂在 outline/draft/review/revise 四段上；关键是前两次停在
+  // 「大纲可以否掉」和「草稿可以否掉」的位置，且继续跑一定能收尾。
+  assert.deepEqual(gates.slice(0, 2), ['outline', 'draft'])
+  assert.ok(gates.length >= 2)
   assert.equal(final.status, 'done', JSON.stringify(final.error))
 
   const done = await engine.getProject(project.id)
@@ -262,4 +337,33 @@ test('autoReview=false：审校/修订被跳过，导出仍可用', async (t) =>
   const saved = await engine.getProject(project.id)
   assert.equal(saved.stages.review.status, 'skipped')
   assert.ok(await engine.getArtifact(project.id, 'blurb'))
+})
+
+test('window：一轮最多推进 N 章，没排到的章 defer 成 pending，下一轮从断点接着写', async (t) => {
+  const { engine, project } = await setup(t)
+  const boot = await engine.startRun(project.id, { stages: ['premise', 'bible', 'characters', 'spine', 'outline'] })
+  await waitRun(engine, boot.id)
+
+  const first = await engine.startRun(project.id, { stages: ['draft'], window: 2 })
+  await waitRun(engine, first.id)
+  const afterFirst = await engine.getProject(project.id)
+  const draftedOnce = Object.keys(afterFirst.artifacts).filter(key => key.startsWith('draft/'))
+  assert.deepEqual(draftedOnce.sort(), ['draft/ch01', 'draft/ch02'], '一轮只写 2 章')
+  // defer 而不是静默 done：否则阶段显示完成、后续 run 直接跳过，永远写不完。
+  assert.equal(afterFirst.stages.draft.status, 'partial')
+  assert.equal(afterFirst.stages.draft.items.ch03, 'pending', '第一个被推迟的章记 pending')
+  assert.deepEqual(Object.keys(afterFirst.stages.draft.items).sort(), ['ch01', 'ch02', 'ch03'], '推迟后就停手，不再逐个登记')
+
+  const second = await engine.startRun(project.id, { stages: ['draft'], window: 2 })
+  await waitRun(engine, second.id)
+  const afterSecond = await engine.getProject(project.id)
+  const draftedTwice = Object.keys(afterSecond.artifacts).filter(key => key.startsWith('draft/'))
+  assert.deepEqual(draftedTwice.sort(), ['draft/ch01', 'draft/ch02', 'draft/ch03', 'draft/ch04'])
+
+  const third = await engine.startRun(project.id, { stages: ['draft'], window: 10 })
+  await waitRun(engine, third.id)
+  const afterThird = await engine.getProject(project.id)
+  const drafts = Object.keys(afterThird.artifacts).filter(key => key.startsWith('draft/'))
+  assert.equal(drafts.length, 6, '窗口大于剩余章数时一次补齐')
+  assert.equal(afterThird.stages.draft.status, 'done')
 })

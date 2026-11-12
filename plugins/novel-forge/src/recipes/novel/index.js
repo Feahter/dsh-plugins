@@ -1,11 +1,15 @@
-// novel recipe — 小说 recipe 定义。
-// 契约：docs/architecture.md §3.1（recipe 形状）、§4.1（params）、§4.2（stages）、§4.4（JSON 形状）。
+// novel recipe — 小说 recipe 定义（v0.2 agent-first）。
+// 契约：docs/architecture-v2.md §2（卷章分层）、§3（9 段阶段表）、§4（正典）、§6（chapter.js）、§12（提示词）。
 // 本文件只做编排：拼 prompt 输入 → 调 ctx.llm.generate → 校验/规范化 → 返回 artifacts。
+// 每章的工作量是固定的：细纲 1 + 草稿 1 + 摘要/正典摊 0.5 + 审校 1 + 修订摊薄 = 3.5 次调用。
 import { z } from 'zod'
 import { createPrompts, SUMMARY_MARKER, sexOf } from './prompts/zh.js'
 import { defaultCraft, severityRank, countCjk } from './craft.js'
-import { normalizeOutline, chaptersOf } from './outline.js'
-import { createLedger, mergeLedger, slimLedger, characterBrief, emptyLedger } from './ledger.js'
+import { chaptersOf } from './outline.js'
+import { characterBrief } from './ledger.js'
+import { buildPacket } from './packet.js'
+import * as plan from './plan.js'
+import * as canonLib from './canon.js'
 import { markdownExport, epubExport } from './export.js'
 
 // forge/errors.js 由引擎负责；并行施工/单测先行时用兼容兜底（形状一致，engine 只看 code）。
@@ -29,6 +33,16 @@ async function loadForgeError() {
 
 const ForgeError = await loadForgeError()
 
+// chapter.js 归 L5 并行施工：还没落盘时整个 recipe 仍要能被 import / validate；
+// 执行到章节工作单元时再由 requireChapter() 抛可读的 BAD_RECIPE。
+let chapterUnit = null
+let chapterUnitError = null
+try {
+  chapterUnit = await import('./chapter.js')
+} catch (err) {
+  chapterUnitError = err
+}
+
 // ---------------------------------------------------------------- params
 
 const GENRES = ['悬疑', '奇幻', '科幻', '都市', '历史', '言情', '恐怖', '武侠', '通用']
@@ -42,6 +56,8 @@ export const paramsDefaults = {
   language: 'zh',
   chapters: 24,
   wordsPerChapter: 3000,
+  chaptersPerVolume: 30,
+  contextBudget: 12000,
   pov: '第三人称限知',
   tone: '',
   styleGuide: '',
@@ -62,8 +78,20 @@ const paramsSchema = {
     genre: { type: 'string', enum: GENRES },
     audience: { type: 'string', enum: AUDIENCES },
     language: { type: 'string', enum: ['zh', 'en'] },
-    chapters: { type: 'integer', minimum: 6, maximum: 120 },
+    chapters: { type: 'integer', minimum: 6, maximum: 3000, description: '总章数；长书按卷惰性展开' },
     wordsPerChapter: { type: 'integer', minimum: 800, maximum: 8000 },
+    chaptersPerVolume: {
+      type: 'integer',
+      minimum: 10,
+      maximum: 60,
+      description: '每卷章数；chapters/chaptersPerVolume 超过 40 卷时自动抬升以保证卷数 ≤40',
+    },
+    contextBudget: {
+      type: 'integer',
+      minimum: 4000,
+      maximum: 30000,
+      description: '写一章的提示词预算（字符）。第 N 章的写作材料和第 1 章一样大，不随章号增长',
+    },
     pov: { type: 'string', enum: POVS },
     tone: { type: 'string', maxLength: 200 },
     styleGuide: { type: 'string', maxLength: 4000 },
@@ -179,11 +207,16 @@ const ledgerPatchSchema = z.object({
   canonRules: z.array(z.string()).optional(),
 })
 
-// 模型少给 ledgerPatch / verdict 是常态，不能因此丢掉整份审校结果：
-// 两者可选，verdict 缺失时由 block/warn 计数推断（见 review stage）。
+// §4.4：正典补丁形状宽松收（facts/notes/threads/entities/timeline/invariants 都交给 mergeCanon），
+// 模型多写字段不该让整章补丁作废。
+const canonPatchSchema = z.object({}).passthrough()
+
+// 模型少给 ledgerPatch / canonPatch / verdict 是常态，不能因此丢掉整份审校结果：
+// 三者可选，verdict 缺失时由 block/warn 计数推断（见 review stage）。
 const reviewSchema = z.object({
   findings: z.array(findingSchema),
   ledgerPatch: ledgerPatchSchema.nullish(),
+  canonPatch: canonPatchSchema.nullish(),
   verdict: z.enum(['pass', 'revise']).optional(),
 })
 
@@ -192,6 +225,21 @@ const blurbSchema = z.object({
   tagline: z.string(),
   blurb: z.string(),
   tags: z.array(z.string()),
+})
+
+// v2：spine 是结构化 JSON；卷数与卷计划的对齐在 alignSpine 里做（模型多给/少给都不算错）。
+const spineVolumeSchema = z.object({
+  title: z.string().catch(''),
+  goal: z.string().catch(''),
+  arc: z.string().catch(''),
+  cast: z.array(z.string()).catch([]),
+  opens: z.array(z.string()).catch([]),
+  closes: z.array(z.string()).catch([]),
+})
+const spineSchema = z.object({
+  mainline: z.string().min(1),
+  ending: z.string().catch(''),
+  volumes: z.array(spineVolumeSchema).catch([]),
 })
 
 // ---------------------------------------------------------------- helpers
@@ -621,16 +669,6 @@ function chapterNumber(ctx) {
   return index + 1
 }
 
-function previousChapter(ctx) {
-  const index = Number.isInteger(ctx.index) ? ctx.index : 0
-  return ctx.items?.[index - 1] ?? null
-}
-
-function nextChapter(ctx) {
-  const index = Number.isInteger(ctx.index) ? ctx.index : 0
-  return ctx.items?.[index + 1] ?? null
-}
-
 function collectCastNames(beats, outlineChapter) {
   const names = []
   const push = (name) => {
@@ -642,33 +680,6 @@ function collectCastNames(beats, outlineChapter) {
     for (const name of scene?.cast ?? []) push(name)
   }
   return names
-}
-
-/** 按 §4.3 预算拼装写章材料；每一块都过 ctx.fit。 */
-function buildDraftMaterials(ctx) {
-  const item = ctx.item ?? {}
-  const beats = jsonOr(ctx, `beats/${item.id}`, null)
-  const previous = previousChapter(ctx)
-  const next = nextChapter(ctx)
-
-  const materials = {
-    beats: fit(ctx, textOf(ctx, `beats/${item.id}`), 2500),
-    previousSummary: previous ? fit(ctx, textOf(ctx, `summary/${previous.id}`), 800) : '',
-    ledger: fit(ctx, slimLedger(jsonOr(ctx, 'ledger', emptyLedger()), { maxChars: 3000 }), 3000),
-    nextGoal: next ? fit(ctx, `目标：${next.goal ?? ''}\n转折：${next.turn ?? ''}`, 400) : '',
-    characters: fit(
-      ctx,
-      characterBrief(
-        jsonOr(ctx, 'characters', {})?.cast ?? [],
-        collectCastNames(beats, item),
-        1500,
-      ),
-      1500,
-    ),
-    styleGuide: fit(ctx, ctx.params?.styleGuide ?? '', 1500),
-    previousHook: previous?.hook ?? '',
-  }
-  return materials
 }
 
 function draftMaxTokens(params = {}) {
@@ -684,7 +695,7 @@ function clampInt(value, fallback, min, max) {
 
 function hasPatch(patch) {
   if (!patch || typeof patch !== 'object') return false
-  return ['facts', 'threads', 'characters', 'timeline', 'canonRules'].some((key) => {
+  return ['facts', 'notes', 'threads', 'entities', 'characters', 'timeline', 'canonRules', 'invariants'].some((key) => {
     const value = patch[key]
     if (Array.isArray(value)) return value.length > 0
     if (value && typeof value === 'object') return Object.keys(value).length > 0
@@ -715,12 +726,270 @@ function salvageReview(error) {
       if (parsed.success) findings.push(parsed.data)
     }
   }
-  const patch = raw?.ledgerPatch == null ? null : ledgerPatchSchema.safeParse(raw.ledgerPatch)
+  const rawPatch = raw?.canonPatch ?? raw?.ledgerPatch
+  const patch = rawPatch == null ? null : canonPatchSchema.safeParse(rawPatch)
   return {
     findings,
+    canonPatch: patch?.success ? patch.data : null,
     ledgerPatch: patch?.success ? patch.data : null,
     verdict: undefined,
   }
+}
+
+// ---------------------------------------------------------------- v2 章节工作单元
+
+/**
+ * chapter.js 归 L5 并行施工：文件还没落盘时整个 recipe 仍要能被 import / validate，
+ * 只有真跑到章节工作单元时才抛可读的 BAD_RECIPE，而不是 import 阶段整体炸掉。
+ */
+function requireChapter() {
+  if (chapterUnit && typeof chapterUnit.prepareChapter === 'function') return chapterUnit
+  const why = chapterUnitError?.message ?? 'chapter.js 没有导出 prepareChapter'
+  throw new ForgeError('BAD_RECIPE', `章节工作单元不可用：${why}`, { file: 'src/recipes/novel/chapter.js' })
+}
+
+/** chapter.js 的 read 契约：json → 对象，md → 字符串，没有 → null。 */
+// 本轮窗口（§7）：缺章名单必须在 run 开头定一次，不能边写边算——
+// 边写边算会让名单越来越短，每章都落在窗口第 0 位，window 等于失效。
+const RUN_WINDOWS = new Map()
+
+function outsideWindow(ctx, id, outline) {
+  const size = Number(ctx.run?.options?.window) || 0
+  if (size <= 0) return false
+  const key = String(ctx.run?.id ?? 'run')
+  let pending = RUN_WINDOWS.get(key)
+  if (!pending) {
+    pending = new Set(
+      chaptersOf(outline)
+        .filter((chapter) => chapter?.id && !has(ctx, `draft/${chapter.id}`))
+        .map((chapter) => String(chapter.id)),
+    )
+    if (RUN_WINDOWS.size > 64) RUN_WINDOWS.clear()
+    RUN_WINDOWS.set(key, pending)
+  }
+  const list = [...pending]
+  const position = list.indexOf(String(id))
+  return position >= size
+}
+
+function readerOf(ctx, overrides = {}) {
+  return (key) => {
+    const name = String(key)
+    if (Object.prototype.hasOwnProperty.call(overrides, name)) return overrides[name]
+    const artifact = typeof ctx.read === 'function' ? ctx.read(name) : null
+    if (!artifact) return null
+    return artifact.kind === 'json' ? artifact.content : String(artifact.content ?? '')
+  }
+}
+
+/** 读 v2 outline；v1 项目先做内存迁移（是否落盘由 outline stage 决定）。 */
+function currentOutline(ctx) {
+  const outline = jsonOr(ctx, 'outline', null)
+  if (!outline) return null
+  return plan.isV2(outline) ? outline : plan.migrateOutline(outline, { params: ctx.params ?? {} })
+}
+
+function chaptersTotal(params = {}) {
+  return clampInt(params.chapters, paramsDefaults.chapters, 6, 3000)
+}
+
+function perVolumeOf(params = {}) {
+  return clampInt(params.chaptersPerVolume, paramsDefaults.chaptersPerVolume, 10, 60)
+}
+
+/** §2 / §3：卷计划。spine 的 prompt ctx 与落盘对齐都走这一份，保证两边卷数一致。 */
+function volumePlanFor(params = {}) {
+  const total = chaptersTotal(params)
+  const per = plan.effectivePerVolume(total, perVolumeOf(params))
+  const count = Math.max(1, plan.volumeCount(total, per))
+  const base = Math.floor(total / count)
+  return Array.from({ length: count }, (_, offset) => ({
+    index: offset + 1,
+    title: `第${offset + 1}卷`,
+    // 末卷吃余数：与 plan.buildOutlineSkeleton 的切分保持一致。
+    targetChapters: offset === count - 1 ? total - base * (count - 1) : base,
+  }))
+}
+
+/** 把模型给的 spine 强制对齐卷计划：多了裁、少了补兜底卷，卷标题永不为空。 */
+function alignSpine(raw, volumePlan) {
+  const data = raw && typeof raw === 'object' ? raw : {}
+  const source = Array.isArray(data.volumes) ? data.volumes : []
+  const asList = (value) =>
+    Array.isArray(value)
+      ? value
+          .map((row) => String(row ?? '').trim())
+          .filter(Boolean)
+      : []
+  const volumes = volumePlan.map((slot, offset) => {
+    const entry = source[offset] && typeof source[offset] === 'object' ? source[offset] : {}
+    return {
+      id: plan.volumeId(slot.index),
+      index: slot.index,
+      title: String(entry.title ?? '').trim() || slot.title,
+      goal: String(entry.goal ?? '').trim(),
+      arc: String(entry.arc ?? '').trim(),
+      cast: asList(entry.cast),
+      opens: asList(entry.opens),
+      closes: asList(entry.closes),
+      targetChapters: slot.targetChapters,
+    }
+  })
+  const notes = []
+  if (source.length > volumes.length) notes.push(`模型多给 ${source.length - volumes.length} 卷，已按卷计划裁掉`)
+  if (source.length < volumes.length) notes.push(`模型少给 ${volumes.length - source.length} 卷，已用兜底卷补足`)
+  return {
+    spine: {
+      version: 2,
+      mainline: String(data.mainline ?? '').trim(),
+      ending: String(data.ending ?? '').trim(),
+      volumes,
+    },
+    notes,
+  }
+}
+
+/**
+ * canon 种子（§4.3）：v2 canon 直接用；旧形状合并；只有 ledger 的 v1 项目迁移，且不删 ledger。
+ * 幂等：重复调用不会改变已有 v2 canon。
+ */
+function seedCanon(ctx, spine) {
+  const existing = jsonOr(ctx, 'canon', null)
+  if (existing && typeof existing === 'object' && Number(existing.version) === canonLib.CANON_VERSION) {
+    return { canon: existing, source: 'canon', changed: false }
+  }
+  if (existing && typeof existing === 'object') {
+    return { canon: canonLib.mergeCanon(canonLib.emptyCanon(), existing, {}), source: 'canon', changed: true }
+  }
+  const ledger = jsonOr(ctx, 'ledger', null)
+  if (ledger && typeof ledger === 'object') {
+    return {
+      canon: canonLib.migrateLedger(ledger, { characters: jsonOr(ctx, 'characters', null) }),
+      source: 'ledger',
+      changed: true,
+    }
+  }
+  return {
+    canon: canonLib.createCanon({
+      brief: jsonOr(ctx, 'brief', {}),
+      characters: jsonOr(ctx, 'characters', null),
+      params: ctx.params ?? {},
+      spine: spine ?? {},
+    }),
+    source: 'new',
+    changed: true,
+  }
+}
+
+/** 正典提示词片段：按本章出场人物 + 章号裁剪，永不超预算。 */
+function canonTextFor(canon, names, chapterId, maxChars = 3200) {
+  try {
+    const slice = canonLib.queryCanon(canon, { cast: names, atChapter: chapterId, limit: 80 })
+    return canonLib.formatCanon(slice, { maxChars })
+  } catch {
+    return ''
+  }
+}
+
+function siblingChapter(outline, chapterId, offset) {
+  const chapters = Array.isArray(outline?.chapters) ? outline.chapters : []
+  const index = chapters.findIndex((chapter) => chapter?.id === chapterId)
+  if (index < 0) return null
+  return chapters[index + offset] ?? null
+}
+
+function chapterNoOf(ctx, chapter) {
+  const match = String(chapter?.id ?? '').match(/^ch0*(\d+)$/i)
+  if (match) {
+    const no = Number(match[1])
+    if (Number.isInteger(no) && no > 0) return no
+  }
+  return chapterNumber(ctx)
+}
+
+function castNamesFor(beats, chapter, volume) {
+  const names = collectCastNames(beats, chapter)
+  for (const name of volume?.cast ?? []) {
+    const value = String(name ?? '').trim()
+    if (value && !names.includes(value)) names.push(value)
+  }
+  return names
+}
+
+function recentSummaries(outline, ctx, chapterId) {
+  const chapters = Array.isArray(outline?.chapters) ? outline.chapters : []
+  const index = chapters.findIndex((chapter) => chapter?.id === chapterId)
+  const start = Math.max(0, index - 3)
+  return chapters
+    .slice(start, Math.max(0, index))
+    .map((chapter) => ({ id: chapter.id, text: textOf(ctx, `summary/${chapter.id}`) }))
+    .filter((row) => row.text)
+}
+
+function volumeDigest(outline, ctx, chapterId) {
+  const volume = plan.volumeOfChapter(outline, chapterId)
+  if (!volume) return ''
+  const chapters = Array.isArray(outline?.chapters) ? outline.chapters : []
+  const index = chapters.findIndex((chapter) => chapter?.id === chapterId)
+  const lines = []
+  for (const chapter of chapters.slice(0, Math.max(0, index))) {
+    if (chapter?.volume !== volume.id) continue
+    const summary = textOf(ctx, `summary/${chapter.id}`)
+    if (summary) lines.push(`- ${chapter.id}：${summary}`)
+  }
+  return fit(ctx, lines.join('\n'), 1000)
+}
+
+function findingLine(finding) {
+  const where = String(finding?.where ?? '').trim()
+  const issue = String(finding?.issue ?? '').trim()
+  const fix = String(finding?.fix ?? '').trim()
+  return `${finding?.severity ?? 'warn'}${where ? `｜${where}` : ''}：${issue}${fix ? ` → ${fix}` : ''}`
+}
+
+function normalizeFinding(raw) {
+  const severity = ['block', 'warn', 'note'].includes(raw?.severity) ? raw.severity : 'warn'
+  return {
+    severity,
+    kind: String(raw?.kind ?? 'logic'),
+    where: String(raw?.where ?? ''),
+    issue: String(raw?.issue ?? '').trim() || '审校给出了一条没有描述的问题',
+    fix: String(raw?.fix ?? ''),
+  }
+}
+
+/**
+ * 兜底拼包：prepareChapter 没给 packet 时用；revise 永远自己拼（mode:'revise'）。
+ * 返回 buildPacket 的 {text,report,sections}，text 就是 draft/revise 的 user。
+ */
+function assemblePacket(ctx, { chapter, volume, beats, canon, mode = 'draft', revisionFindings = [] }) {
+  const params = ctx.params ?? {}
+  const outline = currentOutline(ctx) ?? { chapters: [] }
+  const id = String(chapter?.id ?? '')
+  const previous = siblingChapter(outline, id, -1)
+  const next = siblingChapter(outline, id, 1)
+  const names = castNamesFor(beats, chapter, volume)
+  return buildPacket({
+    params,
+    chapter,
+    volume: volume ?? null,
+    beats,
+    previous,
+    previousSummary: previous ? textOf(ctx, `summary/${previous.id}`) : '',
+    recentSummaries: recentSummaries(outline, ctx, id),
+    volumeDigest: volumeDigest(outline, ctx, id),
+    canonText: canonTextFor(canon, names, id),
+    castBrief: characterBrief(jsonOr(ctx, 'characters', {})?.cast ?? [], names, 1500),
+    styleSample: fit(ctx, params.styleGuide ?? '', 1200),
+    nextChapterGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
+    revisionFindings,
+    mode,
+  })
+}
+
+/** 审查/修订共用：关闭自动审校时跳过，返回值就是事件流里的跳过原因。 */
+function skipAutoReview(project) {
+  return project?.params?.autoReview === false ? '未开启自动审校' : false
 }
 
 // ---------------------------------------------------------------- recipe
@@ -809,84 +1078,80 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       produces: ['spine'],
       review: false,
       async run(ctx) {
-        const text = await callText(ctx, 'spine', prompts.spine, { maxTokens: 4096 })
+        // §12：spine 是 JSON，且卷数必须等于卷计划；ctx.volumePlan 由脚本算好，模型不许自己发明卷数。
+        const volumePlan = volumePlanFor(ctx.params ?? {})
+        const data = await callJson(withPromptContext(ctx, { volumePlan }), 'spine', prompts.spine, spineSchema)
+        const aligned = alignSpine(data, volumePlan)
         return {
-          artifacts: { spine: { kind: 'md', content: ensureHeading(text, '# 情感脊柱') } },
-          note: '情感脊柱完成',
+          artifacts: { spine: { kind: 'json', content: aligned.spine } },
+          note: `情感脊柱完成：${volumePlan.length} 卷${aligned.notes.length ? `（${aligned.notes.join('；')}）` : ''}`,
         }
       },
     },
     {
       id: 'outline',
       title: '卷章大纲',
-      produces: ['outline', 'ledger'],
+      produces: ['outline', 'canon'],
       review: (project) => project?.params?.reviewGate === true,
-      async run(ctx) {
-        const spec = promptSpec(ctx, prompts.outline, 'outline')
-        const result = await ctx.llm.generate({
-          system: spec.system,
-          user: spec.user,
-          maxTokens: spec.maxTokens,
-          temperature: spec.temperature,
-          json: true,
-          phase: 'outline',
-          label: 'outline',
-        })
-        const raw = result?.json ?? extractJson(result?.text)
-        if (raw === undefined) throw parseError('outline', '模型返回的不是合法 JSON', result?.text)
-        const outline = normalizeOutline(raw, {
-          chapters: ctx.params?.chapters,
-          language: ctx.params?.language,
-        })
-        const ledger = createLedger({
-          brief: jsonOr(ctx, 'brief', {}),
-          outline,
-          params: ctx.params ?? {},
-        })
-        return {
-          artifacts: {
-            outline: { kind: 'json', content: outline },
-            ledger: { kind: 'json', content: ledger },
-          },
-          note: outline.trimmed
-            ? `卷章大纲：${outline.totalChapters} 章（模型多给 ${outline.trimmed} 章，已按计划裁掉）`
-            : `卷章大纲：${outline.totalChapters} 章`,
-        }
+      // 长书只摊开第 1 卷；后面每卷等上一卷写完再惰性展开，靠这里把 outline 判成「还没完」。
+      isStale: ({ key, artifact }) => {
+        if (key !== 'outline') return false
+        const outline = artifact?.content
+        if (!outline || !Array.isArray(outline.volumes)) return false
+        const total = Number(outline.totalChapters) || chaptersOf(outline).length
+        if (total > 0 && total <= 60) return false
+        return outline.volumes.some((volume) => volume && volume.planned !== true)
       },
-    },
-    {
-      id: 'beats',
-      title: '章节细纲',
-      each: 'outline.chapters',
-      produces: ['beats/*'],
-      review: false,
       async run(ctx) {
-        const item = ctx.item ?? {}
-        let data
-        let note = null
-        try {
-          data = await callJson(ctx, 'beats', prompts.beats, beatsSchema)
-        } catch (err) {
-          if (err?.code !== 'LLM_PARSE') throw err
-          const salvaged = salvageScenes(err?.detail?.raw)
-          if (!salvaged.length) throw err
-          // 细纲写不完整时，草稿阶段会退回「只有卷章大纲」，质量损失比少几场大得多。
-          if (typeof ctx.log === 'function') {
-            await ctx.log(`${item.id} 细纲没写完整，已从截断输出里抢救出 ${salvaged.length} 场继续`, {
-              salvaged: salvaged.length,
-            })
+        // 0 次模型（除卷纲惰性展开）：骨架由 plan.js 纯脚本搭，canon 只做种子/迁移。
+        const params = ctx.params ?? {}
+        const language = params.language ?? 'zh'
+        const total = chaptersTotal(params)
+        const spine = jsonOr(ctx, 'spine', null)
+        let outline = jsonOr(ctx, 'outline', null)
+        let changed = false
+        if (outline && !plan.isV2(outline)) {
+          outline = plan.migrateOutline(outline, { params })
+          changed = true
+        }
+        if (!outline) {
+          outline = plan.buildOutlineSkeleton({
+            chapters: total,
+            chaptersPerVolume: perVolumeOf(params),
+            spine,
+            language,
+          })
+          changed = true
+        }
+
+        // §2：≤60 章一次把所有卷的章纲摊开；长书只展开下一卷，且要等已列出的章节都写完，
+        // 避免一次 abort 后重跑就把后面几卷一起摊开、把整本书的章纲都提前生成。
+        const pending = (outline.volumes ?? []).filter((volume) => volume && volume.planned !== true)
+        const listed = Array.isArray(outline.chapters) ? outline.chapters : []
+        const listedWritten = listed.length > 0 && listed.every((chapter) => has(ctx, `draft/${chapter?.id}`))
+        const expand = total <= 60 ? pending : !listed.length || listedWritten ? pending.slice(0, 1) : []
+        let calls = 0
+        if (expand.length) {
+          const unit = requireChapter()
+          const read = readerOf(ctx, { outline })
+          for (const volume of expand) {
+            const ensured = await unit.ensureVolume({ outline, params, read, llm: ctx.llm, language }, { prompts })
+            calls += Number(ensured?.calls) || 0
+            if (ensured?.created) changed = true
+            outline = ensured?.outline ?? outline
           }
-          data = { title: '', scenes: salvaged }
-          note = `${item.id} 细纲被截断：只抢救到 ${salvaged.length} 场，草稿按可用部分写`
         }
-        const beats = {
-          chapterId: item.id,
-          title: String(data.title ?? '').trim() || String(item.title ?? '').trim(),
-          scenes: data.scenes.map((scene, index) => ({ ...scene, no: index + 1 })),
-        }
+
+        const seeded = seedCanon(ctx, spine)
+        if (seeded.source === 'ledger') ctx.log('已把连续性账本迁移为正典 v2')
+        const artifacts = {}
+        if (seeded.changed) artifacts.canon = { kind: 'json', content: seeded.canon }
+        if (changed) artifacts.outline = { kind: 'json', content: outline }
         return {
-          artifacts: { [`beats/${item.id}`]: { kind: 'json', content: beats } },
-          note: note ?? `${item.id} 细纲：${beats.scenes.length} 场`,
+          artifacts,
+          note:
+            `大纲骨架 ${chaptersOf(outline).length}/${outline.totalChapters ?? total} 章、${(outline.volumes ?? []).length} 卷` +
+            `（本轮展开 ${expand.length} 卷、${calls} 次模型调用；正典来自 ${seeded.source}）`,
         }
       },
     },
@@ -894,205 +1159,275 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       id: 'draft',
       title: '章节草稿',
       each: 'outline.chapters',
-      produces: ['draft/*', 'summary/*'],
+      produces: ['draft/*', 'summary/*', 'beats/*', 'canon', 'outline'],
       review: (project) => project?.params?.reviewGate === true,
-      // 历史版本会把「正文缺失，无法修订」这类回声写进 draft/*；它们不算完成，
-      // 否则项目永久停在「已完成」，用户重跑也会被跳过。
+      // 历史版本会把「正文缺失，无法修订」这类回声写进 draft/*；它们不算完成。
       isStale: ({ key, artifact }) => /^draft\//.test(key) && isPlaceholderText(artifact?.content),
       onItemError: 'stop',
       async run(ctx) {
+        const unit = requireChapter()
+        const params = ctx.params ?? {}
+        const language = params.language ?? 'zh'
         const item = ctx.item ?? {}
-        const no = chapterNumber(ctx)
-        const materials = buildDraftMaterials(ctx)
-        const promptCtx = withPromptContext(ctx, { materials })
+        const id = String(item.id)
+        let outline = currentOutline(ctx) ?? { chapters: [item] }
+        let volume = plan.volumeOfChapter(outline, id) ?? plan.volumeById(outline, item.volume)
 
-        const raw = await callText(promptCtx, 'draft', prompts.draft, {
-          phase: 'prose',
-          maxTokens: draftMaxTokens(ctx.params) + 400,
-        })
-        const inline = takeInlineSummary(raw)
-        const text = normalizeProse(inline.prose, { no, title: item.title })
+        // §7 window：一轮最多推进 N 章。排在本轮窗口之外的章节直接跳过，
+        // 下一轮 novel_run 会从剩下没写的章节继续——长篇手动一点的节奏靠它控。
+        if (outsideWindow(ctx, id, outline)) {
+          // defer：这一条留到下一轮，条目保持 pending、阶段标 partial，
+          // 这样紧接着再跑一次 novel_run 会从断点接着写，而不是「已完成」被跳过。
+          return { artifacts: {}, defer: true, note: `${id} 在本轮窗口之外，留到下一轮` }
+        }
 
-        const summaryCtx = withPromptContext(ctx, {
-          materials,
-          draft: text,
-          draftText: text,
-          chapterTitle: item.title,
-          chapterNo: no,
+        // 长书续跑时，轮到未展开的卷就先把这一卷的章纲补出来（每卷 1 次）。
+        let expanded = false
+        if (volume && volume.planned !== true) {
+          const ensured = await unit.ensureVolume({ outline, params, read: readerOf(ctx, { outline }), llm: ctx.llm, language }, { prompts })
+          outline = ensured?.outline ?? outline
+          volume = plan.volumeById(outline, volume.id) ?? volume
+          expanded = true
+        }
+
+        const read = readerOf(ctx, { outline })
+        const hadBeats = has(ctx, `beats/${id}`)
+        const prepared = await unit.prepareChapter({ outline, params, chapterId: id, read, llm: ctx.llm, language }, { prompts })
+        const chapter = prepared?.chapter ?? item
+        volume = prepared?.volume ?? volume
+        const beats = prepared?.beats ?? jsonOr(ctx, `beats/${id}`, null)
+        const canon = prepared?.canon ?? seedCanon(ctx, jsonOr(ctx, 'spine', null)).canon
+        const packet = prepared?.packet ?? assemblePacket(ctx, { chapter, volume, beats, canon })
+        if (packet?.report?.overBudget) ctx.warn(`${id} 写作材料超出 contextBudget，packet 已按优先级裁剪`)
+
+        const promptCtx = withPromptContext(ctx, {
+          chapter,
+          volume: volume ?? null,
+          beats,
+          packet,
+          canonText: canonTextFor(canon, castNamesFor(beats, chapter, volume), id),
+          language,
         })
-        let summary = ''
-        if (inline.summary) {
-          summary = normalizeSummary(inline.summary)
-        } else {
+        const raw = await callText(promptCtx, 'draft', prompts.draft, { phase: 'prose', maxTokens: draftMaxTokens(params) + 400 })
+        const inline = unit.splitInline(raw)
+        const body = normalizeProse(inline?.body ?? '', { no: chapterNoOf(ctx, chapter), title: chapter.title ?? item.title })
+        if (!body) throw parseError('draft', '草稿正文为空', raw)
+
+        // 内联摘要/正典补丁缺省时补小调用；补不出来只 warn，不阻断这一章。
+        let summary = inline?.summary ?? ''
+        if (!summary) {
           try {
             summary = normalizeSummary(
-              await callText(summaryCtx, 'summary', prompts.summary, { phase: 'summary', maxTokens: 800 }),
+              await callText(withPromptContext(ctx, { chapter, draft: body, beats }), 'summary', prompts.summary, {
+                phase: 'summary',
+                maxTokens: 800,
+              }),
             )
           } catch (err) {
             if (err?.code === 'LLM_ABORTED') throw err
-            summary = rescueSummary(ctx, item, text, `模型未给出摘要：${err?.message ?? err}`)
+            ctx.warn(`${id} 摘要生成失败：${err?.message ?? err}`)
+            summary = rescueSummary(ctx, item, body, '摘要调用失败')
           }
         }
 
-        const { stats } = craft.checkDraft({
-          text,
-          params: ctx.params,
-          beats: null,
-          cast: castForCheck(jsonOr(ctx, 'characters', null)),
+        let canonPatch = inline?.canonPatch ?? null
+        if (!hasPatch(canonPatch) && typeof prompts.canonPatch === 'function') {
+          try {
+            canonPatch = await callJson(
+              withPromptContext(ctx, { chapter, summary, beats, canonText: canonTextFor(canon, castNamesFor(beats, chapter, volume), id) }),
+              'canonPatch',
+              prompts.canonPatch,
+              canonPatchSchema,
+              { phase: 'canonPatch' },
+            )
+          } catch (err) {
+            if (err?.code === 'LLM_ABORTED') throw err
+            ctx.warn(`${id} 正典补丁生成失败：${err?.message ?? err}`)
+            canonPatch = null
+          }
+        }
+
+        // commit 时 canon 可能还没落盘（首次运行由 outline stage 种下），beats 也可能刚在本轮生成：
+        // 用内存覆盖喂给它，避免 commitChapter 退回空正典后把已有 canon 写小。
+        const commitRead = readerOf(ctx, {
+          outline,
+          canon,
+          [`beats/${id}`]: beats,
         })
+        const committed = unit.commitChapter({ read: commitRead, params, outline, chapterId: id, text: body, summary, canonPatch })
+        // commitChapter 的 artifacts 是 {kind, content} 对象：要取 content，直接 String() 会落成 [object Object]。
+        const draft = String(committed?.artifacts?.draft?.content ?? body)
+        const finalSummary = String(committed?.artifacts?.summary?.content ?? summary)
+        const artifacts = {
+          [`draft/${id}`]: { kind: 'md', content: draft },
+          [`summary/${id}`]: { kind: 'md', content: finalSummary },
+          canon: { kind: 'json', content: committed?.canon ?? canon },
+        }
+        // 只写这一轮新生成/新展开的东西，避免每章都重写全局产物。
+        if (!hadBeats && beats) artifacts[`beats/${id}`] = { kind: 'json', content: beats }
+        if (expanded) artifacts.outline = { kind: 'json', content: outline }
+        const cjk = Number(committed?.stats?.cjk) || countCjk(draft)
+        const counts = committed?.counts ?? countSeverities(committed?.findings ?? [])
         return {
-          artifacts: {
-            [`draft/${item.id}`]: { kind: 'md', content: text },
-            [`summary/${item.id}`]: { kind: 'md', content: summary },
-          },
-          note: `第 ${no} 章草稿完成，${stats.cjk} 字`,
+          artifacts,
+          note: `第 ${chapterNoOf(ctx, chapter)} 章草稿完成：${cjk} 字${counts.block ? `（block ${counts.block}）` : ''}`,
         }
       },
     },
     {
       id: 'review',
-      title: '连续性审校',
+      title: '章节审校',
       each: 'outline.chapters',
       produces: ['review/*'],
-      review: false,
-      skip: (project) => (project?.params?.autoReview === false ? '未开启自动审校' : false),
+      review: (project) => project?.params?.reviewGate === true,
+      skip: skipAutoReview,
+      onItemError: 'continue',
       async run(ctx) {
+        const unit = requireChapter()
+        const params = ctx.params ?? {}
         const item = ctx.item ?? {}
-        // 没有正文就没什么可审的：以前会把「正文缺失」占位符喂给模型，
-        // 模型照着回声一段，审校结论和后续修订全在加工空气，还白付一次调用。
-        const source = draftOf(ctx, item.id)
-        if (!source) return { artifacts: {}, note: `${item.id} 还没有正文，跳过审校` }
-        let degraded = false
+        const id = String(item.id)
+        const source = draftOf(ctx, id)
+        // 占位稿不是正文：审它只会产生假问题，还可能触发一次无意义的修订。
+        if (!source || isPlaceholderText(source)) return { artifacts: {}, note: `${id} 还没有正文，跳过审校` }
+
+        const outline = currentOutline(ctx) ?? { chapters: [item] }
+        // 审校也要看到最新正典：canon 还没落盘时先种一份，避免写回时把已有内容截短。
+        const seeded = seedCanon(ctx, jsonOr(ctx, 'spine', null)).canon
+        const read = readerOf(ctx, { outline, canon: seeded })
+        const checked = unit.checkChapter({ read, params, outline, chapterId: id, text: source })
+        const canon = checked?.canon ?? seeded
+        const beats = jsonOr(ctx, `beats/${id}`, null)
+        const previous = siblingChapter(outline, id, -1)
+        const next = siblingChapter(outline, id, 1)
+        const promptCtx = withPromptContext(ctx, {
+          chapter: item,
+          beats,
+          draft: source,
+          draftText: source,
+          canonText: canonTextFor(canon, castNamesFor(beats, item), id),
+          previousSummary: previous ? textOf(ctx, `summary/${previous.id}`) : '',
+          nextGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
+        })
+
         let data
+        let degraded = false
         try {
-          data = await callJson(ctx, 'review', prompts.review, reviewSchema)
+          data = await callJson(promptCtx, 'review', prompts.review, reviewSchema)
         } catch (err) {
-          // 审校是增值环节：模型空返回/JSON 不合法时，不应让整炉失败；
-          // 退回确定性检查（AI 腔、对话比、钩子兑现等），并在 note 里标明降级。
           if (err?.code !== 'LLM_EMPTY' && err?.code !== 'LLM_PARSE') throw err
+          // 审校整份不合契约时逐条抢救，确定性检查仍然兜底（v0.1 行为保留）。
           degraded = true
           data = salvageReview(err)
         }
-        const draftText = source
-        const beats = jsonOr(ctx, `beats/${item.id}`, null)
-        const deterministic = craft.checkDraft({
-          text: draftText,
-          params: ctx.params ?? {},
-          beats,
-          previousHook: previousChapter(ctx)?.hook ?? '',
-          cast: castForCheck(jsonOr(ctx, 'characters', null)),
-        })
 
-        const findings = [...data.findings, ...deterministic.findings]
-          .map((finding) => ({
-            severity: finding.severity,
-            kind: finding.kind,
-            where: finding.where,
-            issue: finding.issue,
-            fix: finding.fix,
-          }))
-          .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
+        const deterministic = Array.isArray(checked?.findings) ? checked.findings : []
+        const findings = [...(data.findings ?? []), ...deterministic].map(normalizeFinding)
+        findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
         const counts = countSeverities(findings)
-        // 契约（prompts/zh.js review）：有 block，或 warn ≥ 3 → revise。
-        // 模型给的 verdict 不可信（常整份漏给或与 findings 冲突），一律按计数推断。
         const verdict = counts.block > 0 || counts.warn >= 3 ? 'revise' : 'pass'
-        const review = { findings, ledgerPatch: data.ledgerPatch ?? null, verdict }
-
-        const artifacts = { [`review/${item.id}`]: { kind: 'json', content: review } }
-        if (hasPatch(data.ledgerPatch)) {
-          artifacts.ledger = {
-            kind: 'json',
-            content: mergeLedger(jsonOr(ctx, 'ledger', emptyLedger()), data.ledgerPatch, item.id),
-          }
+        const patch = data.canonPatch ?? data.ledgerPatch ?? null
+        const artifacts = {
+          [`review/${id}`]: { kind: 'json', content: { findings, canonPatch: hasPatch(patch) ? patch : null, verdict } },
         }
+        if (hasPatch(patch)) artifacts.canon = { kind: 'json', content: canonLib.mergeCanon(canon, patch, { chapter: id }) }
         return {
           artifacts,
-          note: `审校 ${item.id}：block ${counts.block} / warn ${counts.warn} / note ${counts.note} → ${verdict}${
-            degraded ? '（模型未返回可用审校结果，仅保留确定性检查）' : ''
-          }`,
+          note:
+            `${id} 审校：block ${counts.block} / warn ${counts.warn} / note ${counts.note}，${verdict === 'pass' ? '通过' : '需要修订'}` +
+            (degraded ? '（模型输出降级，仅保留确定性检查与可抢救意见）' : ''),
         }
       },
     },
     {
       id: 'revise',
-      title: '修订',
+      title: '定点修订',
       each: 'outline.chapters',
       produces: ['draft/*', 'summary/*'],
-      // 修订和草稿写同一批 key：不加 alwaysRun 会被「draft 已完成」整段跳过，
-      // 审校结论就永远落不到正文上（审校-修订闭环静默失效）。
+      review: (project) => project?.params?.reviewGate === true,
+      // 修订永远覆盖写 draft/*：不能因为产物已存在就被跳过。
       alwaysRun: true,
-      review: false,
-      skip: (project) => (project?.params?.autoReview === false ? '未开启自动审校' : false),
+      skip: skipAutoReview,
+      onItemError: 'continue',
       async run(ctx) {
+        const unit = requireChapter()
+        const params = ctx.params ?? {}
         const item = ctx.item ?? {}
-        if (!ctx.has(`review/${item.id}`)) {
-          return { artifacts: {}, note: `${item.id} 尚未审校，跳过修订` }
+        const id = String(item.id)
+        // 先看有没有审校意见：没有意见就没有修订的目标，哪怕正文在也一样。
+        const review = jsonOr(ctx, `review/${id}`, null)
+        if (!review) return { artifacts: {}, note: `${id} 尚未审校，跳过修订` }
+        const source = draftOf(ctx, id)
+        // 同 review：占位稿不能被当成正文再改一遍（v0.1 的保护保留）。
+        if (!source || isPlaceholderText(source)) return { artifacts: {}, note: `${id} 还没有正文，跳过修订` }
+        // alwaysRun 只保证「有新的审校意见时会覆盖」；已经在审校之后改过的章节，续跑时不再改一遍。
+        const draftArtifact = typeof ctx.read === 'function' ? ctx.read(`draft/${id}`) : null
+        const reviewArtifact = typeof ctx.read === 'function' ? ctx.read(`review/${id}`) : null
+        const draftedAt = String(draftArtifact?.meta?.updatedAt ?? '')
+        const reviewedAt = String(reviewArtifact?.meta?.updatedAt ?? '')
+        if (draftedAt && reviewedAt && draftedAt >= reviewedAt) {
+          return { artifacts: {}, note: `${id} 上次审校后已经修订过，跳过` }
         }
-        const draftText = draftOf(ctx, item.id)
-        if (!draftText) {
-          return { artifacts: {}, note: `${item.id} 还没有正文，跳过修订（先补草稿）` }
-        }
-        const review = jsonOr(ctx, `review/${item.id}`, null)
-        const actionable = (review?.findings ?? []).filter(
-          (finding) => finding.severity === 'block' || finding.severity === 'warn',
-        )
-        if (!actionable.length) {
-          return { artifacts: {}, note: `${item.id} 无 block/warn 问题，跳过修订` }
-        }
+        const actionable = (review?.findings ?? []).filter((finding) => finding?.severity === 'block' || finding?.severity === 'warn')
+        if (!actionable.length) return { artifacts: {}, note: `${id} 没有 block/warn 问题，跳过修订` }
 
-        const no = chapterNumber(ctx)
-        const materials = buildDraftMaterials(ctx)
+        // §6：revise 直接 buildPacket(mode:'revise')，把待修问题作为最高优先级切片。
+        const outline = currentOutline(ctx) ?? { chapters: [item] }
+        const chapter = (outline.chapters ?? []).find((row) => row?.id === id) ?? item
+        const volume = plan.volumeOfChapter(outline, id) ?? plan.volumeById(outline, chapter.volume)
+        const beats = jsonOr(ctx, `beats/${id}`, null)
+        const canon = jsonOr(ctx, 'canon', null) ?? seedCanon(ctx, jsonOr(ctx, 'spine', null)).canon
+        const packet = assemblePacket(ctx, {
+          chapter,
+          volume,
+          beats,
+          canon,
+          mode: 'revise',
+          revisionFindings: actionable.map(findingLine),
+        })
+
         const promptCtx = withPromptContext(ctx, {
-          materials,
-          draft: draftText,
-          draftText,
-          review,
+          chapter,
+          volume: volume ?? null,
+          beats,
+          packet,
           findings: actionable,
-          chapterTitle: item.title,
-          chapterNo: no,
+          draft: source,
+          draftText: source,
         })
+        const raw = await callText(promptCtx, 'revise', prompts.revise, { phase: 'revise', maxTokens: draftMaxTokens(params) + 400 })
+        const inline = unit.splitInline(raw)
+        const text = normalizeProse(inline?.body ?? '', { no: chapterNoOf(ctx, chapter), title: chapter.title ?? item.title })
 
-        const prose = await callText(promptCtx, 'revise', prompts.revise, {
-          phase: 'revise',
-          maxTokens: draftMaxTokens(ctx.params) + 400,
-        })
-        const inline = takeInlineSummary(prose)
-        const text = normalizeProse(inline.prose, { no, title: item.title })
-        // 模型只回一段片段也会被当成整章覆盖：按中文字数把「明显不是同一章篇幅」的修订稿挡在落盘前。
-        const before = countCjk(draftText)
+        // 修订只能改问题，不能偷偷把整章删短/注水（v0.1 的长度保护保留）。
+        const before = countCjk(source)
         const after = countCjk(text)
         if (before > 0 && (after / before < 0.8 || after / before > 1.25)) {
-          throw parseError(
-            'revise',
-            `修订稿长度异常（原 ${before} 字 → 新 ${after} 字），已丢弃未落盘`,
-            prose,
-          )
+          throw parseError('revise', `修订稿长度异常：原 ${before} 字 → 新 ${after} 字（允许 0.8–1.25 倍，修订稿已丢弃未落盘）`, raw)
         }
-        let summary = ''
-        if (inline.summary) {
-          summary = normalizeSummary(inline.summary)
-        } else {
+
+        let summary = inline?.summary ?? ''
+        if (!summary) {
           try {
             summary = normalizeSummary(
-              await callText(
-                withPromptContext(promptCtx, { draft: text, draftText: text, reviseSummary: true }),
-                'summary',
-                prompts.summary,
-                { phase: 'summary', maxTokens: 800 },
-              ),
+              await callText(withPromptContext(ctx, { chapter, draft: text, beats }), 'summary', prompts.summary, {
+                phase: 'summary',
+                maxTokens: 800,
+              }),
             )
           } catch (err) {
             if (err?.code === 'LLM_ABORTED') throw err
-            summary = rescueSummary(ctx, item, text, `修订后未给出摘要：${err?.message ?? err}`)
+            ctx.warn(`${id} 修订后摘要生成失败：${err?.message ?? err}`)
+            summary = textOf(ctx, `summary/${id}`) || rescueSummary(ctx, item, text, '修订后摘要调用失败')
           }
         }
 
         return {
           artifacts: {
-            [`draft/${item.id}`]: { kind: 'md', content: text },
-            [`summary/${item.id}`]: { kind: 'md', content: summary },
+            [`draft/${id}`]: { kind: 'md', content: text },
+            [`summary/${id}`]: { kind: 'md', content: summary },
           },
-          note: `${item.id} 已修订（${actionable.length} 条问题）`,
+          note: `${id} 已修订（${actionable.length} 条 block/warn）`,
         }
       },
     },
@@ -1129,7 +1464,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
   return {
     id: 'novel',
-    version: 1,
+    version: 2,
     title: '长篇小说',
 
     paramsSchema,
@@ -1139,9 +1474,9 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       brief: { kind: 'json', title: '故事核心' },
       bible: { kind: 'md', title: '世界观设定' },
       characters: { kind: 'json', title: '人物档案' },
-      spine: { kind: 'md', title: '情感脊柱' },
+      spine: { kind: 'json', title: '情感脊柱（分卷 JSON）' },
       outline: { kind: 'json', title: '卷章大纲' },
-      ledger: { kind: 'json', title: '连续性账本' },
+      canon: { kind: 'json', title: '连续性正典' },
       blurb: { kind: 'json', title: '封面文案' },
       'beats/*': { kind: 'json', title: '章节细纲' },
       'draft/*': { kind: 'md', title: '章节草稿' },
@@ -1152,13 +1487,20 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
     stages,
 
-    /** 领域统计：已写字数/已写章节，供引擎写进 project.stats、UI 展示。 */
+    /** 领域统计：已写章节/字数/卷进度，供引擎写进 project.stats、UI 展示。 */
     stats(project, read) {
-      let total = clampInt(project?.params?.chapters, paramsDefaults.chapters, 6, 120)
+      let chapters = clampInt(project?.params?.chapters, paramsDefaults.chapters, 6, 3000)
+      let volumes = 0
+      let plannedVolumes = 0
       try {
         if (read.has('outline')) {
-          const listed = chaptersOf(read.json('outline'))
-          if (listed.length) total = listed.length
+          const outline = read.json('outline')
+          const listed = chaptersOf(outline)
+          // 长书只列出已展开的卷：进度要按全书总章数算，不能用「已展开章数」冒充总章数。
+          if (Number(outline?.totalChapters) > 0) chapters = Number(outline.totalChapters)
+          else if (listed.length) chapters = listed.length
+          volumes = Array.isArray(outline?.volumes) ? outline.volumes.length : 0
+          plannedVolumes = (outline?.volumes ?? []).filter((volume) => volume && volume.planned === true).length
         }
       } catch {
         // 大纲还没落盘或格式未定：退回 params
@@ -1177,41 +1519,49 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         drafted += 1
         words += text.replace(/\s+/g, '').length
       }
-      return { chapters: total, drafted, words }
+      return { chapters, drafted, words, volumes, plannedVolumes }
     },
 
     estimate(params = {}) {
       const merged = { ...paramsDefaults, ...params }
-      const chapters = clampInt(merged.chapters, paramsDefaults.chapters, 6, 120)
+      const chapters = clampInt(merged.chapters, paramsDefaults.chapters, 6, 3000)
       const wordsPerChapter = clampInt(merged.wordsPerChapter, paramsDefaults.wordsPerChapter, 800, 8000)
       const autoReview = merged.autoReview !== false
       const tokens = (chars) => Math.ceil(chars / 1.6) // §3.4：中文约 1.6 字/token
+      // 卷数走 plan 的同一套算法：chapters/chaptersPerVolume 超过 40 卷时会自动抬升每卷章数。
+      const volumePlans = plan.volumeCount(chapters, perVolumeOf(merged))
 
-      // 每章 4 次：细纲 / 草稿（含内联摘要）/ 审校 / 修订（含内联摘要）；不开审校只有 2 次。
-      const calls = 6 + chapters * (autoReview ? 4 : 2)
-      // 以下常量来自 12 章 × 3000 字的实测聚合（docs/architecture.md §6.5），
-      // 只保留「随字数线性增长」的那部分乘 wordsPerChapter；误差约 ±1%。
+      // §12 成本模型：固定 6 段 + 每章 3.5 次（细纲 1、草稿 1、摘要/正典补丁摊 0.5、审校 1 + 修订摊薄）
+      // + 卷纲每卷 1 次。关键性质：第 N 章的写作材料和第 1 章一样大，成本随章数线性增长。
+      const perChapter = autoReview ? 3.5 : 2.5
+      const calls = Math.ceil(6 + chapters * perChapter + volumePlans)
+
       const fixedIn = 25279
       const fixedOut = 10177
       const prose = (ratio) => Math.round(wordsPerChapter * ratio)
+      // 草稿/修订的输入就是 packet，因此按 contextBudget 估，而不是按章号累加：
+      // 第 N 章的写作材料和第 1 章一样大。
+      const budget = clampInt(merged.contextBudget, paramsDefaults.contextBudget, 4000, 30000)
       const perChapterIn =
-        5483 + // 细纲
-        6324 + // 草稿（含摘要契约与账本/文风）
-        (autoReview ? 6331 + prose(1.05) + 4581 + prose(1.05) : 0) // 审校 + 修订
+        budget + // 草稿 packet（硬上限）
+        (autoReview ? Math.round(budget * 0.5) + prose(1.1) + 2500 : 0) + // 审校材料 + 正文；修订复用 packet
+        2100 // 细纲 + 摘要/正典补丁小调用
       const perChapterOut =
         1757 + // 细纲
         prose(1.03) + // 草稿正文
         (autoReview ? 1053 + prose(1.07) : 0) // 审校结论 + 修订正文
-      const estTokensIn = tokens(fixedIn + chapters * perChapterIn)
-      const estTokensOut = tokens(fixedOut + chapters * perChapterOut)
+      const estTokensIn = tokens(fixedIn + volumePlans * 1500 + chapters * perChapterIn)
+      const estTokensOut = tokens(fixedOut + volumePlans * 900 + chapters * perChapterOut)
 
       return {
         chapters,
         calls,
+        volumePlans,
         estTokensIn,
         estTokensOut,
         note:
-          `约 ${calls} 次模型调用；${chapters} 章 × ${wordsPerChapter} 字；` +
+          `约 ${calls} 次模型调用；${chapters} 章 × ${wordsPerChapter} 字，约 ${volumePlans} 卷（每卷约 ${Math.ceil(chapters / Math.max(1, volumePlans))} 章）；` +
+          `第 N 章的写作材料和第 1 章一样大（每章 ${perChapter} 次调用 + 一份固定上限的 packet）；` +
           `预计输入约 ${estTokensIn} tokens、输出约 ${estTokensOut} tokens` +
           (autoReview ? '（含自动审校+修订）' : '（不含审校）'),
       }

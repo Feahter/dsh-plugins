@@ -1,14 +1,18 @@
 // test/fixtures/novel-fixtures.mjs — 假 ctx / 假 prompts / 固定产物。不调真模型。
 
+import { buildOutlineSkeleton, mergeVolumeChapters } from '../../src/recipes/novel/plan.js'
+
+// §12 的 12 个 builder：v0.2 删掉 outline（骨架由脚本搭），新增 volumeChapters / canonPatch。
 export const PROMISE_IDS = [
   'premise',
   'bible',
   'characters',
   'spine',
-  'outline',
+  'volumeChapters',
   'beats',
   'draft',
   'summary',
+  'canonPatch',
   'review',
   'revise',
   'blurb',
@@ -317,4 +321,73 @@ export function sampleBeats(chapterId = 'ch01') {
       },
     ],
   }
+}
+
+/** v2 spine：卷数必须等于卷计划（6 章、每卷 30 章 → 1 卷）。 */
+export function sampleSpine(volumeCount = 1) {
+  return {
+    mainline: '因为沈砚要查父亲的名字，所以他留在殡仪馆守夜，终于在头七那晚听见死者开口。',
+    ending: '他烧掉名册，也放过了自己。',
+    volumes: Array.from({ length: volumeCount }, (_, index) => ({
+      title: `第${index + 1}卷 头七`,
+      goal: `第 ${index + 1} 卷：查清父亲的名字`,
+      arc: '从逃避到承担',
+      cast: ['沈砚', '阿绫'],
+      opens: index === 0 ? ['三号柜里的手机'] : [`第 ${index + 1} 卷的新线`],
+      closes: index === 0 ? [] : ['三号柜里的手机'],
+    })),
+  }
+}
+
+/** v2 outline：卷章分层，章 id 由脚本发号（6 章 / 每卷 30 章 → 1 卷 6 章）。 */
+export function sampleOutlineV2({ chapters = 6, chaptersPerVolume = 30 } = {}) {
+  const skeleton = buildOutlineSkeleton({
+    chapters,
+    chaptersPerVolume,
+    spine: { volumes: [{ title: '头七', goal: '查清父亲的名字', arc: '从逃避到承担' }] },
+    language: 'zh',
+  })
+  const titles = ['起：雨夜', '承：旧照片', '转：头七', '合：名册', '余：回声', '终：将明']
+  const rows = Array.from({ length: chapters }, (_, index) => ({
+    title: titles[index] ?? `第 ${index + 1} 夜`,
+    goal: `第 ${index + 1} 章的目标`,
+    conflict: '他想逃，但尸体开口了',
+    turn: '死者叫出了他父亲的名字',
+    hook: `第 ${index + 2} 章钩子`,
+    pov: '第三人称限知',
+    when: '雨夜',
+    where: '殡仪馆',
+    cast: ['沈砚'],
+  }))
+  return mergeVolumeChapters(skeleton, 'v01', rows)
+}
+
+/** 模型给 volumeChapters 的返回：{chapters:[...]}，id 一律乱写，验证脚本重排。 */
+export function sampleVolumeChapters(count = 6, where = '殡仪馆') {
+  return {
+    chapters: Array.from({ length: count }, (_, index) => ({
+      id: `model-${index}`,
+      title: `第 ${index + 1} 夜`,
+      goal: `第 ${index + 1} 章的目标`,
+      conflict: '他想逃，但尸体开口了',
+      turn: '死者叫出了他父亲的名字',
+      hook: `第 ${index + 2} 章钩子`,
+      pov: '第三人称限知',
+      when: '雨夜',
+      where,
+      cast: ['沈砚'],
+    })),
+  }
+}
+
+/** 正文 + 内联摘要/正典补丁（§12 的 <<<SUMMARY>>> / <<<CANON>>> 协议）。 */
+export function sampleProse({
+  body = '## 第1章 起：雨夜\n\n雨下得很大。\n\n“你来了。”她说。',
+  summary = '发生：沈砚在雨夜见到回魂。\n知情：他知道了名册被改。\n钩子：柜里有人呼吸。\n时空：殡仪馆，凌晨一点。',
+  canon = null,
+} = {}) {
+  let text = body
+  if (summary) text += `\n\n<<<SUMMARY>>>\n${summary}`
+  if (canon) text += `\n\n<<<CANON>>>\n${JSON.stringify(canon)}`
+  return text
 }

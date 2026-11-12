@@ -315,8 +315,9 @@ test('handler：坏 JSON 返回 400，超大 body 返回 413', async () => {
 test('novel_* 工具齐全，参数必填项正确', () => {
   const tools = createTools(makeFakeEngine())
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
-    'novel_cancel', 'novel_create', 'novel_export', 'novel_list',
-    'novel_read', 'novel_run', 'novel_status', 'novel_write',
+    'novel_audit', 'novel_cancel', 'novel_commit', 'novel_context', 'novel_create',
+    'novel_export', 'novel_list', 'novel_next', 'novel_plan', 'novel_read',
+    'novel_run', 'novel_status', 'novel_write',
   ])
   const create = tools.find(tool => tool.name === 'novel_create')
   assert.deepEqual(create.parameters.required, ['premise'])

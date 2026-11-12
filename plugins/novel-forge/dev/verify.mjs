@@ -46,58 +46,114 @@ const characters = {
   ],
 }
 
-const spine = `# 情感脊柱
-
-陈默想留住的不是父亲，是那句没说完的“你妈去哪了”。
-
-每一次头七，都是一次迟到的对话：活人问，死人答不了；死人问，活人不敢答。`
-
-const outline = {
-  totalChapters: 6,
+const spine = {
+  version: 2,
+  mainline: '陈默想留住的不是父亲，是那句没说完的“你妈去哪了”。',
+  ending: '他烧掉值班表，第一次在白天走进殡仪馆。',
   volumes: [
     {
+      id: 'v01',
+      index: 1,
       title: '卷一 · 头七',
-      purpose: '父亲回来，揭开母亲失踪的旧口子。',
-      chapters: [
-        { id: 'ch01', title: '灯不能灭', goal: '陈默守第一夜，父亲出现在灵堂', conflict: '灯油见底，规矩说不能添', turn: '父亲开口问母亲', hook: '值班表上多出一个名字', pov: '第三人称限知', when: '冬夜', where: '灵堂', cast: ['陈默', '陈建国'] },
-        { id: 'ch02', title: '红笔', goal: '陈默去查值班表', conflict: '林姐拦着不让翻旧档', turn: '旧档里母亲的名字被涂掉', hook: '第三格冰柜传来敲击声', pov: '第三人称限知', when: '次日凌晨', where: '档案室', cast: ['陈默', '林姐'] },
-        { id: 'ch03', title: '第三格', goal: '打开第三格冰柜', conflict: '老周拿规矩压人', turn: '冰柜是空的，里面只有一件湿透的女式外套', hook: '外套口袋里有一张船票', pov: '第三人称限知', when: '清晨', where: '停尸间', cast: ['陈默', '老周'] },
-      ],
+      goal: '父亲回来，揭开母亲失踪的旧口子。',
+      arc: '从替死人守夜，到替活人开口。',
+      cast: ['陈默', '陈建国', '林姐'],
+      opens: ['父亲出现在灵堂'],
+      closes: ['老周承认当年改了记录'],
+      targetChapters: 6,
     },
     {
+      id: 'v02',
+      index: 2,
       title: '卷二 · 二七',
-      purpose: '船票指向江对岸，旧案翻面。',
-      chapters: [
-        { id: 'ch04', title: '船票', goal: '按船票上的日期去江口', conflict: '渡船停航，雾太大', turn: '船老大认得母亲的照片', hook: '她说那晚船上还有一个人', pov: '第三人称限知', when: '白天', where: '江口渡船', cast: ['陈默'] },
-        { id: 'ch05', title: '对岸', goal: '找到船票上的地址', conflict: '地址是一片拆掉的旧厂', turn: '厂里留着母亲的工牌', hook: '工牌背面写着陈建国的名字', pov: '第三人称限知', when: '黄昏', where: '江北旧厂', cast: ['陈默', '林姐'] },
-        { id: 'ch06', title: '天亮', goal: '回馆里问清最后一个人', conflict: '父亲的头七要结束了', turn: '老周承认当年改了记录', hook: '陈默第一次在白天点灯', pov: '第三人称限知', when: '头七最后一夜', where: '灵堂', cast: ['陈默', '陈建国', '老周'] },
-      ],
+      goal: '船票指向江对岸，旧案翻面。',
+      arc: '从追问真相，到接受没有答案。',
+      cast: ['陈默', '林姐'],
+      opens: ['冰柜里的船票'],
+      closes: ['陈默第一次在白天点灯'],
+      targetChapters: 0,
     },
   ],
 }
 
-const ledger = {
+const outline = {
+  version: 2,
+  totalChapters: 6,
+  language: 'zh',
+  volumes: [
+    {
+      id: 'v01',
+      index: 1,
+      title: '卷一 · 头七',
+      goal: '父亲回来，揭开母亲失踪的旧口子。',
+      arc: '从替死人守夜，到替活人开口。',
+      cast: ['陈默', '陈建国', '林姐'],
+      opens: ['父亲出现在灵堂'],
+      closes: ['老周承认当年改了记录'],
+      targetChapters: 6,
+      planned: true,
+      chapterIds: ['ch01', 'ch02', 'ch03', 'ch04', 'ch05', 'ch06'],
+      chapters: [
+        { id: 'ch01', index: 1, volume: 'v01', title: '灯不能灭', goal: '陈默守第一夜，父亲出现在灵堂', conflict: '灯油见底，规矩说不能添', turn: '父亲开口问母亲', hook: '值班表上多出一个名字', pov: '第三人称限知', when: '冬夜', where: '灵堂', cast: ['陈默', '陈建国'] },
+        { id: 'ch02', index: 2, volume: 'v01', title: '红笔', goal: '陈默去查值班表', conflict: '林姐拦着不让翻旧档', turn: '旧档里母亲的名字被涂掉', hook: '第三格冰柜传来敲击声', pov: '第三人称限知', when: '次日凌晨', where: '档案室', cast: ['陈默', '林姐'] },
+        { id: 'ch03', index: 3, volume: 'v01', title: '第三格', goal: '打开第三格冰柜', conflict: '老周拿规矩压人', turn: '冰柜是空的，里面只有一件湿透的女式外套', hook: '外套口袋里有一张船票', pov: '第三人称限知', when: '清晨', where: '停尸间', cast: ['陈默', '老周'] },
+        { id: 'ch04', index: 4, volume: 'v01', title: '船票', goal: '按船票上的日期去江口', conflict: '渡船停航，雾太大', turn: '船老大认得母亲的照片', hook: '她说那晚船上还有一个人', pov: '第三人称限知', when: '白天', where: '江口渡船', cast: ['陈默'] },
+        { id: 'ch05', index: 5, volume: 'v01', title: '对岸', goal: '找到船票上的地址', conflict: '地址是一片拆掉的旧厂', turn: '厂里留着母亲的工牌', hook: '工牌背面写着陈建国的名字', pov: '第三人称限知', when: '黄昏', where: '江北旧厂', cast: ['陈默', '林姐'] },
+        { id: 'ch06', index: 6, volume: 'v01', title: '天亮', goal: '回馆里问清最后一个人', conflict: '父亲的头七要结束了', turn: '老周承认当年改了记录', hook: '陈默第一次在白天点灯', pov: '第三人称限知', when: '头七最后一夜', where: '灵堂', cast: ['陈默', '陈建国', '老周'] },
+      ],
+    },
+    {
+      id: 'v02',
+      index: 2,
+      title: '卷二 · 二七',
+      goal: '船票指向江对岸，旧案翻面。',
+      arc: '从追问真相，到接受没有答案。',
+      cast: ['陈默', '林姐'],
+      opens: ['冰柜里的船票'],
+      closes: ['陈默第一次在白天点灯'],
+      targetChapters: 0,
+      planned: false,
+      chapterIds: [],
+      chapters: [],
+    },
+  ],
+  chapters: [],
+}
+
+// v2 正典：客户端 CanonView 读的就是这份形状（docs/architecture-v2.md §4.1）。
+const canon = {
+  version: 2,
   facts: [
-    { id: 'f1', text: '父亲陈建国于三年前去世，死因登记为溺水。', chapter: 'ch01', status: 'canon' },
-    { id: 'f2', text: '母亲赵岚在父亲去世后一个月失踪。', chapter: 'ch01', status: 'canon' },
-    { id: 'f3', text: '殡仪馆冰柜第三格长期空置，馆里有不成文规矩。', chapter: 'ch03', status: 'canon' },
-    { id: 'f4', text: '值班表用红笔写名字，写完不能改。', chapter: 'ch02', status: 'canon' },
+    { id: 'f0001', s: '陈建国', p: '死因登记为', o: '三年前溺水', chapter: 'ch01', status: 'canon' },
+    { id: 'f0002', s: '赵岚', p: '失踪于', o: '父亲去世后一个月', chapter: 'ch01', status: 'canon' },
+    { id: 'f0003', s: '冰柜第三格', p: '长期', o: '空置，馆里有不成文规矩', chapter: 'ch03', status: 'canon' },
+    { id: 'f0004', s: '值班表', p: '用', o: '红笔写名字，写完不能改', chapter: 'ch02', status: 'canon' },
   ],
+  notes: ['时间以头七夜为锚点：ch01 夜 23:40，ch02 次日 02:10，ch03 清晨 05:30。'],
   threads: [
-    { id: 't1', text: '母亲失踪那晚的去向', opened: 'ch01', status: 'open' },
-    { id: 't2', text: '值班表上多出的名字', opened: 'ch01', status: 'open' },
-    { id: 't3', text: '第三格冰柜里的湿外套', opened: 'ch03', status: 'open' },
+    { id: 't0001', text: '母亲赵岚失踪那晚的去向', status: 'open', opened: 'ch01', payoff: '' },
+    { id: 't0002', text: '值班表上多出的名字', status: 'open', opened: 'ch01', payoff: '' },
+    { id: 't0003', text: '第三格冰柜里的湿外套', status: 'open', opened: 'ch03', payoff: '' },
   ],
-  characters: {
-    陈默: { location: '殡仪馆', state: '连着两夜没睡', knows: ['父亲回来了', '母亲名字被涂掉'] },
-    林姐: { location: '化妆间', state: '回避陈默', knows: ['旧档的位置', '外套是谁的'] },
+  entities: {
+    陈默: {
+      kind: 'character', gender: '男', aliases: ['小陈'], role: '守夜人', firstSeen: 'ch01', lastSeen: 'ch02',
+      location: '殡仪馆', state: '连着两夜没睡', knows: ['父亲回来了', '母亲名字被涂掉'],
+      relations: [{ to: '陈建国', kind: '父子' }, { to: '林姐', kind: '同事' }],
+    },
+    林姐: {
+      kind: 'character', gender: '女', aliases: [], role: '遗体化妆师', firstSeen: 'ch02', lastSeen: 'ch02',
+      location: '化妆间', state: '回避陈默', knows: ['旧档的位置', '外套是谁的'],
+      relations: [{ to: '陈默', kind: '师徒' }],
+    },
   },
   timeline: [
     { chapter: 'ch01', when: '头七夜 23:40', event: '父亲出现在灵堂' },
     { chapter: 'ch02', when: '次日 02:10', event: '旧档里的名字被涂掉' },
     { chapter: 'ch03', when: '清晨 05:30', event: '第三格冰柜被打开' },
   ],
-  canonRules: ['头七夜灵堂灯不能灭', '红笔写的名字不能改', '第三格冰柜不装人'],
+  invariants: ['头七夜灵堂灯不能灭', '红笔写的名字不能改', '第三格冰柜不装人'],
+  rules: {},
 }
 
 const beats = {
@@ -264,9 +320,9 @@ const putContent = (project, key, kind, content) => {
 putContent(demo, 'brief', 'json', brief)
 putContent(demo, 'bible', 'md', bible)
 putContent(demo, 'characters', 'json', characters)
-putContent(demo, 'spine', 'md', spine)
+putContent(demo, 'spine', 'json', spine)
 putContent(demo, 'outline', 'json', outline)
-putContent(demo, 'ledger', 'json', ledger)
+putContent(demo, 'canon', 'json', canon)
 for (const [id, content] of Object.entries(beats)) putContent(demo, `beats/${id}`, 'json', content)
 for (const [id, content] of Object.entries(drafts)) putContent(demo, `draft/${id}`, 'md', content)
 for (const [id, content] of Object.entries(reviews)) putContent(demo, `review/${id}`, 'json', content)
@@ -281,7 +337,6 @@ demo.stages = {
   characters: stageOf('done'),
   spine: stageOf('done'),
   outline: stageOf('done'),
-  beats: stageOf('done', Object.fromEntries(chapterIds.map(id => [id, 'done']))),
   draft: stageOf('partial', Object.fromEntries(chapterIds.map(id => [id, id === 'ch01' || id === 'ch02' ? 'done' : 'pending']))),
   review: stageOf('partial', Object.fromEntries(chapterIds.map(id => [id, id === 'ch01' || id === 'ch02' ? 'done' : 'pending']))),
   revise: stageOf('idle', Object.fromEntries(chapterIds.map(id => [id, 'pending']))),
@@ -296,12 +351,12 @@ const demoRun = {
   status: 'done',
   startedAt: iso(NOW - 900000),
   endedAt: iso(NOW - 200000),
-  options: { stages: ['premise', 'bible', 'characters', 'spine', 'outline', 'beats', 'draft'], from: 'premise', autoApprove: true },
+  options: { stages: ['premise', 'bible', 'characters', 'spine', 'outline', 'draft'], from: 'premise', autoApprove: true },
   current: { stage: 'draft', item: 'ch02', label: '草稿 · 第 2 章' },
   progress: { done: 2, total: 6 },
   seq: 10,
   events: [
-    { seq: 1, ts: iso(NOW - 900000), type: 'run-start', data: { stages: ['premise', 'bible', 'characters', 'spine', 'outline', 'beats', 'draft'], items: 6, autoApprove: true } },
+    { seq: 1, ts: iso(NOW - 900000), type: 'run-start', data: { stages: ['premise', 'bible', 'characters', 'spine', 'outline', 'draft'], items: 6, autoApprove: true } },
     { seq: 2, ts: iso(NOW - 880000), type: 'stage-start', data: { stage: 'premise', total: 1 } },
     { seq: 3, ts: iso(NOW - 870000), type: 'llm', data: { stage: 'premise', item: null, phase: 'brief', chars: 860, model: 'deepseek-chat' } },
     { seq: 4, ts: iso(NOW - 860000), type: 'artifact', data: { key: 'brief', kind: 'json', bytes: 920 } },
@@ -722,6 +777,14 @@ async function main() {
     await page.waitForSelector('text=总览', { timeout: 10000 })
     check('新建后进入工作台', await page.locator('.nf-workbench').count() === 1)
 
+    // 新项目是 v2 形状，但还没长出 canon：入口在，点开是「还没建」而不是报错。
+    await page.locator('.nf-rail-canon').click()
+    await page.waitForSelector('.nf-empty', { timeout: 10000 })
+    const newCanonText = await page.locator('.nf-empty').innerText()
+    check('新项目正典入口降级为「还没建」', newCanonText.includes('正典还没建'), newCanonText.slice(0, 120))
+    await page.locator('.nf-rail-overview').click()
+    await page.waitForSelector('.nf-workbench')
+
     // 回到书架，打开有内容的 demo
     await page.locator('.nf-main-top').getByRole('button', { name: '书架' }).click()
     await page.waitForSelector('text=雾港旧案')
@@ -737,6 +800,31 @@ async function main() {
     check('工作台显示运行事件流', benchText.includes('事件流'))
     check('工作台显示已写字数', benchText.includes('5980 字') || benchText.includes('5,980 字'), benchText.slice(0, 200))
     console.log('  · 截图 test/screens/workbench.png')
+
+    // 3.4) 阶段轨必须跟 STAGES 对齐（9 段，beats 不是 stage），并挂正典入口
+    const stageItems = page.locator('.nf-rail-item:not(.nf-rail-canon)')
+    const stageCount = await stageItems.count()
+    check('阶段轨是 9 段', stageCount === 9, `实际 ${stageCount} 段`)
+    const railText = await page.locator('.nf-rail').innerText()
+    check('阶段轨文案与 STAGES 同步', railText.includes('九步 · 一章一章') && !railText.includes('beats') && !railText.includes('细纲'), railText.slice(0, 200))
+
+    // 点正典入口 → 主区域用 canon 产物渲染 CanonView
+    await page.locator('.nf-rail-canon').click()
+    await page.waitForSelector('.nf-canon', { timeout: 10000 })
+    const canonStats = await page.locator('.nf-canon-stat').evaluateAll(nodes => nodes.map(node => [
+      node.querySelector('span')?.textContent ?? '',
+      node.querySelector('b')?.textContent ?? '',
+    ]))
+    check('正典统计数字正确', JSON.stringify(canonStats) === JSON.stringify([['事实', '4'], ['备注', '1'], ['未回收线索', '3'], ['人物', '2']]), JSON.stringify(canonStats))
+    const canonText = await page.locator('.nf-canon').innerText()
+    check('正典渲染未回收线索与人物', canonText.includes('未回收线索') && canonText.includes('母亲赵岚失踪那晚的去向') && canonText.includes('陈默'), canonText.slice(0, 200))
+    await page.screenshot({ path: path.join(SCREENS, 'canon.png') })
+    console.log('  · 截图 test/screens/canon.png')
+
+    // 再点阶段能切回
+    await page.locator('.nf-rail-item', { hasText: '章节草稿' }).click()
+    await page.waitForSelector('.nf-canon', { state: 'detached', timeout: 10000 })
+    check('从正典切回阶段', await page.locator('.nf-canon').count() === 0)
 
     // 3.5) 章节页：细纲/草稿/审校/摘要
     await page.locator('.nf-rail-item', { hasText: '章节草稿' }).click()

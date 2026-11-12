@@ -5,9 +5,8 @@ export const STAGES = [
   { id: 'premise', title: '故事核心', en: 'Premise', note: '一句话炼成 logline、主题与结局方向' },
   { id: 'bible', title: '世界设定', en: 'World', note: '只写这本书会用到的规则、地点与禁忌' },
   { id: 'characters', title: '人物档案', en: 'Cast', note: '欲望、恐惧、秘密、说话方式与弧光' },
-  { id: 'spine', title: '情感脊柱', en: 'Spine', note: '主线因果链、每卷情绪曲线、结局落点' },
-  { id: 'outline', title: '卷章大纲', en: 'Outline', note: '分卷分章：目标、冲突、转折、钩子', review: true },
-  { id: 'beats', title: '章节细纲', en: 'Beats', note: '每章 5–9 个场景 beat', each: true },
+  { id: 'spine', title: '情感脊柱', en: 'Spine', note: '主线、结局与分卷弧光（JSON）' },
+  { id: 'outline', title: '卷章大纲', en: 'Outline', note: '脚本建骨架、按卷惰性展开', review: true },
   { id: 'draft', title: '章节草稿', en: 'Draft', note: '一章一章写，写完即出摘要', each: true, review: true },
   { id: 'review', title: '连续性审校', en: 'Review', note: '事实、时间线、人物、视角与文风', each: true },
   { id: 'revise', title: '修订', en: 'Revise', note: '只改审校指出的问题，保持文风', each: true },
@@ -24,6 +23,8 @@ export const STAGE_ARTIFACT = {
   spine: 'spine',
   outline: 'outline',
   blurb: 'blurb',
+  // 正典不是独立 stage，但产物面板要按 key 取它。
+  canon: 'canon',
 }
 
 export const GENRES = ['悬疑', '奇幻', '科幻', '都市', '历史', '言情', '恐怖', '武侠', '通用']

@@ -118,6 +118,11 @@ export function normalizeOutline(raw, { chapters, language = 'zh' } = {}) {
     fail('outline 必须是 JSON 对象', raw)
   }
 
+  // v0.2 卷章大纲（version:2）已经是脚本建好的骨架 / 惰性展开结果：
+  // 再走一次 v1 扁平化会丢掉卷状态（planned/chapterIds）并因空卷报错，因此原样返回。
+  // 只对 version:2 生效，v1 短篇行为保持不变。
+  if (data.version === 2) return data
+
   let volumesRaw = Array.isArray(data.volumes) ? data.volumes : null
   if (!volumesRaw && Array.isArray(data.chapters)) {
     volumesRaw = [{ title: '', purpose: '', chapters: data.chapters }]

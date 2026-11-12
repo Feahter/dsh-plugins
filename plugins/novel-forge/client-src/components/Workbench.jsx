@@ -165,7 +165,8 @@ function ChapterStageList({ project, outline, stage, onOpen }) {
     chapters.map((chapter, index) => {
       const id = chapter.id || `ch${String(index + 1).padStart(2, '0')}`
       const status = items[id] ?? 'pending'
-      const tab = stage.id === 'review' ? 'review' : stage.id === 'beats' ? 'beats' : 'draft'
+      // 细纲已并入 draft 工作单元，不再是独立 stage；这里只按审校/写作选 tab。
+      const tab = stage.id === 'review' ? 'review' : 'draft'
       return React.createElement('button', {
         key: id, type: 'button', className: 'nf-chapter-row', onClick: () => onOpen(id, tab),
       },
@@ -214,6 +215,39 @@ function StagePane({ project, outline, selected, onOpenChapter, artifact, loadin
       '点「继续炼」或「重跑本步」，让炉子把它炼出来。')
   } else {
     body = React.createElement(ArtifactView, { artifact, onOpenChapter })
+  }
+
+  return React.createElement(React.Fragment, null, head, body)
+}
+
+// ------------------------------------------------------------------ 正典（不是 stage，独立入口）
+// 产物 key 沿用 STAGE_ARTIFACT.canon，取数仍走 Workbench 的 artifactKey effect。
+function CanonPane({ available, legacy, artifact, loading, error, onRetry }) {
+  const head = React.createElement('div', { className: 'nf-main-head' },
+    React.createElement('div', null,
+      React.createElement('h2', { className: 'nf-main-title' }, '正典 · 连续性'),
+      React.createElement('div', { className: 'nf-main-sub' },
+        React.createElement('span', null, '事实、未回收线索与人物状态，跨章一致性的底稿'),
+      ),
+    ),
+  )
+
+  let body
+  if (legacy && !available) {
+    body = React.createElement(Empty, { title: 'v1 项目没有 canon（用账本）' },
+      '这本书仍是 v1 账本形状。跑一次「继续炼」会按 v2 正典重建；旧账本不会被删除。')
+  } else if (loading) {
+    body = React.createElement('div', { className: 'nf-loading' }, React.createElement(Spinner), '取正典中…')
+  } else if (error) {
+    body = React.createElement('div', { className: 'nf-error' },
+      error,
+      React.createElement('div', { style: { marginTop: 10 } },
+        React.createElement(Button, { size: 'sm', variant: 'quiet', onClick: onRetry }, '重试')))
+  } else if (!artifact) {
+    body = React.createElement(Empty, { title: '正典还没建' },
+      '大纲落纸后，正典会随写作自动累积；也可以点「继续炼」让它补种。')
+  } else {
+    body = React.createElement(ArtifactView, { artifact })
   }
 
   return React.createElement(React.Fragment, null, head, body)
@@ -462,7 +496,8 @@ export function Workbench({ projectId, onBack, notify }) {
   }
 
   const onRerun = () => {
-    if (selected === 'overview') return
+    // 正典不是 stage，没有可重跑的阶段。
+    if (selected === 'overview' || selected === 'canon') return
     begin({ from: selected, to: selected, force: true, autoApprove: !project?.params?.reviewGate },
       `重跑「${STAGE_BY_ID[selected]?.title ?? selected}」`)
   }
@@ -529,7 +564,13 @@ export function Workbench({ projectId, onBack, notify }) {
 
   const gate = project.pendingReview
   const params = project.params ?? {}
-  const stageTitle = selected === 'overview' ? '总览' : STAGE_BY_ID[selected]?.title ?? selected
+  const stageTitle = selected === 'overview'
+    ? '总览'
+    : selected === 'canon'
+      ? '正典 · 连续性'
+      : STAGE_BY_ID[selected]?.title ?? selected
+  const hasCanon = Boolean(artifacts.canon)
+  const hasLedger = Boolean(artifacts.ledger)
 
   const body = chapter
     ? React.createElement(ChapterView, {
@@ -544,16 +585,26 @@ export function Workbench({ projectId, onBack, notify }) {
     })
     : selected === 'overview'
       ? React.createElement(Overview, { project, brief, outline, onContinue, onOpenChapter: openChapter, busy: starting, running })
-      : React.createElement(StagePane, {
-        project, outline, selected, artifact, loading: artifactLoading, error: artifactError,
-        onOpenChapter: openChapter,
-        onRetry: () => setArtifactVersion(value => value + 1),
-      })
+      : selected === 'canon'
+        ? React.createElement(CanonPane, {
+          available: hasCanon, legacy: hasLedger, artifact, loading: artifactLoading, error: artifactError,
+          onRetry: () => setArtifactVersion(value => value + 1),
+        })
+        : React.createElement(StagePane, {
+          project, outline, selected, artifact, loading: artifactLoading, error: artifactError,
+          onOpenChapter: openChapter,
+          onRetry: () => setArtifactVersion(value => value + 1),
+        })
 
   return React.createElement('div', { className: 'nf-workbench' },
     React.createElement(StageRail, {
       project,
       selected: chapter ? STAGE_ARTIFACT[selected] ? selected : 'overview' : selected,
+      hasCanon,
+      hasLedger,
+      onCanon: async () => {
+        await leaveChapter(() => { setChapter(null); setSelected('canon') })
+      },
       onSelect: async stage => {
         await leaveChapter(() => { setChapter(null); setSelected(stage) })
       },
@@ -590,7 +641,7 @@ export function Workbench({ projectId, onBack, notify }) {
             title: running ? RUNNING_HINT : undefined,
           }, Icon.play, '继续炼'),
           React.createElement(Button, {
-            size: 'sm', variant: 'quiet', onClick: onRerun, disabled: running || selected === 'overview' || !!chapter,
+            size: 'sm', variant: 'quiet', onClick: onRerun, disabled: running || selected === 'overview' || selected === 'canon' || !!chapter,
             title: running ? RUNNING_HINT : undefined,
           }, Icon.refresh, '重跑本步'),
           React.createElement(ExportMenu, { onExport, busy: exporting }),

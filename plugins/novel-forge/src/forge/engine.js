@@ -69,6 +69,8 @@ function normalizeStageResult(result) {
     artifacts,
     note: typeof result.note === 'string' && result.note ? result.note : null,
     meta: result.meta ?? null,
+    // 这一条现在不做、留到下一次运行：条目保持 pending，阶段标 partial。
+    defer: result.defer === true,
   }
 }
 
@@ -445,6 +447,8 @@ export class ForgeEngine {
         dryRun: options.dryRun === true,
         from: options.from ?? null,
         to: options.to ?? null,
+        // 每轮最多推进多少个单元（recipe 自己解释，引擎只负责透传）：长跑要「一轮一小步」时用。
+        window: Number.isInteger(options.window) && options.window > 0 ? options.window : null,
       },
       current: { stage: null, item: null, label: null },
       progress: { done: 0, total: 0 },
@@ -686,6 +690,7 @@ export class ForgeEngine {
     await this.#emit(live, EVENT.PROGRESS, { done: run.progress.done, total: run.progress.total })
 
     let hadError = false
+    let deferred = false
     for (const unit of work) {
       if (this.#aborted(live)) {
         if (unit.id) state.items[unit.id] = 'pending'
@@ -726,6 +731,14 @@ export class ForgeEngine {
           project.artifacts[key] = written.meta
           await this.#cacheArtifact(live, written, spec.content)
           await this.#emit(live, EVENT.ARTIFACT, { key, kind: spec.kind, bytes: written.meta.bytes })
+        }
+        if (normalized.defer) {
+          if (unit.id) state.items[unit.id] = 'pending'
+          deferred = true
+          project.updatedAt = this.#now()
+          await this.store.saveProject(project)
+          if (normalized.note) await this.#log(live, normalized.note)
+          break
         }
         if (unit.id) state.items[unit.id] = 'done'
         project.updatedAt = this.#now()
@@ -780,7 +793,7 @@ export class ForgeEngine {
 
     // 只跑了一部分条目（例如 --items ch02 单章重跑、或某几条还没跑）时不能标 done，
     // 否则阶段轨显示「完成」而实际缺章。
-    let stageStatus = hadError ? 'partial' : 'done'
+    let stageStatus = hadError || deferred ? 'partial' : 'done'
     if (!hadError && allItems) {
       const items = state.items || {}
       const covered = allItems.filter((item) => items[item.id] === 'done').length

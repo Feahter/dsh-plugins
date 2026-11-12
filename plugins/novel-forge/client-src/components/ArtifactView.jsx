@@ -214,6 +214,63 @@ export function LedgerView({ data }) {
   )
 }
 
+// ------------------------------------------------------------------ 正典（v2）
+// 形状见 docs/architecture-v2.md §4.1；facts/notes/threads/entities 都可能缺。
+export function CanonView({ data }) {
+  const facts = asArray(data?.facts)
+  const notes = asArray(data?.notes)
+  const threads = asArray(data?.threads)
+  const entities = data?.entities && typeof data.entities === 'object' ? Object.entries(data.entities) : []
+  const openThreads = threads.filter(thread => thread?.status !== 'closed')
+  const recentFacts = facts.slice().reverse().slice(0, 12)
+
+  const stats = [
+    ['事实', facts.length],
+    ['备注', notes.length],
+    ['未回收线索', openThreads.length],
+    ['人物', entities.length],
+  ]
+
+  const section = (title, count, rows, emptyText) => React.createElement('section', null,
+    React.createElement('h4', null, `${title} · ${count}`),
+    rows.length ? React.createElement('ul', null, rows) : React.createElement('p', { className: 'nf-muted' }, emptyText),
+  )
+
+  return React.createElement('div', { className: 'nf-canon' },
+    React.createElement('div', { className: 'nf-canon-stats' },
+      stats.map(([label, value]) => React.createElement('div', { className: 'nf-canon-stat', key: label },
+        React.createElement('b', null, formatNumber(value)),
+        React.createElement('span', null, label),
+      )),
+    ),
+
+    React.createElement('div', { className: 'nf-ledger' },
+      section('未回收线索', openThreads.length,
+        openThreads.map((thread, index) => React.createElement('li', { key: thread?.id || index },
+          React.createElement('time', null, thread?.opened || '—'),
+          React.createElement('span', null, thread?.text || '（未记录）'),
+          React.createElement('span', { className: 'nf-badge nf-badge-muted', style: { marginLeft: 'auto' } },
+            thread?.status || 'open'),
+        )), '暂无未回收线索。'),
+
+      section('人物', entities.length,
+        entities.map(([name, entity]) => React.createElement('li', { key: name },
+          React.createElement('span', { style: { flex: '0 0 64px' } }, name),
+          React.createElement('span', null,
+            [entity?.kind, entity?.location, entity?.state].filter(Boolean).join(' · ') || '暂无'),
+        )), '暂无人物。'),
+
+      section('最近事实', `${recentFacts.length}/${facts.length}`,
+        recentFacts.map((fact, index) => React.createElement('li', { key: fact?.id || index },
+          React.createElement('time', null, fact?.chapter || '—'),
+          React.createElement('span', null,
+            [fact?.s, fact?.p, fact?.o].filter(Boolean).join(' · ') || '（未记录）'),
+          fact?.status ? React.createElement('span', { className: 'nf-badge nf-badge-muted', style: { marginLeft: 'auto' } }, fact.status) : null,
+        )), '暂无事实。'),
+    ),
+  )
+}
+
 // ------------------------------------------------------------------ 入口
 const STRUCTURED = {
   brief: BriefView,
@@ -222,6 +279,7 @@ const STRUCTURED = {
   characters: CharactersView,
   review: ReviewView,
   ledger: LedgerView,
+  canon: CanonView,
 }
 
 /**
