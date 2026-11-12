@@ -1,24 +1,8 @@
 {
-  "name": "@feahter/dsh-realtime-voice",
-  "version": "0.1.0",
-  "description": "Continuous realtime dictation for the DeepSeek Harness composer, powered by the local SenseVoice recognizer",
-  "license": "MIT",
-  "author": "Feahter",
-  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Feahter/dsh-plugins.git",
-    "directory": "plugins/realtime-voice"
-  },
-  "keywords": [
-    "dsh-plugin",
-    "dsh-bundle",
-    "dictation",
-    "speech-to-text",
-    "sensevoice",
-    "realtime",
-    "voice-input"
-  ],
+  "name": "dsh-realtime-voice",
+  "description": "Continuous realtime dictation for the composer, powered by the local SenseVoice recognizer",
+  "version": "0.3.0",
+  "private": true,
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -30,15 +14,15 @@
   "files": [
     "index.js",
     "client.js",
+    "host/",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "docs"
+    "docs/INTEGRATION.md",
+    "test/harness.mjs",
+    "test/host-refine.test.mjs"
   ],
-  "engines": {
-    "dsh": ">=0.2.1-rc.4"
-  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -51,7 +35,9 @@
       ]
     }
   },
-  "publishConfig": {
-    "access": "public"
+  "scripts": {
+    "test": "node test/harness.mjs && node --test test/host-refine.test.mjs",
+    "test:client": "node test/harness.mjs",
+    "test:host": "node --test test/host-refine.test.mjs"
   }
 }

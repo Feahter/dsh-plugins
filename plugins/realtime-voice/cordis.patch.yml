@@ -1,3 +1,11 @@
+# Bundle patch for dsh-realtime-voice.
+#
+# One row only. The Host half registers its two HTTP routes lazily and
+# translates through the Host `translator` service when one is installed,
+# otherwise through Google's anonymous endpoint, so no extra service row is
+# required here. If another bundle in the same profile already inserts a
+# `translator` row, keep that one: duplicate ids would provide the same service
+# twice.
 - insert:
     - id: dsh-realtime-voice
-      name: '@feahter/dsh-realtime-voice'
+      name: 'dsh-realtime-voice'

@@ -1,10 +1,54 @@
 /**
- * Host half of the dsh-realtime-voice bundle.
+ * Host half of the realtime-voice bundle.
  *
- * All behavior lives in the browser (Client) half: continuous microphone
- * capture, voice-activity segmentation, and calls to the experimental speech
- * Host Remote (`speech/transcribe`, local SenseVoice ONNX). This row exists so
- * the bundle has a Loader entry and a plugin-manager presence beside its
- * `dsh.client` contribution.
+ * Speech recognition stays a Client concern (the browser captures audio and
+ * calls the existing `speech/transcribe` Host Remote). This half only exposes
+ * two local HTTP routes under the web server origin:
+ *
+ *   GET  /plugins/realtime-voice/health  — capability probe
+ *   POST /plugins/realtime-voice/refine  — translate (and, when wired, cleanup)
+ *
+ * Both routes are registered through `ctx.inject(['webServer'], ...)`, so a
+ * build without a web server simply never mounts them instead of failing the
+ * plugin tree. Translation prefers the opt-in Host `translator` service and
+ * falls back to Google's anonymous endpoint when that service is absent, so the
+ * feature works on a stock profile without installing anything; the client can
+ * still opt out per machine (settings → 在线翻译).
  */
-export function apply() {}
+import { createHealthHandler, createRefineHandler, ROUTES } from './host/refine.js'
+
+/**
+ * @param {import('@deepseek-ai/cordis').Context} ctx
+ */
+export function apply(ctx) {
+  ctx.inject(['webServer'], (ctx) => {
+    ctx.effect(() => {
+      const health = ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTES.health,
+        handler: createHealthHandler({
+          getTranslator: () => ctx.get('translator'),
+        }),
+      })
+      const refine = ctx.webServer.register({
+        kind: 'exact',
+        path: ROUTES.refine,
+        handler: createRefineHandler({
+          getTranslator: () => ctx.get('translator'),
+          getServerOrigin: () => {
+            try {
+              return ctx.webServer.getOrigin()
+            } catch {
+              return undefined
+            }
+          },
+          logger: ctx.logger,
+        }),
+      })
+      return () => {
+        refine()
+        health()
+      }
+    }, 'realtime-voice: HTTP routes')
+  })
+}

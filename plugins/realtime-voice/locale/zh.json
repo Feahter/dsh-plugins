@@ -1,7 +1,6 @@
 {
   "meta": {
     "title": "实时语音输入",
-    "description": "连续听写：边说边出字，停顿自动断句并把整句写入输入框，使用本地 SenseVoice 模型识别。",
-    "detail": "docs/DETAIL.md"
+    "description": "连续听写、说完自动排版、可把中文直接说成英文；本地 SenseVoice 识别，并提供 voiceInput 服务供其他插件接入。"
   }
 }
