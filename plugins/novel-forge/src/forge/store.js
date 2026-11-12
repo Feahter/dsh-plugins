@@ -13,6 +13,7 @@ export const LIMITS = Object.freeze({
   artifact: 8 * 1024 * 1024,
   project: 4 * 1024 * 1024,
   run: 8 * 1024 * 1024,
+  runLog: 4 * 1024 * 1024,
   versionsKept: 3,
 })
 
@@ -355,11 +356,12 @@ export class Store {
    * @param {string} key
    * @param {string} [kind] 不传则从 project.json 的元数据取
    */
-  async readArtifact(projectId, key, kind) {
+  async readArtifact(projectId, key, kind, knownMeta) {
     const id = safeId(projectId)
     const k = safeKey(key)
-    const project = await this.readProject(id)
-    const meta = project.artifacts?.[k]
+    // knownMeta：调用方手上已有 project.artifacts 时直接传，省掉一次 project.json 解析
+    // （120 章项目每次运行要读几百个产物，逐个解析 project.json 是 O(n²)）。
+    const meta = knownMeta ? knownMeta[k] ?? null : (await this.readProject(id)).artifacts?.[k]
     const finalKind = kind || meta?.kind
     if (!finalKind) {
       if (!meta) return null
@@ -466,14 +468,27 @@ export class Store {
     return out
   }
 
-  /** 追加人类可读日志行（run.log）。 */
+  /**
+   * 追加人类可读日志行（run.log）。
+   * 超过 RUN_LOG_LIMIT 就轮转成 .log.1 重新开始，避免长跑把日志写成无限大。
+   */
   async appendRunLog(projectId, runId, line) {
     const id = safeId(projectId)
     const rid = safeId(runId)
     const dir = this.runsDir(id)
     await fsp.mkdir(dir, { recursive: true })
+    const file = join(dir, `${rid}.log`)
     const text = String(line ?? '')
-    await fsp.appendFile(join(dir, `${rid}.log`), text.endsWith('\n') ? text : `${text}\n`, 'utf8')
+    const payload = text.endsWith('\n') ? text : `${text}\n`
+    try {
+      const stat = await fsp.stat(file)
+      if (stat.size + Buffer.byteLength(payload) > LIMITS.runLog) {
+        await fsp.rename(file, `${file}.1`).catch(() => {})
+      }
+    } catch {
+      // 文件还不存在：正常首次追加
+    }
+    await fsp.appendFile(file, payload, 'utf8')
   }
 
   // ----------------------------------------------------------------- exports

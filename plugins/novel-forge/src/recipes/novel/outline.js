@@ -45,17 +45,19 @@ function formatZod(error) {
     .join('；')
 }
 
+// 模型偶尔漏一两个章节字段是常态：除 title / goal 外一律兜底，
+// 不能因为 when/where/conflict/turn/hook/pov/cast 缺一个就丢掉整份大纲。
 const chapterSchema = z.object({
   id: z.unknown().optional(),
   title: z.string().min(1),
   goal: z.string(),
-  conflict: z.string(),
-  turn: z.string(),
-  hook: z.string(),
-  pov: z.string(),
-  when: z.string(),
-  where: z.string(),
-  cast: z.array(z.unknown()),
+  conflict: z.string().catch(''),
+  turn: z.string().catch(''),
+  hook: z.string().catch(''),
+  pov: z.string().catch(''),
+  when: z.string().catch(''),
+  where: z.string().catch(''),
+  cast: z.array(z.unknown()).catch([]),
 })
 
 const volumeSchema = z.object({

@@ -11,6 +11,7 @@ const DEFAULT = {
   chapters: 24,
   wordsPerChapter: 3000,
   pov: '第三人称限知',
+  protagonistGender: 'auto',
   audience: '成年',
   tone: '',
   styleGuide: '',
@@ -19,17 +20,26 @@ const DEFAULT = {
 
 const CHAPTER_PRESETS = [6, 12, 24, 48]
 const WORD_PRESETS = [2000, 3000, 4500, 6000]
+const GENDER_PRESETS = [
+  { value: 'auto', label: '自动' },
+  { value: '男', label: '男' },
+  { value: '女', label: '女' },
+]
 
 /** 本地预估，不调模型；公式与 recipe.estimate 保持一致，服务端可达时以服务端为准。 */
 export function estimateFor(chapters, wordsPerChapter, autoReview = true) {
   const chapterCount = Math.max(0, Number(chapters) || 0)
   const words = Math.max(0, Number(wordsPerChapter) || 0)
-  const calls = 6 + chapterCount * (autoReview ? 6 : 3)
+  // 每章 4 次：细纲 / 草稿（含内联摘要）/ 审校 / 修订（含内联摘要）；不开审校只有 2 次。
+  const calls = 6 + chapterCount * (autoReview ? 4 : 2)
   const perChar = 1 / 1.6 // 中文约 1.6 字/token
-  const fixed = Math.ceil((5 * 4000 + 3000) * perChar) + Math.ceil((5 * 1200 + 600) * perChar)
-  const perIn = (4000 + 14500 + (words + 1000) + (autoReview ? (words + 6000) + (words + 8000) : 0)) * perChar
-  const perOut = (1200 + words + 450 + (autoReview ? (800 + words + 450) : 0)) * perChar
-  const tokens = Math.round(fixed + chapterCount * (perIn + perOut))
+  // 常量来自 12 章 × 3000 字的实测聚合（docs/architecture.md §6.5）。
+  const fixedIn = 25279
+  const fixedOut = 10177
+  const prose = ratio => Math.round(words * ratio)
+  const perIn = 5483 + 6324 + (autoReview ? 6331 + prose(1.05) + 4581 + prose(1.05) : 0)
+  const perOut = 1757 + prose(1.03) + (autoReview ? 1053 + prose(1.07) : 0)
+  const tokens = Math.round((fixedIn + chapterCount * perIn + fixedOut + chapterCount * perOut) * perChar)
   // 一次调用大致 2 分钟（含写正文的长调用），只给一个量级。
   const minutes = calls * 2
   return { chapters: chapterCount, calls, tokens, minutes }
@@ -78,7 +88,13 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
   React.useEffect(() => {
     let live = true
     const timer = setTimeout(() => {
-      api.estimateNew({ ...form }).then(value => {
+      // 估算只吃篇幅与审校开关：主角性别不影响调用数，不往这里带。
+      api.estimateNew({
+        genre: form.genre,
+        chapters: Number(form.chapters) || 24,
+        wordsPerChapter: Number(form.wordsPerChapter) || 3000,
+        autoReview: form.autoReview !== false,
+      }).then(value => {
         if (live && value && Number.isFinite(value.calls)) setServerEstimate(value)
       }).catch(() => {})
     }, 300)
@@ -121,6 +137,7 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
           chapters: Number(form.chapters) || 24,
           wordsPerChapter: Number(form.wordsPerChapter) || 3000,
           pov: form.pov,
+          protagonistGender: form.protagonistGender,
           tone: form.tone.trim(),
           styleGuide: form.styleGuide.trim(),
           autoReview: true,
@@ -209,6 +226,26 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
                 onChange: event => set('audience', event.target.value),
               }, ['成年', '青少年', '泛读者'].map(audience => React.createElement('option', { key: audience, value: audience }, audience))),
             ),
+          ),
+
+          React.createElement('div', { className: 'nf-field' },
+            React.createElement('span', { className: 'nf-label' },
+              '主角性别',
+              React.createElement('em', null, '定死主角的代词，避免正文里「他/她」混用；选「自动」由模型按故事核心决定。'),
+            ),
+            React.createElement('div', {
+              role: 'group',
+              'aria-label': '主角性别',
+              style: { display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' },
+            },
+            GENDER_PRESETS.map(option => React.createElement('button', {
+              key: option.value,
+              type: 'button',
+              className: 'nf-btn nf-btn-sm nf-btn-quiet',
+              onClick: () => set('protagonistGender', option.value),
+              'aria-pressed': form.protagonistGender === option.value,
+              style: form.protagonistGender === option.value ? { borderColor: 'var(--nf-ink)', color: 'var(--nf-ink)' } : undefined,
+            }, option.label))),
           ),
 
           React.createElement(Field, {

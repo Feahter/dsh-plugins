@@ -54,6 +54,7 @@ export function createFakeCtx({
 
   const calls = []
   const logs = []
+  const warns = []
   let cursor = 0
 
   const ctx = {
@@ -111,6 +112,10 @@ export function createFakeCtx({
     log(message) {
       logs.push(message)
     },
+    warn(message) {
+      logs.push(message)
+      warns.push(message)
+    },
     progress() {},
     llm: {
       async generate(options) {
@@ -125,6 +130,7 @@ export function createFakeCtx({
     },
   }
 
+  ctx.warns = warns
   ctx.remainingOutputs = () => outputs.length - cursor
   return ctx
 }
@@ -181,6 +187,7 @@ export function sampleCharacters() {
       {
         name: '沈砚',
         role: '主角',
+        gender: '男',
         want: '弄清楚父亲死亡的真相',
         fear: '自己也会被遗忘',
         secret: '他能听见死者说话',
@@ -191,6 +198,7 @@ export function sampleCharacters() {
       {
         name: '阿绫',
         role: '关键配角',
+        gender: '女',
         want: '离开这座小城',
         fear: '被困在原地',
         secret: '她见过头七的回魂',

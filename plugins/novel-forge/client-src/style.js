@@ -295,10 +295,19 @@ body[data-ds-dark-theme] .nf-root{
   grid-template-columns: 252px minmax(0, 1fr) 318px;
 }
 .nf-workbench.no-drawer{ grid-template-columns: 252px minmax(0, 1fr); }
+/* 窄屏才显示紧凑运行条（宽屏用右侧抽屉）；基础规则须在媒体查询之前，避免同权重覆盖。 */
+.nf-runbar{ display: none; }
 @media (max-width: 1080px){
   .nf-workbench{ grid-template-columns: 216px minmax(0, 1fr); }
   .nf-workbench .nf-drawer{ display: none; }
   .nf-workbench.no-drawer{ grid-template-columns: 216px minmax(0, 1fr); }
+  /* 抽屉被隐藏后，顶部紧凑运行条接管进度与取消。 */
+  .nf-runbar{
+    display: flex; align-items: center; gap: 8px; flex-basis: 100%; order: 10;
+    padding: 6px 10px; border: 1px solid var(--nf-line); border-radius: 3px;
+    background: var(--nf-paper-2); font-size: 11px; color: var(--nf-ink-2);
+  }
+  .nf-runbar-label{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 /* 阶段轨 */
@@ -355,6 +364,7 @@ body[data-ds-dark-theme] .nf-root{
 .nf-stat{ background: var(--nf-card); padding: 14px 14px 12px; }
 .nf-stat b{ display: block; font-family: var(--nf-serif); font-size: 21px; font-weight: 600; line-height: 1.2; letter-spacing: .02em; }
 .nf-stat span{ display: block; margin-top: 4px; font-size: 9.5px; letter-spacing: .14em; color: var(--nf-ink-3); }
+.nf-stat .nf-stat-sub{ display: block; margin-top: 2px; font-size: 9.5px; letter-spacing: .02em; color: var(--nf-ink-3); }
 @media (max-width: 640px){ .nf-stats{ grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .nf-quote{
@@ -513,10 +523,20 @@ body[data-ds-dark-theme] .nf-root{
 .nf-run-current{ font-family: var(--nf-serif); font-size: 13px; letter-spacing: .02em; margin-bottom: 8px; word-break: break-word; }
 .nf-run-nums{ display: flex; justify-content: space-between; font-size: 10px; color: var(--nf-ink-3); margin-top: 7px; font-variant-numeric: tabular-nums; }
 .nf-events{ list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.nf-event{ display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; padding: 5px 0; font-size: 11px; line-height: 1.6; color: var(--nf-ink-2); border-bottom: 1px dashed var(--nf-line); }
+.nf-event{ display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; padding: 5px 0; font-size: 11px; line-height: 1.6; color: var(--nf-ink-2); border-bottom: 1px dashed var(--nf-line);
+  /* 屏外事件跳过布局与绘制；22px 是单行高度，避免滚动条跳动。 */
+  content-visibility: auto; contain-intrinsic-size: 0 22px; }
+.nf-new-events{
+  position: sticky; top: 0; z-index: 3; align-self: center; flex: none; margin: 2px 0;
+  padding: 4px 12px; border: 1px solid var(--nf-cinnabar); border-radius: 999px;
+  background: var(--nf-card); color: var(--nf-cinnabar); font: inherit; font-size: 11px;
+  cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+.nf-new-events:hover{ background: var(--nf-paper-2); }
 .nf-event:last-child{ border-bottom: 0; }
 .nf-event time{ color: var(--nf-ink-3); font-family: var(--nf-mono); font-size: 9.5px; padding-top: 1px; }
 .nf-event.is-accent span{ color: var(--nf-cinnabar); }
+.nf-event.is-warn span{ color: var(--nf-warn); }
 .nf-event.is-strong span{ color: var(--nf-ink); }
 .nf-run-empty{ padding: 18px 6px; color: var(--nf-ink-3); font-size: 11px; line-height: 1.9; text-align: center; }
 .nf-drawer-foot{ flex: none; padding: 10px 16px 14px; border-top: 1px solid var(--nf-line); display: flex; gap: 8px; }

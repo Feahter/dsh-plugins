@@ -33,10 +33,23 @@ function fmtDate(value) {
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-function chapterIdOf(raw) {
+/**
+ * 章 id 补零宽度跟随项目里实际的产物 key（outline 章数 >99 时是 ch005…ch120）。
+ * 没有写过的章（没有 draft/chNNN 之类 key）时退回两位。
+ */
+function chapterIdWidth(keys = []) {
+  let width = 0
+  for (const key of keys) {
+    const matched = String(key ?? '').match(/^draft\/ch(\d+)$/)
+    if (matched) width = Math.max(width, matched[1].length)
+  }
+  return width || 2
+}
+
+function chapterIdOf(raw, keys = []) {
   const match = String(raw ?? '').match(/(\d+)/)
   if (!match) return null
-  return `ch${String(Number(match[1])).padStart(2, '0')}`
+  return `ch${String(Number(match[1])).padStart(chapterIdWidth(keys), '0')}`
 }
 
 const projectParam = {
@@ -188,13 +201,27 @@ export function createTools(engine) {
       async args => {
         const project = await resolve(engine, args.project)
         if (args.chapter) {
-          const id = chapterIdOf(args.chapter)
-          if (!id) throw new Error(`看不懂章节号：${args.chapter}`)
-          const keys = [`beats/${id}`, `draft/${id}`, `review/${id}`, `summary/${id}`]
+          const knownKeys = Object.keys(project.artifacts ?? {})
+          const id = chapterIdOf(args.chapter, knownKeys)
+          if (!id) throw httpError(400, 'BAD_PARAMS', `看不懂章节号：${args.chapter}`)
+          const kinds = ['beats', 'draft', 'review', 'summary']
           const out = { ok: true, project: project.title, chapter: id }
-          for (const key of keys) {
-            const artifact = await engine.getArtifact(project.id, key)
-            out[key.split('/')[0]] = artifact ? artifact.content : null
+          for (const kind of kinds) {
+            const artifact = await engine.getArtifact(project.id, `${kind}/${id}`)
+            out[kind] = artifact ? artifact.content : null
+          }
+          if (kinds.every(kind => out[kind] == null)) {
+            const chapterKeys = knownKeys.filter(key => /^(beats|draft|review|summary)\/ch\d+$/.test(key))
+            const width = chapterIdWidth(knownKeys)
+            throw httpError(
+              404,
+              'CHAPTER_NOT_FOUND',
+              `第 ${args.chapter} 章映射为 ${id}，但项目里没有这一章的产物。` +
+                (chapterKeys.length
+                  ? `已有章节产物：${chapterKeys.slice(0, 8).join('、')}${chapterKeys.length > 8 ? ' …' : ''}`
+                  : '项目还没有任何章节产物。'),
+              { chapter: id, width },
+            )
           }
           return out
         }
@@ -250,7 +277,7 @@ export function createTools(engine) {
           }
         }
         const artifact = await engine.writeArtifact(project.id, args.key, { kind, content }, { stage: 'manual' })
-        return { ok: true, key: args.key, bytes: artifact?.bytes ?? null, version: artifact?.meta?.version ?? null }
+        return { ok: true, key: args.key, bytes: artifact?.meta?.bytes ?? null, version: artifact?.meta?.version ?? null }
       },
       { render: (_args, value) => text(`已保存 ${value.key}${value.version ? `（v${value.version}）` : ''}。`) },
     ),

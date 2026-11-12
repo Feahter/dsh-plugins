@@ -5,7 +5,7 @@ import {
 } from '../api.js'
 import { STAGES, STAGE_BY_ID, STATUS_LABEL, STAGE_ARTIFACT } from '../strings.js'
 import {
-  Badge, Button, Dot, Empty, Icon, ProgressBar, Spinner, formatNumber, formatWords,
+  Badge, Button, Dot, Empty, Icon, ProgressBar, Spinner, formatNumber, formatTokens, formatWords,
 } from './bits.jsx'
 import { StageRail, overallProgress } from './StageRail.jsx'
 import { ArtifactView } from './ArtifactView.jsx'
@@ -13,15 +13,24 @@ import { RunDrawer } from './RunDrawer.jsx'
 import { ChapterView } from './ChapterView.jsx'
 
 const EVENT_LIMIT = 400
+// 后端对单项目只允许一个活运行，第二个 startRun 必撞 409 RUN_ACTIVE。
+const RUNNING_HINT = '正在运行，先取消或等它跑完'
 
-/** 合并增量事件：按 seq 去重，旧事件不丢。 */
+/** 合并增量事件：按 seq 去重，旧事件不丢；没有新事件时返回原数组（引用不变）。 */
 function mergeEvents(prev, incoming) {
   if (!incoming?.length) return prev
   const seen = new Set(prev.map(event => event.seq))
   const next = prev.slice()
-  for (const event of incoming) if (!seen.has(event.seq)) next.push(event)
+  let added = 0
+  for (const event of incoming) {
+    if (event.seq != null && seen.has(event.seq)) continue
+    if (event.seq != null) seen.add(event.seq)
+    next.push(event)
+    added += 1
+  }
+  if (!added) return prev
   next.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
-  return next.slice(-EVENT_LIMIT)
+  return next.length > EVENT_LIMIT ? next.slice(-EVENT_LIMIT) : next
 }
 
 /** 续跑起点：审稿门优先，否则第一个没完成的阶段。 */
@@ -45,8 +54,19 @@ function chapterMeta(outline) {
   return list
 }
 
+// 成本可见性：调用次数旁边直接给出估算 token 与重试次数，省得用户去翻 run.json。
+function costLine(stats) {
+  const tokensIn = Number(stats?.estTokensIn) || 0
+  const tokensOut = Number(stats?.estTokensOut) || 0
+  const retried = Number(stats?.retried) || 0
+  if (!tokensIn && !tokensOut) return ''
+  const parts = [`${formatTokens(tokensIn)} 进`, `${formatTokens(tokensOut)} 出`]
+  if (retried) parts.push(`重试 ${retried}`)
+  return parts.join(' · ')
+}
+
 // ------------------------------------------------------------------ 总览
-function Overview({ project, brief, outline, onContinue, onOpenChapter, busy }) {
+function Overview({ project, brief, outline, onContinue, onOpenChapter, busy, running }) {
   const params = project?.params ?? {}
   const chapters = chapterMeta(outline)
   const total = params.chapters ?? chapters.length ?? 0
@@ -64,7 +84,10 @@ function Overview({ project, brief, outline, onContinue, onOpenChapter, busy }) 
           project?.pendingReview ? React.createElement('span', { className: 'nf-badge nf-badge-accent' }, '待确认') : null,
         ),
       ),
-      React.createElement(Button, { variant: 'accent', onClick: onContinue, busy }, Icon.play, '继续炼'),
+      React.createElement(Button, {
+        variant: 'accent', onClick: onContinue, busy, disabled: running,
+        title: running ? RUNNING_HINT : undefined,
+      }, Icon.play, '继续炼'),
     ),
 
     brief?.logline ? React.createElement('blockquote', { className: 'nf-quote' },
@@ -87,6 +110,7 @@ function Overview({ project, brief, outline, onContinue, onOpenChapter, busy }) 
       React.createElement('div', { className: 'nf-stat' },
         React.createElement('span', null, '模型调用'),
         React.createElement('b', null, formatNumber(project?.stats?.calls ?? 0), React.createElement('small', null, ' 次')),
+        React.createElement('small', { className: 'nf-stat-sub' }, costLine(project?.stats)),
       ),
     ),
 
@@ -243,16 +267,30 @@ export function Workbench({ projectId, onBack, notify }) {
   const [artifactVersion, setArtifactVersion] = React.useState(0)
 
   const [run, setRun] = React.useState(null)
+  const running = run?.status === 'running'
   const [events, setEvents] = React.useState([])
   const [runError, setRunError] = React.useState('')
   const [starting, setStarting] = React.useState(false)
   const [cancelling, setCancelling] = React.useState(false)
+  // 取消后服务端还在给当前 item 收尾，轮询要延续到 run 真正落终态。
+  const [settling, setSettling] = React.useState(false)
   const [exporting, setExporting] = React.useState(false)
   const [gateBusy, setGateBusy] = React.useState(false)
   const [gateHidden, setGateHidden] = React.useState(false)
+  const gateAt = project?.pendingReview?.at ?? null
+  // 点过「稍后」只对当次审稿门有效；来了新的审稿门要再提醒一次。
+  React.useEffect(() => { setGateHidden(false) }, [gateAt])
 
   const [chapter, setChapter] = React.useState(null) // {id, tab}
   const seqRef = React.useRef(0)
+  // run 落终态会重建轮询 effect；收尾全量拉取不能跟着 effect 的 alive 一起作废，
+  // 用组件级标记判断，否则最后一次 run-end 事件会被误丢。
+  const mountedRef = React.useRef(true)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+  const flushChapterRef = React.useRef(null)
 
   const loadProject = React.useCallback(async () => {
     const data = await getProject(projectId)
@@ -294,9 +332,10 @@ export function Workbench({ projectId, onBack, notify }) {
     return () => { alive = false }
   }, [projectId, loadProject])
 
-  // 轮询：运行中每 1200ms 增量拉；结束即停并刷新项目
+  // 轮询：运行中每 1200ms 增量拉；取消后继续拉到收尾完成，然后刷新项目。
   React.useEffect(() => {
-    if (run?.status !== 'running') return undefined
+    const active = run?.status === 'running' || settling
+    if (!active) return undefined
     let alive = true
     let inFlight = false
     const timer = setInterval(() => {
@@ -308,16 +347,18 @@ export function Workbench({ projectId, onBack, notify }) {
           const next = payload?.run
           if (!next) return
           setRun(next)
+          setRunError('')
           if (next.events?.length) {
             seqRef.current = Math.max(seqRef.current, ...next.events.map(event => event.seq ?? 0))
             setEvents(previous => mergeEvents(previous, next.events))
           }
           if (next.status !== 'running') {
+            setSettling(false)
             // 收尾补一次全量拉取：run-end 常在最后一次增量之后才落盘，
             // 只靠增量轮询会漏掉它，抽屉停在「已完成」。
             getRun(projectId, 0)
               .then(payload => {
-                if (!alive || !payload?.run) return
+                if (!mountedRef.current || !payload?.run) return
                 setRun(payload.run)
                 setEvents(payload.run.events ?? [])
                 seqRef.current = payload.run.events?.length
@@ -334,15 +375,17 @@ export function Workbench({ projectId, onBack, notify }) {
         .finally(() => { inFlight = false })
     }, 1200)
     return () => { alive = false; clearInterval(timer) }
-  }, [projectId, run?.id, run?.status, loadProject])
+  }, [projectId, run?.id, run?.status, settling, loadProject])
 
   // 阶段产物
   const artifactKey = selected === 'overview' ? null : STAGE_ARTIFACT[selected] ?? null
   React.useEffect(() => {
     if (!artifactKey) { setArtifact(null); setArtifactError(''); return undefined }
-    if (!artifacts[artifactKey] && !artifactVersion) {
+    if (!artifacts[artifactKey]) {
+      // 项目里没有这个产物：就是空态，不发请求也不报红。
       setArtifact(null)
       setArtifactError('')
+      setArtifactLoading(false)
       return undefined
     }
     let alive = true
@@ -350,12 +393,42 @@ export function Workbench({ projectId, onBack, notify }) {
     setArtifactError('')
     getArtifact(projectId, artifactKey)
       .then(payload => { if (alive) setArtifact(payload ?? null) })
-      .catch(error => { if (alive) { setArtifact(null); setArtifactError(error.message) } })
+      .catch(error => {
+        if (!alive) return
+        setArtifact(null)
+        // 产物还没生成（ARTIFACT_MISSING）是正常空态，不是错误；
+        // 否则跑完一轮后点任意未到的阶段都会看到红条。
+        if (error?.code === 'ARTIFACT_MISSING' || /没有这个产物/.test(error?.message ?? '')) setArtifactError('')
+        else setArtifactError(error.message)
+      })
       .finally(() => { if (alive) setArtifactLoading(false) })
     return () => { alive = false }
   }, [projectId, artifactKey, artifactVersion, artifacts])
 
-  const openChapter = (id, tab = 'beats') => setChapter({ id, tab })
+  // 章节页把 flush 注册到这里；任何会卸载它的导航都先落草稿。
+  const registerFlush = React.useCallback(fn => {
+    flushChapterRef.current = fn
+    return () => { if (flushChapterRef.current === fn) flushChapterRef.current = null }
+  }, [])
+
+  const flushChapter = React.useCallback(async () => {
+    const fn = flushChapterRef.current
+    if (!fn) return
+    try {
+      if (await fn()) notify('离开前已自动保存草稿', 'ok')
+    } catch (error) {
+      notify('草稿自动保存失败：' + error.message, 'error')
+    }
+  }, [notify])
+
+  const leaveChapter = async fn => {
+    await flushChapter()
+    fn()
+  }
+
+  const openChapter = (id, tab = 'beats') =>
+    leaveChapter(() => setChapter({ id, tab }))
+
 
   const refreshRun = next => {
     if (!next) return
@@ -365,8 +438,10 @@ export function Workbench({ projectId, onBack, notify }) {
   }
 
   const begin = async (options, message) => {
+    await flushChapter()
     setStarting(true)
     setRunError('')
+    setSettling(false)
     try {
       const created = await startRun(projectId, options)
       refreshRun(created)
@@ -411,6 +486,7 @@ export function Workbench({ projectId, onBack, notify }) {
     try {
       const cancelled = await cancelRun(projectId)
       if (cancelled) setRun(cancelled)
+      setSettling(true)
       notify('已请求取消，等当前这一步收尾', 'ok')
     } catch (error) {
       notify(error.message, 'error')
@@ -423,8 +499,8 @@ export function Workbench({ projectId, onBack, notify }) {
     setExporting(true)
     try {
       const payload = await exportProject(projectId, format)
-      const file = payload?.export
-      notify(file ? `已导出 ${file.filename}` : '已导出', 'ok')
+      const file = payload ?? {}
+      notify(file.filename ? `已导出 ${file.filename}（保存在 ${file.path}）` : '已导出', 'ok')
     } catch (error) {
       notify(error.message, 'error')
     } finally {
@@ -463,10 +539,11 @@ export function Workbench({ projectId, onBack, notify }) {
       initialTab: chapter.tab,
       outline,
       notify,
-      onBack: () => setChapter(null),
+      registerFlush,
+      onBack: () => leaveChapter(() => setChapter(null)),
     })
     : selected === 'overview'
-      ? React.createElement(Overview, { project, brief, outline, onContinue, onOpenChapter: openChapter, busy: starting })
+      ? React.createElement(Overview, { project, brief, outline, onContinue, onOpenChapter: openChapter, busy: starting, running })
       : React.createElement(StagePane, {
         project, outline, selected, artifact, loading: artifactLoading, error: artifactError,
         onOpenChapter: openChapter,
@@ -477,21 +554,44 @@ export function Workbench({ projectId, onBack, notify }) {
     React.createElement(StageRail, {
       project,
       selected: chapter ? STAGE_ARTIFACT[selected] ? selected : 'overview' : selected,
-      onSelect: stage => { setChapter(null); setSelected(stage) },
+      onSelect: async stage => {
+        await leaveChapter(() => { setChapter(null); setSelected(stage) })
+      },
+      onOverview: async () => {
+        await leaveChapter(() => { setChapter(null); setSelected('overview') })
+      },
     }),
 
     React.createElement('main', { className: 'nf-main' },
       React.createElement('div', { className: 'nf-main-inner' },
         React.createElement('div', { className: 'nf-main-top' },
-          React.createElement('button', { type: 'button', className: 'nf-btn nf-btn-quiet nf-btn-sm', onClick: onBack },
-            Icon.back, '书架'),
+          React.createElement('button', {
+            type: 'button',
+            className: 'nf-btn nf-btn-quiet nf-btn-sm',
+            onClick: async () => { await leaveChapter(onBack) },
+          }, Icon.back, '书架'),
           React.createElement('span', { className: 'nf-muted', style: { fontSize: 11 } }, '/'),
           React.createElement('span', { style: { fontSize: 12, color: 'var(--nf-ink-2)' } }, chapter ? `第 ${chapter.id.replace(/^ch0?/, '')} 章` : stageTitle),
           React.createElement('span', { className: 'nf-grow' }),
-          React.createElement(Button, { size: 'sm', variant: 'primary', onClick: onContinue, busy: starting },
-            Icon.play, '继续炼'),
+          // 窄窗口没有右侧抽屉，用紧凑条兜住进度与取消入口。
+          (run?.status === 'running' || settling) ? React.createElement('div', { className: 'nf-runbar' },
+            React.createElement(Dot, { status: settling ? 'idle' : 'running' }),
+            React.createElement('span', { className: 'nf-runbar-label' },
+              settling ? '收尾中…' : (run?.current?.label || '运行中…')),
+            React.createElement('span', { className: 'nf-muted', style: { fontSize: 10.5 } },
+              `${run?.progress?.done ?? 0} / ${run?.progress?.total || '—'}`),
+            React.createElement(Button, {
+              size: 'sm', variant: 'danger', onClick: onCancel,
+              disabled: !(run?.status === 'running'), busy: cancelling,
+            }, '取消'),
+          ) : null,
           React.createElement(Button, {
-            size: 'sm', variant: 'quiet', onClick: onRerun, disabled: selected === 'overview' || !!chapter,
+            size: 'sm', variant: 'primary', onClick: onContinue, busy: starting, disabled: running,
+            title: running ? RUNNING_HINT : undefined,
+          }, Icon.play, '继续炼'),
+          React.createElement(Button, {
+            size: 'sm', variant: 'quiet', onClick: onRerun, disabled: running || selected === 'overview' || !!chapter,
+            title: running ? RUNNING_HINT : undefined,
           }, Icon.refresh, '重跑本步'),
           React.createElement(ExportMenu, { onExport, busy: exporting }),
         ),

@@ -113,11 +113,112 @@ const OMNISCIENT_PATTERNS = [
   { re: /镜头(?:转向|拉远|一转)/g, label: '镜头切换' },
 ]
 
+function pronounFor(gender) {
+  if (gender === '男') return '他'
+  if (gender === '女') return '她'
+  return ''
+}
+
+function countOf(text, needle) {
+  if (!needle) return 0
+  let count = 0
+  let position = text.indexOf(needle)
+  while (position !== -1) {
+    count += 1
+    position = text.indexOf(needle, position + needle.length)
+  }
+  return count
+}
+
+/** 按句末标点切句；只用于代词规则，不参与段落统计。 */
+function splitSentences(paragraph) {
+  return String(paragraph)
+    .split(/[。！？!?；;…]+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+}
+
+function genderFindings(body, paragraphs, cast) {
+  const people = Array.isArray(cast) ? cast : []
+  const names = []
+  const declared = []
+  for (const person of people) {
+    const name = String(person?.name ?? '').trim()
+    if (!name) continue
+    if (!names.includes(name)) names.push(name)
+    const pronoun = pronounFor(person?.gender)
+    if (person?.role !== '主角' || !pronoun) continue
+    if (!declared.some((item) => item.name === name)) declared.push({ name, gender: person.gender, pronoun })
+  }
+  if (!declared.length) return []
+
+  const findings = []
+  // 规则 1：逐段，段内只有主角一个人物却用了相反代词。
+  // 精度上做了两道收窄（真实稿子里「他」经常指段内没点名的人，放宽会全是误报）：
+  //   a) 段内已经出现主角的正确代词 → 作者在用两个代词指不同的人，不判；
+  //   b) 只在「同句里主角名之后出现相反代词」或「相反代词做下一句主语」时判。
+  for (let index = 0; index < paragraphs.length && findings.length < 3; index += 1) {
+    const paragraph = paragraphs[index]
+    for (const person of declared) {
+      if (findings.length >= 3) break
+      if (!paragraph.includes(person.name)) continue
+      if (paragraph.includes(person.pronoun)) continue
+      const wrong = person.pronoun === '他' ? '她' : '他'
+      if (!paragraph.includes(wrong)) continue
+      const others = names.filter((name) => name !== person.name)
+      if (others.some((name) => paragraph.includes(name))) continue
+      const sentences = splitSentences(paragraph)
+      let drifted = false
+      for (let i = 0; i < sentences.length; i += 1) {
+        const sentence = sentences[i]
+        const at = sentence.indexOf(person.name)
+        if (at >= 0 && sentence.indexOf(wrong, at + person.name.length) >= 0) {
+          drifted = true
+          break
+        }
+        if (i > 0 && sentences[i - 1].includes(person.name) && sentence.startsWith(wrong)) {
+          drifted = true
+          break
+        }
+      }
+      if (!drifted) continue
+      findings.push({
+        severity: 'warn',
+        kind: '性别',
+        where: `第${index + 1}段`,
+        issue: `「${person.name}」是${person.gender}，本段用「${wrong}」指代，段内只有 ${person.name} 一个人物，代词前后不一致`,
+        fix: `把本段指代 ${person.name} 的「${wrong}」改成「${person.pronoun}」；若这句写的是别人，补上对方姓名`,
+      })
+    }
+  }
+
+  // 规则 2：整章，主角名多次出现却一次正确代词都没有。规则 1 命中时不重复报。
+  if (!findings.length) {
+    for (const person of declared) {
+      const nameCount = countOf(body, person.name)
+      const wrong = person.pronoun === '他' ? '她' : '他'
+      if (nameCount < 3) continue
+      if (countOf(body, person.pronoun) !== 0) continue
+      if (countOf(body, wrong) < 3) continue
+      findings.push({
+        severity: 'warn',
+        kind: '性别',
+        where: '全文',
+        issue: `整章没有出现「${person.pronoun}」，主角「${person.name}」很可能被写成了另一种性别`,
+        fix: `按人物档案把主角的代词统一成「${person.pronoun}」，并检查动作描写是否也写反`,
+      })
+      break
+    }
+  }
+
+  return findings
+}
+
 /**
  * 确定性检查。返回 findings（形状同 §4.4）与 stats。
- * @param {{text?: string, params?: object, beats?: object|null, previousHook?: string}} input
+ * @param {{text?: string, params?: object, beats?: object|null, previousHook?: string, cast?: Array<{name?: string, role?: string, gender?: string}>}} input
  */
-export function checkDraft({ text = '', params = {}, beats = null, previousHook = '' } = {}) {
+export function checkDraft({ text = '', params = {}, beats = null, previousHook = '', cast = [] } = {}) {
   const body = String(text ?? '')
   const wordsPerChapter = Number(params.wordsPerChapter) || DEFAULTS.wordsPerChapter
   const pov = params.pov || DEFAULTS.pov
@@ -226,8 +327,8 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   }
 
   // 7. 细纲指定人物缺席
-  const cast = collectCast(beats)
-  const missing = cast.filter((name) => !body.includes(name))
+  const beatCast = collectCast(beats)
+  const missing = beatCast.filter((name) => !body.includes(name))
   if (missing.length) {
     add(
       'warn',
@@ -242,6 +343,11 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   const hook = String(previousHook ?? '').trim()
   if (hook && !body.includes(hook.slice(0, 4))) {
     add('note', 'hook', '开头', '未见对上一章钩子的直接回应', '开篇一两段先接住上一章留下的问题')
+  }
+
+  // 9. 代词一致性（人物档案声明了性别时）
+  for (const finding of genderFindings(body, paragraphs, cast)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
   }
 
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))

@@ -30,8 +30,14 @@ function stripFence(markdown) {
 
 export function stripChapterHeading(markdown) {
   return stripFence(markdown)
-    .replace(/^\s*#{1,4}\s*第\s*[0-9一二三四五六七八九十百千零两]+\s*章[^\n]*\n+/, '')
+    // 模型常写「第一章 头七」而不带井号；两种都要剥，否则导出会多一行重复标题。
+    .replace(/^\s*(?:#{1,4}\s*)?第\s*[0-9一二三四五六七八九十百千零两]+\s*章[^\n]*\n+/, '')
     .trim()
+}
+
+/** EPUB 里不要原始 HTML：正文里的 <script>/<img onerror> 会被阅读器执行成 XSS。 */
+function escapeAngle(text) {
+  return String(text ?? '').replace(/</g, '&lt;')
 }
 
 /** `<slug>-<yyyyMMdd>.<ext>`：保留中文，去掉路径非法字符。 */
@@ -128,7 +134,8 @@ export async function epubExport(ctx) {
 
   const content = manuscript.chapters.map((chapter) => ({
     title: `第${chapter.no}章 ${chapter.title}`,
-    content: marked.parse(`## 第${chapter.no}章 ${chapter.title}\n\n${chapter.body}`),
+    // 只转义尖括号：保留 markdown 语法，同时让正文里的裸 HTML 变成纯文本。
+    content: marked.parse(`## 第${chapter.no}章 ${escapeAngle(chapter.title)}\n\n${escapeAngle(chapter.body)}`),
   }))
 
   if (!content.length) {

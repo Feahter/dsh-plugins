@@ -108,7 +108,7 @@ export function ProjectList({ projects, loading, error, onCreate, onOpen, onCont
           React.createElement(Button, { size: 'sm', onClick: onRetry }, '重试')),
       ) : null,
 
-      projects.length === 0
+      projects.length === 0 && !error
         ? React.createElement(Empty, {
           title: '还没有书。',
           body: '给我一句话，就能开炉。设定、人物、大纲、细纲、正文、审校，墨炉一章一章地炼。',

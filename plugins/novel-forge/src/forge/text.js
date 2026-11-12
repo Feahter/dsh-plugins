@@ -33,6 +33,10 @@ export function safeKey(key) {
       throw new ForgeError('BAD_PARAMS', `产物 key 含非法路径段：${key}`, { key })
     }
   }
+  // `.versions` 是产物历史归档目录：放行会让人用 `.versions/x.1` 覆盖任意产物的旧版本。
+  if (segments[0] === '.versions') {
+    throw new ForgeError('BAD_PARAMS', `产物 key 不允许写入保留目录：${key}`, { key })
+  }
   return key
 }
 
@@ -81,10 +85,92 @@ export function estimateTokens(chars) {
   return Math.ceil(n / 1.6)
 }
 
-const FENCE = /```(?:json|JSON)?\s*([\s\S]*?)```/
+const FENCE = /```(?:json|JSON)?\s*([\s\S]*?)```/g
 
 /**
- * 从模型输出里提取 JSON：整体解析 → 剥代码围栏 → 首尾括号截取。
+ * 扫出所有「括号配平」的顶层片段。模型常在 JSON 前面写一段带大括号的思考，
+ * 首尾括号截取会从错误的 { 开始，配平扫描能跳过那段噪声。
+ * 字符串里的括号与转义不参与配平。
+ */
+function balancedSpans(raw, limit = 12) {
+  const spans = []
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; continue }
+    if (ch === '{' || ch === '[') {
+      if (depth === 0) start = i
+      depth += 1
+      continue
+    }
+    if (ch === '}' || ch === ']') {
+      if (depth === 0) continue
+      depth -= 1
+      if (depth === 0 && start >= 0) {
+        spans.push(raw.slice(start, i + 1))
+        start = -1
+        if (spans.length >= limit) break
+      }
+      continue
+    }
+    if (depth === 0 && /[^\s,;]/.test(ch)) {
+      // 顶层出现非括号内容：说明前面的片段不是 JSON，重置
+      start = -1
+    }
+  }
+  return spans
+}
+
+/** 常见的手写 JSON 毛病：尾逗号、// 与块注释、中文引号、单引号键。 */
+function repairJson(text) {
+  let out = ''
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    if (inString) {
+      out += ch
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; out += ch; continue }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i += 1
+      out += '\n'
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i += 1
+      i += 1
+      continue
+    }
+    if (ch === ',') {
+      // 尾逗号：只在字符串外、后面紧跟 } 或 ] 时删掉
+      let j = i + 1
+      while (j < text.length && /\s/.test(text[j])) j += 1
+      if (text[j] === '}' || text[j] === ']') continue
+    }
+    out += ch
+  }
+  return out
+}
+
+/**
+ * 从模型输出里提取 JSON：整体 → 代码围栏 → 配平片段 → 修复版。
+ * 真实模型（尤其推理模型）常把思考写在 JSON 前面，或留尾逗号/注释；
+ * 每一次解析失败都等于把整段 prompt 的输入费扔掉，所以这里尽量抢救。
  * 全部失败抛 LLM_PARSE（调用方可补 raw）。
  * @param {string} text
  */
@@ -97,26 +183,29 @@ export function extractJson(text) {
 
   /** @type {string[]} */
   const candidates = [raw]
-  const fenced = raw.match(FENCE)
-  if (fenced && fenced[1] && fenced[1].trim()) candidates.push(fenced[1].trim())
-
-  const brace = raw.indexOf('{')
-  const bracket = raw.indexOf('[')
-  let start = -1
-  if (brace >= 0 && (bracket < 0 || brace < bracket)) start = brace
-  else if (bracket >= 0) start = bracket
-  if (start >= 0) {
-    const open = raw[start]
-    const close = open === '{' ? '}' : ']'
-    const end = raw.lastIndexOf(close)
-    if (end > start) candidates.push(raw.slice(start, end + 1))
+  for (const fenced of raw.matchAll(FENCE)) {
+    const body = fenced[1]?.trim()
+    if (body) candidates.push(body)
   }
+  candidates.push(...balancedSpans(raw))
+  candidates.push(...balancedSpans(repairJson(raw)))
 
+  const seen = new Set()
   for (const candidate of candidates) {
+    const source = candidate.trim()
+    if (!source || seen.has(source)) continue
+    seen.add(source)
     try {
-      return JSON.parse(candidate)
+      return JSON.parse(source)
     } catch {
-      // 继续尝试下一种
+      const repaired = repairJson(source)
+      if (repaired !== source) {
+        try {
+          return JSON.parse(repaired)
+        } catch {
+          // 继续尝试下一种
+        }
+      }
     }
   }
   throw new ForgeError('LLM_PARSE', '无法从模型输出中解析 JSON')

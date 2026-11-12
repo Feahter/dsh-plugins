@@ -44,7 +44,7 @@ function BeatsView({ data }) {
   )
 }
 
-export function ChapterView({ projectId, project, chapterId, initialTab = 'beats', outline, notify, onBack }) {
+export function ChapterView({ projectId, project, chapterId, initialTab = 'beats', outline, notify, onBack, registerFlush }) {
   const [tab, setTab] = React.useState(initialTab)
   const [loaded, setLoaded] = React.useState({})
   const [loading, setLoading] = React.useState(true)
@@ -88,6 +88,24 @@ export function ChapterView({ projectId, project, chapterId, initialTab = 'beats
   React.useEffect(() => { setTab(initialTab) }, [initialTab, chapterId])
 
   const dirty = draft !== original
+
+  // 离开章节页前由工作台调用：把最新草稿写回，避免未保存内容静默丢失。
+  // 用 ref 保存最新编辑态，注册一次即可，不用因每次输入重注册。
+  const flushStateRef = React.useRef(null)
+  flushStateRef.current = { draft, original, chapterId }
+
+  React.useEffect(() => {
+    if (!registerFlush) return undefined
+    const flush = async () => {
+      const state = flushStateRef.current
+      if (!state || state.draft === state.original) return false
+      await putArtifact(projectId, { key: `draft/${state.chapterId}`, kind: 'md', content: state.draft })
+      setOriginal(state.draft)
+      setLoaded(previous => ({ ...previous, draft: state.draft }))
+      return true
+    }
+    return registerFlush(flush)
+  }, [registerFlush, projectId])
 
   const save = async () => {
     setSaving(true)

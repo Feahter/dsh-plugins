@@ -1,6 +1,6 @@
 // 右运行抽屉：当前 item、进度、事件流、取消。
 import React from 'react'
-import { Badge, Button, Dot, Icon, ProgressBar, formatClock } from './bits.jsx'
+import { Badge, Button, Dot, Icon, ProgressBar, formatClock, formatTokens } from './bits.jsx'
 import { RUN_STATUS_LABEL, STAGE_BY_ID } from '../strings.js'
 
 const stageTitle = stageId => STAGE_BY_ID[stageId]?.title ?? stageId ?? ''
@@ -40,24 +40,93 @@ export function describeEvent(event) {
     case 'progress':
       return { text: `进度 ${data.done ?? 0}/${data.total ?? 0}`, tone: '' }
     case 'log':
-      return { text: data.message ?? '', tone: '' }
+      // 发动机的 warn 级日志（缺性别、产物丢失自愈等）用琥珀色，别混在信息流里。
+      return { text: data.message ?? '', tone: data.level === 'warn' ? 'is-warn' : '' }
     default:
       return { text: data.message || event?.type || '事件', tone: '' }
   }
 }
 
+/**
+ * 单条事件。memo + 按 event 记忆描述结果：轮询追加新事件时，
+ * 旧行拿到同一个 event 引用就不再重算、也不再重建 DOM。
+ * 注意不要吃 index：事件被 EVENT_LIMIT 截断后 index 会整体位移，
+ * 那样 memo 会全部失效。key 的兜底在父层算。
+ */
+const EventRow = React.memo(function EventRow({ event }) {
+  const described = React.useMemo(() => describeEvent(event), [event])
+  return React.createElement('li', { className: `nf-event ${described.tone}` },
+    React.createElement('time', null, formatClock(event.ts)),
+    React.createElement('span', null, described.text),
+  )
+})
+
+/** 距底 24px 内算「在底部」，跟随新事件。 */
+const AT_BOTTOM_SLACK = 24
+
+const isAtBottom = node => node.scrollHeight - node.scrollTop - node.clientHeight < AT_BOTTOM_SLACK
+
 export function RunDrawer({ run, events, onCancel, cancelling, error }) {
-  const listRef = React.useRef(null)
+  const bodyRef = React.useRef(null)
+  // 滚动容器是 .nf-drawer-body；ul 本身不滚，钉底必须作用在它身上。
+  const followRef = React.useRef(true)
+  const lastLengthRef = React.useRef(0)
+  const lastSeqRef = React.useRef(-1)
+  const [pending, setPending] = React.useState(0)
   const status = run?.status ?? 'idle'
   const total = run?.progress?.total ?? 0
   const done = run?.progress?.done ?? 0
   const running = status === 'running'
   const current = run?.current
 
-  React.useEffect(() => {
-    const node = listRef.current
+  const onScroll = React.useCallback(() => {
+    const node = bodyRef.current
+    if (!node) return
+    const atBottom = isAtBottom(node)
+    followRef.current = atBottom
+    if (atBottom) setPending(value => (value ? 0 : value))
+  }, [])
+
+  const scrollToLatest = React.useCallback(() => {
+    const node = bodyRef.current
+    followRef.current = true
+    setPending(0)
     if (node) node.scrollTop = node.scrollHeight
-  }, [events.length])
+  }, [])
+
+  // 依赖 events 引用：mergeEvents 没有新事件时返回原数组，本 effect 不会空跑。
+  React.useEffect(() => {
+    const node = bodyRef.current
+    const length = events.length
+    const previousLength = lastLengthRef.current
+    lastLengthRef.current = length
+    if (!node) return
+
+    // 列表从空变非空（开炉 / 收尾补全量）时重新跟随。
+    if (previousLength === 0 && length > 0) {
+      followRef.current = true
+      setPending(0)
+    }
+
+    const previousSeq = lastSeqRef.current
+    lastSeqRef.current = length ? (events[length - 1].seq ?? length) : -1
+
+    if (followRef.current) {
+      node.scrollTop = node.scrollHeight
+      setPending(0)
+      return
+    }
+    if (!length) {
+      followRef.current = true
+      setPending(0)
+      return
+    }
+    // 事件到 EVENT_LIMIT 后长度不再增长，只能按 seq 数新增。
+    const added = previousSeq < 0
+      ? length
+      : events.reduce((count, event) => ((event.seq ?? 0) > previousSeq ? count + 1 : count), 0)
+    if (added > 0) setPending(value => value + added)
+  }, [events])
 
   return React.createElement('aside', { className: 'nf-drawer', 'aria-label': '运行' },
     React.createElement('div', { className: 'nf-drawer-head' },
@@ -67,7 +136,12 @@ export function RunDrawer({ run, events, onCancel, cancelling, error }) {
       React.createElement('span', { className: 'nf-muted', style: { fontSize: 10 } }, RUN_STATUS_LABEL[status] ?? status),
     ),
 
-    React.createElement('div', { className: 'nf-drawer-body' },
+    React.createElement('div', { className: 'nf-drawer-body', ref: bodyRef, onScroll },
+      pending > 0
+        ? React.createElement('button', {
+          type: 'button', className: 'nf-new-events', onClick: scrollToLatest,
+        }, `${pending} 条新事件 ↓`)
+        : null,
       error ? React.createElement('div', { className: 'nf-error' }, error) : null,
 
       React.createElement('div', { className: 'nf-run-card' },
@@ -82,6 +156,9 @@ export function RunDrawer({ run, events, onCancel, cancelling, error }) {
         React.createElement(ProgressBar, { value: done, total: total || 1, tone: 'accent' }),
         React.createElement('div', { className: 'nf-run-nums' },
           React.createElement('span', null, `${done} / ${total || '—'}`),
+          React.createElement('span', null, run?.stats?.calls
+            ? `调用 ${run.stats.calls} 次 · ${formatTokens(run.stats.estTokensIn)} 进 / ${formatTokens(run.stats.estTokensOut)} 出${run.stats.retried ? ` · 重试 ${run.stats.retried}` : ''}`
+            : ''),
           React.createElement('span', null, run?.seq ? `事件 ${run.seq}` : ''),
         ),
       ),
@@ -89,14 +166,11 @@ export function RunDrawer({ run, events, onCancel, cancelling, error }) {
       React.createElement('div', { style: { fontSize: 10, letterSpacing: '.18em', color: 'var(--nf-ink-3)', marginTop: 4 } }, '事件流'),
 
       events.length
-        ? React.createElement('ul', { className: 'nf-events', ref: listRef },
-          events.map(event => {
-            const described = describeEvent(event)
-            return React.createElement('li', { key: event.seq ?? `${event.ts}-${Math.random()}`, className: `nf-event ${described.tone}` },
-              React.createElement('time', null, formatClock(event.ts)),
-              React.createElement('span', null, described.text),
-            )
-          }),
+        ? React.createElement('ul', { className: 'nf-events' },
+          events.map((event, index) => React.createElement(EventRow, {
+            key: event.seq ?? index,
+            event,
+          })),
         )
         : React.createElement('p', { className: 'nf-run-empty' }, running ? '等第一条事件…' : '还没有运行记录。点「继续炼」开始。'),
     ),

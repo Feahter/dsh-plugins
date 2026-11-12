@@ -64,6 +64,22 @@ const TEMPERATURE = {
  * 工艺宪法：所有阶段共享的 12 条硬约束。
  * 只讲"怎么写才算人写的"，不讲任何阶段的输出格式。
  */
+// 草稿/修订和摘要合并成一次调用：省掉每章一次额外的 summary 往返（12 章省 12 次调用 / 约 4.7 万字符输入）。
+// 模型没按格式给就用调用方回退到独立 summary 调用，正确性不依赖模型听话。
+export const SUMMARY_MARKER = '<<<SUMMARY>>>'
+
+function inlineSummaryBlock() {
+  return [
+    '【摘要（这一次输出里一起给）】',
+    `正文写完后，另起一行只写 ${SUMMARY_MARKER}，紧接着输出本章摘要四行，不要标题、不要代码块、不要再写别的：`,
+    '发生：这一章实际发生了什么（按场景顺序，2–4 句）',
+    '知情：谁知道了什么（秘密、把柄、误解的变化）',
+    '钩子：结尾留下的具体悬念',
+    '时空：时间与地点推进到哪里',
+    '摘要直接给下一章写作使用，只写事实，不要评价文笔。',
+  ].join('\n')
+}
+
 const CRAFT = `【工艺宪法】
 你写的不是"内容"，是一个具体的人在具体时刻做的选择。以下十二条是硬约束。
 
@@ -282,6 +298,14 @@ function readText(ctx, key, max) {
   return max ? fit(ctx, s, max) : s
 }
 
+/**
+ * 本章正文：同一 stage.run 内刚产出的 draft 还没进引擎的产物缓存，
+ * ctx.text('draft/chNN') 读不到；调用方（index.js）会把正文挂在 ctx.draftText / ctx.draft 上，优先用它们。
+ */
+function draftTextOf(ctx, chId) {
+  return str(ctx && ctx.draftText) || str(ctx && ctx.draft) || readText(ctx, `draft/${chId}`)
+}
+
 function readJson(ctx, key, fallback) {
   try {
     if (ctx && typeof ctx.has === 'function' && !ctx.has(key)) return fallback
@@ -414,6 +438,42 @@ function chapterCastNames(ctx, ch) {
   return names
 }
 
+/** 把各种写法的性别归一成「男／女」，认不出就留空（不猜）。 */
+export function sexOf(gender) {
+  const value = str(gender).trim().toLowerCase()
+  if (!value) return ''
+  if (['男', '男性', 'male', 'm', 'boy', 'man'].includes(value)) return '男'
+  if (['女', '女性', 'female', 'f', 'girl', 'woman'].includes(value)) return '女'
+  return ''
+}
+
+function pronounOf(gender) {
+  const sex = sexOf(gender)
+  return sex === '男' ? '他' : sex === '女' ? '她' : ''
+}
+
+/** 「女·「她」」这样的标签；档案没写性别时返回空串。 */
+function genderTag(cast) {
+  const sex = sexOf(cast && cast.gender)
+  return sex ? `${sex}·「${pronounOf(sex)}」` : ''
+}
+
+/** 全员代词对照表：正文里指代同一个人只能用一个代词，这张表就是依据。 */
+function pronounLine(ctx) {
+  const data = readJson(ctx, 'characters', null)
+  const cast = data && Array.isArray(data.cast) ? data.cast : []
+  const lines = cast
+    .filter((c) => c && str(c.name))
+    .map((c) => {
+      const role = str(c.role) || '配角'
+      const sex = sexOf(c.gender)
+      return sex
+        ? `- ${str(c.name)}＝「${pronounOf(sex)}」（${sex}，${role}）`
+        : `- ${str(c.name)}：档案没写性别（${role}）——沿用前文已用的代词，本章不要换`
+    })
+  return lines.length ? lines.join('\n') : ''
+}
+
 function castDump(ctx, max) {
   const data = readJson(ctx, 'characters', null)
   const cast = data && Array.isArray(data.cast) ? data.cast : []
@@ -425,7 +485,10 @@ function castDump(ctx, max) {
     if (c.secret) bits.push(`瞒着【${c.secret}】`)
     if (c.voice) bits.push(`说话【${c.voice}】`)
     if (c.arc) bits.push(`弧光【${c.arc}】`)
-    return `- ${str(c.name) || '（无名）'}（${str(c.role) || '配角'}）：${bits.join('；')}`
+    const tag = genderTag(c)
+    const role = str(c.role) || '配角'
+    const head = tag ? `${tag}，${role}` : role
+    return `- ${str(c.name) || '（无名）'}（${head}）：${bits.join('；')}`
   })
   return fit(ctx, lines.join('\n'), max)
 }
@@ -446,7 +509,10 @@ function castBrief(ctx, names, max) {
     if (c.fear) bits.push(`怕【${c.fear}】`)
     if (c.secret) bits.push(`瞒着【${c.secret}】`)
     if (c.voice) bits.push(`说话【${c.voice}】`)
-    return `- ${str(c.name) || '（无名）'}（${str(c.role) || '配角'}）：${bits.join('；')}`
+    const tag = genderTag(c)
+    const role = str(c.role) || '配角'
+    const head = tag ? `${tag}，${role}` : role
+    return `- ${str(c.name) || '（无名）'}（${head}）：${bits.join('；')}`
   })
   return fit(ctx, lines.join('\n'), max)
 }
@@ -666,6 +732,13 @@ function biblePrompt(ctx) {
   }
 }
 
+/** 用户在新建时定死了主角性别，就在这里变成硬约束；auto 时什么都不说。 */
+function protagonistRule(p) {
+  const sex = sexOf(p.protagonistGender)
+  if (!sex) return '- 用户没有指定主角性别：由你按故事核心定，定了就照此执行。'
+  return `- 用户已指定主角性别为「${sex}」：主角必须写成${sex}性，代词固定用「${pronounOf(sex)}」，不得更改。`
+}
+
 function charactersPrompt(ctx) {
   const p = paramsOf(ctx)
   const user = [
@@ -677,11 +750,23 @@ function charactersPrompt(ctx) {
       '人物数量',
       '主角 1、对手 1、关键配角 3–5。每个配角都要有自己想要的东西；没有欲望的人不许出场。关系写成"谁对谁"，不要写"互为好友"。输出 cast 必须 5–7 人；示例只列 1 人，是形状示范。'
     ),
+    section(
+      '性别与代词（必须先定，后文不得再改）',
+      [
+        '- 每个角色都要写 gender：只能是「男」或「女」；不许留空，不许写「未知」。',
+        '- 同一个人的代词全书只有一个：男用「他」，女用「她」。正文、摘要、账本里都按这个来。',
+        '- 名字不能暗示性别时（如「沈砚」「周岩」），更要在 gender 里写清，否则后文一定会混用。',
+        protagonistRule(p),
+      ]
+        .filter(Boolean)
+        .join('\n')
+    ),
     jsonContract(
       [
         '- cast：array，5–7 人',
         '- cast[].name：string，2–4 字，全书唯一',
         '- cast[].role：string，如"主角""对手""关键配角"',
+        "- cast[].gender：string，'男' 或 '女'；必填，决定后文用「他」还是「她」", 
         '- cast[].want：string，≤40 字，当下最想要的东西',
         '- cast[].fear：string，≤40 字，不敢面对的东西',
         '- cast[].secret：string，≤50 字，不能让人知道、且中段会爆炸的事',
@@ -694,10 +779,11 @@ function charactersPrompt(ctx) {
           {
             name: '沈砚',
             role: '主角',
+            gender: '女',
             want: '查清母亲真正的死因',
             fear: '自己也会在头七看见不该看见的东西',
             secret: '十岁那年见过一次死者回来，但一直说自己忘了',
-            voice: '话少，句子短，紧张时重复对方最后一个词。他会为陌生人破例，绝不会在活人面前提母亲。',
+            voice: '话少，句子短，紧张时重复对方最后一个词。她会为陌生人破例，绝不会在活人面前提母亲。',
             arc: '从靠规矩躲事，到主动破坏规矩换真相',
             relations: [{ to: '周迟', kind: '互相利用的师徒，沈砚欠他一条命' }],
           },
@@ -933,7 +1019,7 @@ function beatsPrompt(ctx) {
   return {
     system: `${CRAFT}\n\n${ADDENDA.beats}`,
     user: hardCap(ctx, user, BUDGET.beats.user),
-    maxTokens: 2800,
+    maxTokens: 3400,
     temperature: TEMPERATURE.beats,
   }
 }
@@ -968,6 +1054,11 @@ function draftPrompt(ctx) {
         castBrief(ctx, chapterCastNames(ctx, ch), castMax),
         '（档案缺失：只使用本章细纲 cast 里的名字，不要新增有名有姓的角色。）'
       ),
+      section(
+        '代词对照',
+        pronounLine(ctx),
+        '（人物档案没写性别：沿用前文已经用过的代词，本章内不要换成另一个代词。）'
+      ),
       section('文风样本', styleText(ctx, BUDGET.draft.style), '（无额外样本：按工艺宪法与项目文风写。）'),
       [
         '【写作指令】',
@@ -976,7 +1067,9 @@ function draftPrompt(ctx) {
         '3. 按【本章细纲】的场景顺序写；可以让场景更狠、更具体，但不要绕开本章的转折与钩子。若你有更强的写法，允许偏离，但必须同时满足：本章目标达成或失败得更彻底，转折真正改变局面，结尾落在钩子指向的具体动作、话语或物件上。',
         '4. 段落之间空一行。不要写"以下是"、不要总结、不要解释、不要小标题、不要列表、不要作者按。',
         '5. 最后一句停在钩子上：一个动作、一句话、一个物件的变化，不写"他陷入了沉思"。',
+        '6. 代词：按【代词对照】指代每个人；同一个人全章只用他或她中的一个，不要一段用这个、一段用那个。',
       ].join('\n'),
+      inlineSummaryBlock(),
     ]
       .filter(Boolean)
       .join('\n\n')
@@ -995,7 +1088,8 @@ function draftPrompt(ctx) {
     ledgerMax = Math.max(0, ledgerMax - over)
     user = compose(castMax, ledgerMax)
   }
-  const maxTokens = Math.min(16000, Math.max(1600, Math.round(words * 2.2)))
+  const inline = user.includes(SUMMARY_MARKER)
+  const maxTokens = Math.min(16000, Math.max(1600, Math.round(words * 2.2) + (inline ? 400 : 0)))
   return {
     system: `${CRAFT}\n\n${ADDENDA.draft}`,
     user: hardCap(ctx, user, BUDGET.draft.user),
@@ -1009,14 +1103,26 @@ function summaryPrompt(ctx) {
   const n = chapterNo(ctx)
   const chId = str(ch.id) || 'ch01'
   const prevId = itemIdAt(ctx, -1)
+  // 修订后的第二次摘要：正文只按「原摘要 + 审校意见 + 修订稿首尾」给，
+  // 不再把整章 8500 字重新投喂一遍（12 章能省约 7 万字输入）。
+  const updated = Boolean(ctx.reviseSummary)
+  const prose = updated ? fitEnds(ctx, draftTextOf(ctx, chId), 2400) : draftTextOf(ctx, chId)
   const user = [
     projectHeader(ctx),
     section('本章任务', chapterCard(ch, n), '（缺失：以正文实际发生为准。）'),
     section(
       '本章正文',
-      fitEnds(ctx, readText(ctx, `draft/${chId}`), BUDGET.summary.draft),
+      updated ? prose : fitEnds(ctx, prose, BUDGET.summary.draft),
       '（正文缺失：请在输出里写"正文缺失，无法摘要"，不要编造。）'
     ),
+    updated ? section('修订前的摘要', readText(ctx, `summary/${chId}`, 1000), '（无旧摘要。）') : '',
+    updated
+      ? section(
+          '本次修订了什么',
+          (ctx.findings ?? []).map((f) => `- [${f.severity}] ${f.issue}`).join('\n'),
+          '',
+        )
+      : '',
     section('本章细纲', beatsText(ctx, chId, BUDGET.summary.beats), ''),
     section('上一章摘要', readText(ctx, `summary/${prevId}`, BUDGET.summary.prev), prevId ? '（无）' : '（第一章。）'),
     mdContract(`发生：……
@@ -1050,13 +1156,14 @@ function reviewPrompt(ctx) {
     section('本章细纲', beatsText(ctx, chId, BUDGET.review.beats), '（缺失：只能按正文与账本对账。）'),
     section('连续性账本', ledgerText(ctx, BUDGET.review.ledger), '（账本为空：只检查本章内部一致性。）'),
     section('人物速查', castBrief(ctx, chapterCastNames(ctx, ch), BUDGET.review.cast), '（档案缺失：只按正文里的人物表现对账。）'),
+    section('代词对照', pronounLine(ctx), '（档案没写性别：只按正文内部是否自洽判断。）'),
     section('上一章摘要', readText(ctx, `summary/${prevId}`, BUDGET.review.prev), prevId ? '（无）' : '（第一章。）'),
     section('下一章要发生', nextChapterLine(ctx), '（无。）'),
     jsonContract(
       [
         '- findings：array；没有问题也要给 []',
         "- findings[].severity：'block' | 'warn' | 'note'",
-        '- findings[].kind：string，如 事实／时间线／知情／视角／AI腔／节奏／对话',
+        '- findings[].kind：string，如 事实／时间线／知情／视角／性别／AI腔／节奏／对话；代词与人物性别对不上就记「性别」',
         '- findings[].where：string，第几段或引用原句（≤30 字），必须能定位',
         '- findings[].issue：string，≤60 字，说清哪里错、为什么错',
         '- findings[].fix：string，≤60 字，怎么改：删哪句／换成什么动作／补什么细节',
@@ -1110,23 +1217,31 @@ function revisePrompt(ctx) {
     section('修订对象', `第 ${n} 章${ch.title ? `《${ch.title}》` : ''}（${chId}）`, ''),
     section(
       '待修订正文',
-      fitEnds(ctx, readText(ctx, `draft/${chId}`), BUDGET.revise.draft),
+      fitEnds(ctx, draftTextOf(ctx, chId), BUDGET.revise.draft),
       '（正文缺失：直接输出"正文缺失，无法修订"，不要编造正文。）'
     ),
     section('审校意见', reviewBody, ''),
     section('本章细纲', beatsText(ctx, chId, BUDGET.revise.beats), '（缺失：以保留原文意图为准。）'),
     section('连续性账本', ledgerText(ctx, BUDGET.revise.ledger), '（账本为空：只按审校意见修改。）'),
+    section(
+      '代词对照',
+      pronounLine(ctx),
+      '（档案没写性别：沿用原文的代词，如发现原文互相矛盾，按人物身份统一。）'
+    ),
     [
       '【修订指令】',
       `1. 只改审校意见点名的位置；没被点名的段落尽量保持原样。`,
       `2. 输出完整正文，第一行仍是「## 第${n}章${ch.title ? ` ${ch.title}` : ' 标题'}」，段落之间空行。`,
       `3. 总字数与原文相差不超过 10%（原文约 ${words} 字）。`,
       '4. 不要解释改了什么，不要输出修改说明或对照表。',
+      '5. 代词：同一个人全章只用「他」或「她」中的一个；原文前后不一致时，按【代词对照】统一。',
     ].join('\n'),
+    inlineSummaryBlock(),
   ]
     .filter(Boolean)
     .join('\n\n')
-  const maxTokens = Math.min(16000, Math.max(1600, Math.round(words * 2.2)))
+  const inline = user.includes(SUMMARY_MARKER)
+  const maxTokens = Math.min(16000, Math.max(1600, Math.round(words * 2.2) + (inline ? 400 : 0)))
   return {
     system: `${CRAFT}\n\n${ADDENDA.revise}`,
     user: hardCap(ctx, user, BUDGET.revise.user),

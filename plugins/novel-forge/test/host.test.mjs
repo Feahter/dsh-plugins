@@ -192,6 +192,15 @@ test('审稿门：没有待确认返回 409，有则续跑 nextStages', async ()
   assert.equal(entry[2].autoApprove, true)
 })
 
+test('审稿门：不带 autoApprove 时默认继续按门确认，不静默放行', async () => {
+  const engine = makeFakeEngine({
+    getProject: async () => ({ ...PROJECT, pendingReview: { stage: 'outline', nextStages: ['beats'] } }),
+  })
+  await call(engine, 'POST', '/projects/p1/review/continue')
+  const entry = engine.calls.find(item => item[0] === 'startRun')
+  assert.equal(entry[2].autoApprove, false)
+})
+
 test('GET /recipes 隐藏函数，只给 UI 需要的形状', async () => {
   const engine = makeFakeEngine()
   const result = await call(engine, 'GET', '/recipes')

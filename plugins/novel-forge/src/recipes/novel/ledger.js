@@ -170,7 +170,7 @@ function mergeThreads(ledger, patchThreads, chapterId) {
   }
 }
 
-function mergeCharacters(ledger, patchCharacters) {
+function mergeCharacters(ledger, patchCharacters, chapterId = '') {
   if (!patchCharacters || typeof patchCharacters !== 'object' || Array.isArray(patchCharacters)) return
   for (const [rawName, rawState] of Object.entries(patchCharacters)) {
     const name = norm(rawName)
@@ -180,7 +180,10 @@ function mergeCharacters(ledger, patchCharacters) {
       location: rawState.location != null ? norm(rawState.location) : current.location,
       state: rawState.state != null ? norm(rawState.state) : current.state,
       knows: [...new Set([...(current.knows ?? []), ...(rawState.knows ?? []).map(norm).filter(Boolean)])],
+      lastSeen: norm(chapterId) || norm(rawState.lastSeen) || norm(current.lastSeen) || '',
     }
+    if (rawState.role != null) next.role = norm(rawState.role)
+    else if (current.role != null) next.role = current.role
     ledger.characters[name] = next
   }
 }
@@ -198,6 +201,36 @@ function mergeTimeline(ledger, patchTimeline, chapterId) {
     if (duplicate) continue
     ledger.timeline.push({ chapter, when: norm(entry.when), event })
   }
+}
+
+/** 角色「最近出现」的章节序号；没有 lastSeen 的旧账本视为最久远。 */
+function seenRank(character) {
+  const matched = String(character?.lastSeen ?? '').match(/\d+/)
+  return matched ? Number(matched[0]) : -1
+}
+
+function limitCharacters(characters) {
+  const entries = Object.entries(characters ?? {})
+  if (entries.length <= LIMITS.characters) return characters
+  const protagonists = []
+  const supporting = []
+  entries.forEach(([name, state], index) => {
+    const item = { name, index, rank: seenRank(state) }
+    if (norm(state?.role) === '主角') protagonists.push(item)
+    else supporting.push(item)
+  })
+  const newestFirst = (a, b) => b.rank - a.rank || b.index - a.index
+  const keep = new Set()
+  if (protagonists.length >= LIMITS.characters) {
+    // 全是主角时没有配角可淘汰，只保上限内最近出现的。
+    for (const item of protagonists.sort(newestFirst).slice(0, LIMITS.characters)) keep.add(item.name)
+  } else {
+    for (const item of protagonists) keep.add(item.name)
+    const room = LIMITS.characters - protagonists.length
+    for (const item of supporting.sort(newestFirst).slice(0, room)) keep.add(item.name)
+  }
+  // 保留原有插入顺序，避免键顺序随淘汰算法抖动。
+  return Object.fromEntries(entries.filter(([name]) => keep.has(name)))
 }
 
 function applyLimits(ledger) {
@@ -218,9 +251,9 @@ function applyLimits(ledger) {
   if (ledger.timeline.length > LIMITS.timeline) {
     ledger.timeline = ledger.timeline.slice(-LIMITS.timeline)
   }
-  const names = Object.keys(ledger.characters ?? {})
-  if (names.length > LIMITS.characters) {
-    ledger.characters = Object.fromEntries(names.slice(-LIMITS.characters).map((name) => [name, ledger.characters[name]]))
+  // 角色按「最久未出现」淘汰；主角（role === '主角'）永不淘汰，除非主角自己超限。
+  if (Object.keys(ledger.characters ?? {}).length > LIMITS.characters) {
+    ledger.characters = limitCharacters(ledger.characters)
   }
 }
 
@@ -241,7 +274,7 @@ export function mergeLedger(ledger, patch = {}, chapterId = '') {
 
   mergeFacts(base, patch.facts, chapterId)
   mergeThreads(base, patch.threads, chapterId)
-  mergeCharacters(base, patch.characters)
+  mergeCharacters(base, patch.characters, chapterId)
   mergeTimeline(base, patch.timeline, chapterId)
   for (const rule of patch.canonRules ?? []) pushUnique(base.canonRules, rule)
 

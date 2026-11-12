@@ -218,14 +218,17 @@ async function main() {
     const { events } = await engine.getRunEvents(runId, 0)
     const runEnd = events.find(event => event.type === 'run-end')
     assert('事件流有 run-end(done)', runEnd?.data?.status === 'done', `run-end=${runEnd?.data?.status ?? 'missing'}`)
-    assert(
-      '六个章节正文都写入',
-      events.filter(event => event.type === 'artifact' && event.data?.key?.startsWith('draft/')).length === 6,
-      `draftArtifacts=${events.filter(event => event.type === 'artifact' && event.data?.key?.startsWith('draft/')).length}`,
+    // revise 会二次写 draft/*（同一 key，版本 +1），所以按「唯一 key」数，而不是事件条数。
+    const draftKeys = new Set(
+      events
+        .filter(event => event.type === 'artifact' && event.data?.key?.startsWith('draft/'))
+        .map(event => event.data.key),
     )
+    assert('六个章节正文都写入', draftKeys.size === 6, `draftArtifacts=${draftKeys.size}`)
 
     // 5. UI 完成态。运行中的增量轮询可能在 run-end 落盘前就看到 done 并停表，
-    //    所以先确认「已完成 / 24 / 24」，读完大纲与草稿后再回书架重开取全量事件。
+    //    所以先确认「已完成」，读完大纲与草稿后再回书架重开取全量事件。
+    //    总数是各阶段 item 数之和（revise 会二次写 draft，所以比章节数多一轮）。
     await page.waitForFunction(
       () => (document.querySelector('.nf-drawer')?.innerText ?? '').includes('已完成'),
       null,
@@ -233,7 +236,15 @@ async function main() {
     )
     const doneDrawer = await page.locator('.nf-drawer').innerText()
     assert('UI 进度不是 NaN', !doneDrawer.includes('NaN'), doneDrawer.split('\n').find(line => line.includes('/')) ?? '')
-    assert('UI 显示 24/24 进度', /24\s*\/\s*24/.test(doneDrawer), doneDrawer.split('\n').find(line => line.includes('/')) ?? '')
+    const expectedTotal = Object.values(finishedProject.stages ?? {}).reduce(
+      (sum, stage) => sum + Math.max(1, Object.keys(stage.items ?? {}).length),
+      0,
+    )
+    assert(
+      'UI 进度全部完成',
+      new RegExp(`${expectedTotal}\\s*/\\s*${expectedTotal}`).test(doneDrawer),
+      `${doneDrawer.split('\n').find(line => line.includes('/')) ?? ''}（期望 ${expectedTotal}/${expectedTotal}）`,
+    )
 
     // 6. 卷章大纲：真数据经 API 进入 UI
     const outlineRail = page.locator('.nf-rail-item', { hasText: '卷章大纲' })

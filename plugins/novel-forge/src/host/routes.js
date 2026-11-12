@@ -188,7 +188,9 @@ export async function handle({ engine, modelInfo }, request) {
     const stages = project.pendingReview.nextStages ?? []
     const run = await engine.startRun(project.id, {
       stages: stages.length ? stages : undefined,
-      autoApprove: body?.autoApprove ?? true,
+      // 只有调用方明确要求「后面别再问我了」才自动放行；默认继续按审稿门逐个确认，
+      // 否则点一次「确认并继续」会把后面所有 gate 静默跳过。
+      autoApprove: body?.autoApprove === true,
     })
     return { status: 202, body: { run } }
   }

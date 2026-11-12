@@ -2,8 +2,8 @@
 // 契约：docs/architecture.md §3.1（recipe 形状）、§4.1（params）、§4.2（stages）、§4.4（JSON 形状）。
 // 本文件只做编排：拼 prompt 输入 → 调 ctx.llm.generate → 校验/规范化 → 返回 artifacts。
 import { z } from 'zod'
-import { createPrompts } from './prompts/zh.js'
-import { defaultCraft, severityRank } from './craft.js'
+import { createPrompts, SUMMARY_MARKER, sexOf } from './prompts/zh.js'
+import { defaultCraft, severityRank, countCjk } from './craft.js'
 import { normalizeOutline, chaptersOf } from './outline.js'
 import { createLedger, mergeLedger, slimLedger, characterBrief, emptyLedger } from './ledger.js'
 import { markdownExport, epubExport } from './export.js'
@@ -48,6 +48,7 @@ export const paramsDefaults = {
   autoReview: true,
   reviewGate: false,
   seed: '',
+  protagonistGender: 'auto',
 }
 
 const paramsSchema = {
@@ -69,50 +70,64 @@ const paramsSchema = {
     autoReview: { type: 'boolean' },
     reviewGate: { type: 'boolean' },
     seed: { type: 'string', maxLength: 500 },
+    protagonistGender: {
+      type: 'string',
+      enum: ['auto', '男', '女'],
+      description: '主角性别：auto 交给模型定；男/女 则写死并在全书统一代词',
+    },
   },
 }
 
 // ---------------------------------------------------------------- 输出 schema（§4.4）
 
+// 注意：模型少写一个字段，不该让整段已经付过费的调用作废。
+// 只把「有它才有意义」的字段设成必填（logline/name/issue），其余 `.catch('')` 降级成空串，
+// 下游 prompt 对空值都有兜底文案。
+const soft = z.string().catch('')
+const softList = z.array(z.string()).catch([])
+
 const briefSchema = z.object({
-  title: z.string(),
+  title: soft,
   logline: z.string().min(1),
-  theme: z.string(),
-  promise: z.string(),
-  ending: z.string(),
-  genreTags: z.array(z.string()).default([]),
+  theme: soft,
+  promise: soft,
+  ending: soft,
+  genreTags: softList,
 })
 
-const relationSchema = z.object({ to: z.string(), kind: z.string() })
+const relationSchema = z.object({ to: soft, kind: soft })
 
 const castSchema = z.object({
   name: z.string().min(1),
-  role: z.string(),
-  want: z.string(),
-  fear: z.string(),
-  secret: z.string(),
-  voice: z.string(),
-  arc: z.string(),
-  relations: z.array(relationSchema).default([]),
+  role: soft,
+  // 性别决定后文用「他」还是「她」。软字段：模型漏写不让整份档案作废，
+  // 但 characters 阶段会记一条 warn，提示后文可能混用代词。
+  gender: soft,
+  want: soft,
+  fear: soft,
+  secret: soft,
+  voice: soft,
+  arc: soft,
+  relations: z.array(relationSchema).catch([]),
 })
 
 const charactersSchema = z.object({ cast: z.array(castSchema).min(1) })
 
 const sceneSchema = z.object({
-  no: z.union([z.number(), z.string()]),
-  where: z.string(),
-  when: z.string(),
-  cast: z.array(z.string()).default([]),
-  goal: z.string(),
-  obstacle: z.string(),
-  turn: z.string(),
-  exit: z.string(),
-  sensory: z.string(),
+  no: z.union([z.number(), z.string()]).catch(1),
+  where: soft,
+  when: soft,
+  cast: softList,
+  goal: soft,
+  obstacle: soft,
+  turn: soft,
+  exit: soft,
+  sensory: soft,
 })
 
 const beatsSchema = z.object({
   chapterId: z.string().optional(),
-  title: z.string(),
+  title: soft,
   scenes: z.array(sceneSchema).min(1),
 })
 
@@ -152,6 +167,8 @@ const ledgerPatchSchema = z.object({
     .record(
       z.string(),
       z.object({
+        // role 必须声明：zod 默认剥掉未声明字段，主角保护（ledger.limitCharacters）靠它。
+        role: z.string().optional(),
         location: z.string().optional(),
         state: z.string().optional(),
         knows: z.array(z.string()).optional(),
@@ -162,10 +179,12 @@ const ledgerPatchSchema = z.object({
   canonRules: z.array(z.string()).optional(),
 })
 
+// 模型少给 ledgerPatch / verdict 是常态，不能因此丢掉整份审校结果：
+// 两者可选，verdict 缺失时由 block/warn 计数推断（见 review stage）。
 const reviewSchema = z.object({
   findings: z.array(findingSchema),
-  ledgerPatch: ledgerPatchSchema,
-  verdict: z.enum(['pass', 'revise']),
+  ledgerPatch: ledgerPatchSchema.nullish(),
+  verdict: z.enum(['pass', 'revise']).optional(),
 })
 
 const blurbSchema = z.object({
@@ -183,8 +202,67 @@ function clip(value, max = 2000) {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
-function parseError(stage, message, raw) {
-  return new ForgeError('LLM_PARSE', `${stage}：${message}`, { raw: clip(raw) })
+function parseError(stage, message, raw, max = 2000) {
+  return new ForgeError('LLM_PARSE', `${stage}：${message}`, { raw: clip(raw, max) })
+}
+
+/** 取尾部若干字符，把「断在哪」写进错误信息——不然用户只看到「解析失败」，无从判断。 */
+function tailOf(text, max = 120) {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').trim()
+  return flat.length > max ? flat.slice(-max) : flat
+}
+
+/**
+ * 判断输出是不是「JSON 写到一半断了」：字符串外的开括号多于闭括号。
+ * 截断（撞输出上限、流被掐）是最常见的解析失败原因，单独识别出来才能对症重试。
+ */
+export function looksCutJson(text) {
+  const raw = String(text ?? '')
+  let open = 0
+  let close = 0
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{' || ch === '[') open += 1
+    else if (ch === '}' || ch === ']') close += 1
+  }
+  return open > 0 && open > close
+}
+
+/**
+ * 模型在「正文缺失」时被要求回声的占位文本（历史行为）。这种产物等于没有：
+ * 它会让下游阶段以为有正文，进而把占位符当章节内容继续加工。
+ */
+const PLACEHOLDER_TEXT = /正文缺失|无法修订|无法摘要/
+
+export function isPlaceholderText(text) {
+  const value = String(text ?? '').trim()
+  if (!value || value.length > 400) return false
+  return PLACEHOLDER_TEXT.test(value)
+}
+
+/** 读正文；占位符/空串一律当成「没有正文」。 */
+function draftOf(ctx, id) {
+  const text = textOf(ctx, `draft/${id}`)
+  return isPlaceholderText(text) ? '' : text
+}
+
+function parseFailureMessage(text, cut) {
+  const chars = String(text ?? '').length
+  const tail = tailOf(text)
+  const why = cut ? '，写到一半就断了（像是撞到输出上限或被流中断）' : ''
+  return `模型返回的不是合法 JSON（输出 ${chars} 字${why}${tail ? `，结尾是「${tail}」` : ''}）`
 }
 
 function formatZod(error) {
@@ -197,33 +275,142 @@ function formatZod(error) {
     .join('；')
 }
 
-/** 抽取 JSON：先整体解析，再剥围栏，再取第一个 {/[ 到最后一个 }/]。 */
-export function extractJson(text) {
-  const source = String(text ?? '').trim()
-  if (!source) return undefined
-  try {
-    return JSON.parse(source)
-  } catch {
-    /* next */
+/**
+ * 扫出「括号配平」的顶层片段。模型常在 JSON 前面写一段带大括号的思考，
+ * 「第一个 { 到最后一个 }」会从错误的起点截取；配平扫描能跳过那段噪声。
+ * 字符串里的括号与转义不参与配平。
+ */
+function jsonSpans(raw, limit = 12) {
+  const spans = []
+  let depth = 0
+  let start = -1
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      if (depth === 0) start = i
+      depth += 1
+      continue
+    }
+    if (ch === '}' || ch === ']') {
+      if (depth === 0) continue
+      depth -= 1
+      if (depth === 0 && start >= 0) {
+        spans.push(raw.slice(start, i + 1))
+        start = -1
+        if (spans.length >= limit) break
+      }
+      continue
+    }
+    if (depth === 0 && /[^\s,;]/.test(ch)) start = -1
   }
-  const fenced = source.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  if (fenced) {
+  return spans
+}
+
+/** 手写 JSON 的常见毛病：// 与块注释、字符串外的尾逗号。 */
+function repairJsonText(text) {
+  let out = ''
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    if (inString) {
+      out += ch
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      out += ch
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i += 1
+      out += '\n'
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i += 1
+      i += 1
+      continue
+    }
+    if (ch === ',') {
+      let j = i + 1
+      while (j < text.length && /\s/.test(text[j])) j += 1
+      if (text[j] === '}' || text[j] === ']') continue
+    }
+    out += ch
+  }
+  return out
+}
+
+/**
+ * 抽取 JSON：整体 → 代码围栏 → 配平片段 → 修复版。
+ * 一次解析失败等于把整段 prompt 的输入费扔掉，所以尽量抢救。
+ */
+export function extractJson(text) {
+  const raw = String(text ?? '').trim()
+  if (!raw) return undefined
+  const candidates = [raw]
+  for (const fenced of raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    const body = fenced[1]?.trim()
+    if (body) candidates.push(body)
+  }
+  candidates.push(...jsonSpans(raw))
+  candidates.push(...jsonSpans(repairJsonText(raw)))
+  const seen = new Set()
+  for (const candidate of candidates) {
+    const source = candidate.trim()
+    if (!source || seen.has(source)) continue
+    seen.add(source)
     try {
-      return JSON.parse(fenced[1].trim())
+      return JSON.parse(source)
     } catch {
       /* next */
     }
-  }
-  const start = source.search(/[{[]/)
-  const end = Math.max(source.lastIndexOf('}'), source.lastIndexOf(']'))
-  if (start >= 0 && end > start) {
-    try {
-      return JSON.parse(source.slice(start, end + 1))
-    } catch {
-      /* fallthrough */
+    const repaired = repairJsonText(source)
+    if (repaired !== source) {
+      try {
+        return JSON.parse(repaired)
+      } catch {
+        /* next */
+      }
     }
   }
   return undefined
+}
+
+/**
+ * 细纲被截断时的抢救：从 `"scenes": [ ...` 里逐个取出已经写完整的场，重新编号。
+ * 只收结构完整、能过 sceneSchema 的场；一场都救不出时返回空数组，让调用方照常报错。
+ */
+export function salvageScenes(raw) {
+  const text = String(raw ?? '')
+  const at = text.search(/"scenes"\s*:\s*\[/)
+  if (at < 0) return []
+  const body = text.slice(text.indexOf('[', at) + 1)
+  const scenes = []
+  for (const span of jsonSpans(body, 24)) {
+    const value = extractJson(span)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const parsed = sceneSchema.safeParse({ ...value, no: scenes.length + 1 })
+    if (parsed.success) scenes.push(parsed.data)
+  }
+  return scenes.map((scene, index) => ({ ...scene, no: index + 1 }))
 }
 
 function has(ctx, key) {
@@ -241,6 +428,18 @@ function jsonOr(ctx, key, fallback = null) {
   } catch {
     return fallback
   }
+}
+
+/** 给确定性检查用的最小人物表：名字 + 角色 + 性别，不含自由文本。 */
+export function castForCheck(data) {
+  const cast = data && Array.isArray(data.cast) ? data.cast : []
+  return cast
+    .filter((member) => member && member.name)
+    .map((member) => ({
+      name: String(member.name),
+      role: String(member.role ?? ''),
+      gender: String(member.gender ?? '').trim(),
+    }))
 }
 
 function textOf(ctx, key) {
@@ -276,25 +475,54 @@ function promptSpec(ctx, promptFn, stage) {
   }
 }
 
-async function callJson(ctx, stage, promptFn, schema, { phase } = {}) {
-  const spec = promptSpec(ctx, promptFn, stage)
+/** 截断重试时追加的说明：只要求「先把 JSON 写完整」，不改别的要求。 */
+function cutRetryNote(chars, tail) {
+  return [
+    `【上一次输出没能解析成 JSON（${chars} 字，结尾是「${tail}」），像是写到一半就断了】`,
+    '这次务必先保证 JSON 完整闭合：',
+    '- 只输出一个 JSON 对象，前后不要任何说明，不要 markdown 围栏；',
+    '- 条目数与字段长度宁可取小值，也要让每个括号先配对完；',
+    '- 写到最后一个字段就立刻收尾，不要补充解释。',
+  ].join('\n')
+}
+
+async function askJson(ctx, stage, spec, { extra, maxTokens } = {}) {
   const result = await ctx.llm.generate({
     system: spec.system,
-    user: spec.user,
-    maxTokens: spec.maxTokens,
+    user: extra ? `${spec.user}\n\n${extra}` : spec.user,
+    maxTokens: Number.isFinite(maxTokens) ? maxTokens : spec.maxTokens,
     temperature: spec.temperature,
     json: true,
-    phase: phase ?? stage,
+    phase: spec.phase ?? stage,
     label: stage,
   })
+  const text = String(result?.text ?? '')
   let data = result?.json
-  if (data == null) data = extractJson(result?.text)
+  if (data == null) data = extractJson(text)
+  return { data, text }
+}
+
+async function callJson(ctx, stage, promptFn, schema, { phase, retryCut = true } = {}) {
+  const spec = { ...promptSpec(ctx, promptFn, stage), phase: phase ?? stage }
+  let { data, text } = await askJson(ctx, stage, spec)
+  if (data === undefined && retryCut && looksCutJson(text)) {
+    // 截断（撞输出上限／流被掐）几乎必然发生在 JSON 中途：抬一次预算重来，
+    // 比整章失败、用户手动重跑整条流水线便宜得多。只在「像被截断」时重试，避免为脏格式双付费。
+    const budget = Math.min(16000, Math.max(1200, Math.round(spec.maxTokens * 1.6)))
+    ;({ data, text } = await askJson(ctx, stage, spec, {
+      extra: cutRetryNote(String(text).length, tailOf(text)),
+      maxTokens: budget,
+    }))
+  }
   if (data === undefined) {
-    throw parseError(stage, '模型返回的不是合法 JSON', result?.text)
+    throw parseError(stage, parseFailureMessage(text, looksCutJson(text)), text, 12000)
   }
   const parsed = schema.safeParse(data)
   if (!parsed.success) {
-    throw parseError(stage, `JSON 字段不合契约（${formatZod(parsed.error)}）`, data)
+    const error = parseError(stage, `JSON 字段不合契约（${formatZod(parsed.error)}）`, data)
+    // detail.raw 会被 clip 截断；把原始对象挂在 detail.data 上，供降级路径抢救可用字段。
+    if (error.detail && typeof error.detail === 'object') error.detail.data = data
+    throw error
   }
   return parsed.data
 }
@@ -355,6 +583,31 @@ function normalizeProse(raw, { no, title }) {
   const normalizedTitle = String(title ?? '').trim()
   const heading = `## 第${no}章${normalizedTitle ? ` ${normalizedTitle}` : ''}`
   return `${heading}\n\n${text}`
+}
+
+// draft/revise 的同一枪里带着摘要：按标记切开。
+// 只有「切出来且看起来真的是摘要」才认，否则让调用方回退到独立摘要调用——
+// 省一次往返是优化，摘要正确性是前提。
+function takeInlineSummary(raw) {
+  const text = String(raw ?? '')
+  const at = text.lastIndexOf(SUMMARY_MARKER)
+  if (at < 0) return { prose: text, summary: '' }
+  const tail = text.slice(at + SUMMARY_MARKER.length).trim()
+  const looksRight = tail.length >= 16 && tail.length <= 2200 && /发生|知情|钩子|时空/.test(tail)
+  return { prose: text.slice(0, at), summary: looksRight ? tail : '' }
+}
+
+// 摘要再失败也不能把已经付过费的正文丢掉：退回「旧摘要」或正文首段截取，
+// 至少让这一章的稿子落盘、下游 prompt 有个可读的参照。
+function rescueSummary(ctx, item, text, why) {
+  const previous = textOf(ctx, `summary/${item.id}`)
+  if (previous) return previous
+  const body = String(text ?? '')
+    .replace(/^#{1,6}.*$/m, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const head = Array.from(body).slice(0, 240).join('')
+  return `自动摘要（${why}）：${head}${body.length > 240 ? '…' : ''}`
 }
 
 function normalizeSummary(raw) {
@@ -449,6 +702,27 @@ function countSeverities(findings) {
   )
 }
 
+/**
+ * 审校结果整份不合契约时，逐条抢救还能用的字段：
+ * findings 逐项过 findingSchema，ledgerPatch 合法才收，verdict 交给 block/warn 计数推断。
+ */
+function salvageReview(error) {
+  const raw = error?.detail?.data ?? extractJson(error?.detail?.raw)
+  const findings = []
+  if (raw && Array.isArray(raw.findings)) {
+    for (const item of raw.findings) {
+      const parsed = findingSchema.safeParse(item)
+      if (parsed.success) findings.push(parsed.data)
+    }
+  }
+  const patch = raw?.ledgerPatch == null ? null : ledgerPatchSchema.safeParse(raw.ledgerPatch)
+  return {
+    findings,
+    ledgerPatch: patch?.success ? patch.data : null,
+    verdict: undefined,
+  }
+}
+
 // ---------------------------------------------------------------- recipe
 
 /**
@@ -491,9 +765,41 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       review: false,
       async run(ctx) {
         const data = await callJson(ctx, 'characters', prompts.characters, charactersSchema)
+        const warn = typeof ctx.warn === 'function' ? ctx.warn : ctx.log
+        const notes = []
+        const cast = Array.isArray(data.cast) ? data.cast : []
+
+        // 主角标记要能被下游认出来：craft 的代词检查、ledger 的主角保护都只认 role === '主角'。
+        // 模型常写「主人公」「主视角」，归一化，避免一条规则对不上就静默失效。
+        for (const member of cast) {
+          if (!/^(主人公|主视角|视角人物|第一主角|pov|protagonist)$/i.test(String(member.role ?? '').trim())) continue
+          member.role = '主角'
+        }
+        if (cast.length && !cast.some((member) => member.role === '主角')) {
+          cast[0].role = '主角'
+          notes.push(`没标主角，已把「${cast[0].name ?? '第一位人物'}」当主角`)
+        }
+
+        // 用户在建项目时把性别定死了，就以用户为准：模型写成别的性别时改回来并说明，
+        // 否则代词对照会按模型的错性别展开，正文越写越乱。
+        const wanted = ['男', '女'].includes(String(ctx.params?.protagonistGender ?? '')) ? String(ctx.params.protagonistGender) : ''
+        if (wanted) {
+          const leads = cast.filter((member) => member.role === '主角')
+          const changed = leads.filter((member) => sexOf(member.gender) !== wanted)
+          for (const member of changed) member.gender = wanted
+          if (changed.length) notes.push(`主角性别按你的选择定为「${wanted}」`)
+        }
+
+        const missing = castForCheck(data).filter((member) => !member.gender)
+        if (missing.length) {
+          // 不阻断：老项目/弱模型的档案可能没写性别。留一条 warn，让人知道
+          // 后面正文出现「他/她」混用不是玄学，而是这里缺了依据。
+          const message = `人物档案缺少性别：${missing.map((member) => member.name).join('、')}——正文可能混用代词，建议在人物档案里补 gender`
+          if (typeof warn === 'function') await warn.call(ctx, message)
+        }
         return {
           artifacts: { characters: { kind: 'json', content: data } },
-          note: `人物档案：${data.cast.length} 人`,
+          note: `人物档案：${cast.length} 人${notes.length ? `（${notes.join('；')}）` : ''}`,
         }
       },
     },
@@ -556,7 +862,23 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       review: false,
       async run(ctx) {
         const item = ctx.item ?? {}
-        const data = await callJson(ctx, 'beats', prompts.beats, beatsSchema)
+        let data
+        let note = null
+        try {
+          data = await callJson(ctx, 'beats', prompts.beats, beatsSchema)
+        } catch (err) {
+          if (err?.code !== 'LLM_PARSE') throw err
+          const salvaged = salvageScenes(err?.detail?.raw)
+          if (!salvaged.length) throw err
+          // 细纲写不完整时，草稿阶段会退回「只有卷章大纲」，质量损失比少几场大得多。
+          if (typeof ctx.log === 'function') {
+            await ctx.log(`${item.id} 细纲没写完整，已从截断输出里抢救出 ${salvaged.length} 场继续`, {
+              salvaged: salvaged.length,
+            })
+          }
+          data = { title: '', scenes: salvaged }
+          note = `${item.id} 细纲被截断：只抢救到 ${salvaged.length} 场，草稿按可用部分写`
+        }
         const beats = {
           chapterId: item.id,
           title: String(data.title ?? '').trim() || String(item.title ?? '').trim(),
@@ -564,7 +886,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         }
         return {
           artifacts: { [`beats/${item.id}`]: { kind: 'json', content: beats } },
-          note: `${item.id} 细纲：${beats.scenes.length} 场`,
+          note: note ?? `${item.id} 细纲：${beats.scenes.length} 场`,
         }
       },
     },
@@ -574,6 +896,9 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       each: 'outline.chapters',
       produces: ['draft/*', 'summary/*'],
       review: (project) => project?.params?.reviewGate === true,
+      // 历史版本会把「正文缺失，无法修订」这类回声写进 draft/*；它们不算完成，
+      // 否则项目永久停在「已完成」，用户重跑也会被跳过。
+      isStale: ({ key, artifact }) => /^draft\//.test(key) && isPlaceholderText(artifact?.content),
       onItemError: 'stop',
       async run(ctx) {
         const item = ctx.item ?? {}
@@ -581,11 +906,12 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         const materials = buildDraftMaterials(ctx)
         const promptCtx = withPromptContext(ctx, { materials })
 
-        const prose = await callText(promptCtx, 'draft', prompts.draft, {
+        const raw = await callText(promptCtx, 'draft', prompts.draft, {
           phase: 'prose',
-          maxTokens: draftMaxTokens(ctx.params),
+          maxTokens: draftMaxTokens(ctx.params) + 400,
         })
-        const text = normalizeProse(prose, { no, title: item.title })
+        const inline = takeInlineSummary(raw)
+        const text = normalizeProse(inline.prose, { no, title: item.title })
 
         const summaryCtx = withPromptContext(ctx, {
           materials,
@@ -594,11 +920,26 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           chapterTitle: item.title,
           chapterNo: no,
         })
-        const summary = normalizeSummary(
-          await callText(summaryCtx, 'summary', prompts.summary, { phase: 'summary', maxTokens: 800 }),
-        )
+        let summary = ''
+        if (inline.summary) {
+          summary = normalizeSummary(inline.summary)
+        } else {
+          try {
+            summary = normalizeSummary(
+              await callText(summaryCtx, 'summary', prompts.summary, { phase: 'summary', maxTokens: 800 }),
+            )
+          } catch (err) {
+            if (err?.code === 'LLM_ABORTED') throw err
+            summary = rescueSummary(ctx, item, text, `模型未给出摘要：${err?.message ?? err}`)
+          }
+        }
 
-        const { stats } = craft.checkDraft({ text, params: ctx.params, beats: null })
+        const { stats } = craft.checkDraft({
+          text,
+          params: ctx.params,
+          beats: null,
+          cast: castForCheck(jsonOr(ctx, 'characters', null)),
+        })
         return {
           artifacts: {
             [`draft/${item.id}`]: { kind: 'md', content: text },
@@ -617,6 +958,10 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       skip: (project) => (project?.params?.autoReview === false ? '未开启自动审校' : false),
       async run(ctx) {
         const item = ctx.item ?? {}
+        // 没有正文就没什么可审的：以前会把「正文缺失」占位符喂给模型，
+        // 模型照着回声一段，审校结论和后续修订全在加工空气，还白付一次调用。
+        const source = draftOf(ctx, item.id)
+        if (!source) return { artifacts: {}, note: `${item.id} 还没有正文，跳过审校` }
         let degraded = false
         let data
         try {
@@ -626,15 +971,16 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           // 退回确定性检查（AI 腔、对话比、钩子兑现等），并在 note 里标明降级。
           if (err?.code !== 'LLM_EMPTY' && err?.code !== 'LLM_PARSE') throw err
           degraded = true
-          data = { findings: [], ledgerPatch: null, verdict: 'pass' }
+          data = salvageReview(err)
         }
-        const draftText = textOf(ctx, `draft/${item.id}`)
+        const draftText = source
         const beats = jsonOr(ctx, `beats/${item.id}`, null)
         const deterministic = craft.checkDraft({
           text: draftText,
           params: ctx.params ?? {},
           beats,
           previousHook: previousChapter(ctx)?.hook ?? '',
+          cast: castForCheck(jsonOr(ctx, 'characters', null)),
         })
 
         const findings = [...data.findings, ...deterministic.findings]
@@ -647,8 +993,10 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           }))
           .sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
         const counts = countSeverities(findings)
-        const verdict = counts.block || counts.warn ? 'revise' : 'pass'
-        const review = { findings, ledgerPatch: data.ledgerPatch, verdict }
+        // 契约（prompts/zh.js review）：有 block，或 warn ≥ 3 → revise。
+        // 模型给的 verdict 不可信（常整份漏给或与 findings 冲突），一律按计数推断。
+        const verdict = counts.block > 0 || counts.warn >= 3 ? 'revise' : 'pass'
+        const review = { findings, ledgerPatch: data.ledgerPatch ?? null, verdict }
 
         const artifacts = { [`review/${item.id}`]: { kind: 'json', content: review } }
         if (hasPatch(data.ledgerPatch)) {
@@ -670,12 +1018,19 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       title: '修订',
       each: 'outline.chapters',
       produces: ['draft/*', 'summary/*'],
+      // 修订和草稿写同一批 key：不加 alwaysRun 会被「draft 已完成」整段跳过，
+      // 审校结论就永远落不到正文上（审校-修订闭环静默失效）。
+      alwaysRun: true,
       review: false,
       skip: (project) => (project?.params?.autoReview === false ? '未开启自动审校' : false),
       async run(ctx) {
         const item = ctx.item ?? {}
         if (!ctx.has(`review/${item.id}`)) {
           return { artifacts: {}, note: `${item.id} 尚未审校，跳过修订` }
+        }
+        const draftText = draftOf(ctx, item.id)
+        if (!draftText) {
+          return { artifacts: {}, note: `${item.id} 还没有正文，跳过修订（先补草稿）` }
         }
         const review = jsonOr(ctx, `review/${item.id}`, null)
         const actionable = (review?.findings ?? []).filter(
@@ -687,7 +1042,6 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
         const no = chapterNumber(ctx)
         const materials = buildDraftMaterials(ctx)
-        const draftText = textOf(ctx, `draft/${item.id}`)
         const promptCtx = withPromptContext(ctx, {
           materials,
           draft: draftText,
@@ -700,17 +1054,38 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
         const prose = await callText(promptCtx, 'revise', prompts.revise, {
           phase: 'revise',
-          maxTokens: draftMaxTokens(ctx.params),
+          maxTokens: draftMaxTokens(ctx.params) + 400,
         })
-        const text = normalizeProse(prose, { no, title: item.title })
-        const summary = normalizeSummary(
-          await callText(
-            withPromptContext(promptCtx, { draft: text, draftText: text }),
-            'summary',
-            prompts.summary,
-            { phase: 'summary', maxTokens: 800 },
-          ),
-        )
+        const inline = takeInlineSummary(prose)
+        const text = normalizeProse(inline.prose, { no, title: item.title })
+        // 模型只回一段片段也会被当成整章覆盖：按中文字数把「明显不是同一章篇幅」的修订稿挡在落盘前。
+        const before = countCjk(draftText)
+        const after = countCjk(text)
+        if (before > 0 && (after / before < 0.8 || after / before > 1.25)) {
+          throw parseError(
+            'revise',
+            `修订稿长度异常（原 ${before} 字 → 新 ${after} 字），已丢弃未落盘`,
+            prose,
+          )
+        }
+        let summary = ''
+        if (inline.summary) {
+          summary = normalizeSummary(inline.summary)
+        } else {
+          try {
+            summary = normalizeSummary(
+              await callText(
+                withPromptContext(promptCtx, { draft: text, draftText: text, reviseSummary: true }),
+                'summary',
+                prompts.summary,
+                { phase: 'summary', maxTokens: 800 },
+              ),
+            )
+          } catch (err) {
+            if (err?.code === 'LLM_ABORTED') throw err
+            summary = rescueSummary(ctx, item, text, `修订后未给出摘要：${err?.message ?? err}`)
+          }
+        }
 
         return {
           artifacts: {
@@ -812,21 +1187,23 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       const autoReview = merged.autoReview !== false
       const tokens = (chars) => Math.ceil(chars / 1.6) // §3.4：中文约 1.6 字/token
 
-      const calls = 6 + chapters * (1 + 2 + (autoReview ? 3 : 0))
-      const fixedIn = tokens(5 * 4000 + 3000)
-      const fixedOut = tokens(5 * 1200 + 600)
+      // 每章 4 次：细纲 / 草稿（含内联摘要）/ 审校 / 修订（含内联摘要）；不开审校只有 2 次。
+      const calls = 6 + chapters * (autoReview ? 4 : 2)
+      // 以下常量来自 12 章 × 3000 字的实测聚合（docs/architecture.md §6.5），
+      // 只保留「随字数线性增长」的那部分乘 wordsPerChapter；误差约 ±1%。
+      const fixedIn = 25279
+      const fixedOut = 10177
+      const prose = (ratio) => Math.round(wordsPerChapter * ratio)
       const perChapterIn =
-        tokens(4000) +
-        tokens(14500) +
-        tokens(wordsPerChapter + 1000) +
-        (autoReview ? tokens(wordsPerChapter + 6000) + tokens(wordsPerChapter + 8000) : 0)
+        5483 + // 细纲
+        6324 + // 草稿（含摘要契约与账本/文风）
+        (autoReview ? 6331 + prose(1.05) + 4581 + prose(1.05) : 0) // 审校 + 修订
       const perChapterOut =
-        tokens(1200) +
-        tokens(wordsPerChapter) +
-        tokens(450) +
-        (autoReview ? tokens(800) + tokens(wordsPerChapter + 450) : 0)
-      const estTokensIn = fixedIn + chapters * perChapterIn
-      const estTokensOut = fixedOut + chapters * perChapterOut
+        1757 + // 细纲
+        prose(1.03) + // 草稿正文
+        (autoReview ? 1053 + prose(1.07) : 0) // 审校结论 + 修订正文
+      const estTokensIn = tokens(fixedIn + chapters * perChapterIn)
+      const estTokensOut = tokens(fixedOut + chapters * perChapterOut)
 
       return {
         chapters,

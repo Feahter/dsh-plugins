@@ -411,7 +411,7 @@ createLlmGateway({ service, resolveModel, onEvent, signal })
   - 更新 stages/items 状态由 engine 负责（store 不管语义）。
 - `readArtifact`：md 读字符串；json 读并 parse（坏 JSON 抛 `ARTIFACT_CORRUPT`）。
 - 所有路径做 `safeKey(key)`：拒绝 `..`、绝对路径、反斜杠；key 只允许 `[a-zA-Z0-9_\-/.]`，`/` 换目录。
-- 单文件上限：artifact 8MB，project.json 4MB，run.json 8MB；超了抛 `TOO_LARGE`。
+- 单文件上限：artifact 8MB，project.json 4MB，run.json 8MB，run.log 4MB；超了抛 `TOO_LARGE`（run.log 例外：超限轮转成 `.log.1`，不中断运行）。
 - `trashProject`：`mv projects/<id> trash/<id>-<ts>`。
 
 ### 3.6 ForgeError
@@ -420,9 +420,10 @@ createLlmGateway({ service, resolveModel, onEvent, signal })
 new ForgeError(code, message, detail?)
 // code: NOT_FOUND | BAD_PARAMS | BAD_STAGE | RUN_ACTIVE | ARTIFACT_MISSING |
 //       ARTIFACT_CORRUPT | TOO_LARGE | LLM_UNAVAILABLE | LLM_ERROR | LLM_ABORTED |
-//       LLM_PARSE | LLM_EMPTY | BAD_RECIPE | EXPORT_FAILED | CONFLICT
+//       LLM_PARSE | LLM_EMPTY | LLM_AUTH | LLM_TIMEOUT | BAD_RECIPE | EXPORT_FAILED | CONFLICT
 ```
 宿主把 code 映射 HTTP：NOT_FOUND→404，BAD_*→400，RUN_ACTIVE/CONFLICT→409，LLM_*→502，TOO_LARGE→413，其他→500。
+例外：`LLM_AUTH`→400（模型配置问题，重试无意义，要提示用户去设置里配 key）、`LLM_TIMEOUT`→504（等太久，不是服务端 500）。
 
 ---
 
@@ -644,6 +645,45 @@ export default {
 16. **侧栏 id 必须等于 `main` 的 key**：宿主点击侧栏项时按 id 去选 main panel。曾把侧栏 id 写成 `novel-forge.panel`、main key 写成 `novel-forge`，只有真实宿主会报 `main panel "novel-forge.panel" is not registered`（假 harness 不校验）。两处统一用 `novel-forge`。
 17. **`GET /recipes` 兼容 `engine.recipes` 是 Map**：引擎把 recipe 存在 `Map<id, recipe>`，此前直接 `.map()` 在真宿主 500；路由层先取 `[...recipes.values()]`。
 18. **修订不猜“没问题”**：`revise` 先看 `review/<id>` 是否存在；审校没跑完（模型失败/跳过）时返回「尚未审校，跳过修订」，绝不把「没读到审校」当成「没有 block/warn」。
+19. **`stage.alwaysRun`**：`revise` 的 `produces` 与 `draft` 同 key，引擎的「产物都在就跳过」会让任何非 force run 永久跳过修订（审校说「要改」却没人改）。引擎加 `alwaysRun: true` 逃生口（recipe 校验必须是布尔），只给 revise 用。别删。
+20. **永久性模型错误不重试**：`llm.js` 从 `finish.failure.code` 识别 `MISSING_CREDENTIAL`/`INVALID_API_KEY`/鉴权类失败，直接抛 `LLM_AUTH`；只有 `LLM_ERROR`/`LLM_EMPTY`/`LLM_TIMEOUT` 退避重试，且超时只补一枪。
+21. **产物丢失可自愈**：run 开始读产物缓存时，单个文件缺失/损坏只从 `project.artifacts` 摘掉并打 warn「本次会重新生成」，不再让整个项目从此跑不了；读缓存复用 `project.artifacts` 的 meta 并发加载，避免 120 章项目逐个重解析 project.json。
+22. **取消后阶段不留 `running`**：`#finish` 在 `status === 'cancelled'` 时把 running 阶段置 `partial`，UI 不会一直显示「正在跑」。
+23. **`getRunEvents` 带 `dropped`**：事件数组有上限，调用方需要知道历史被截断。
+24. **审稿门默认不放行**：`POST /projects/:id/review/continue` 只有显式 `autoApprove: true` 才跳过后续 gate，默认逐个确认。
+25. **导出加固**：EPUB 正文/标题只做尖括号转义（裸 HTML 进书＝存储型 XSS）；章节标题剥离同时支持 `## 第1章 x` 与「第一章 x」两种写法，避免导出双标题。`safeKey` 拒绝 `.versions` 首段，防止覆盖产物历史归档。
+26. **事件落盘合并 + 串行**：`log/progress/llm` 三类高频事件 200ms 合并成一次 run.json 写（200 条日志的 run 从 207 次写降到 8 次），结构事件仍即时写；所有写走同一条 per-run 链，避免「旧快照后落盘盖掉 run-error」的丢更新。
+27. **终态先记事件再改 status**：`#finish`/`#fail` 先 `#record` 终态事件、再改 `run.status`、再一次性落盘——读到 `done/error` 的调用方，events 里一定已经有 `run-end`/`run-error`。
+
+### 6.5 调用成本的实测结论（12 章 × 3000 字，autoReview=true）
+
+基线 78 次调用 / 输入 509,979 字符（system 29.4% + user 70.6%）/ 输出 119,771 字符。三处结构性浪费与对策：
+
+| 问题 | 实测规模 | 对策 |
+| --- | --- | --- |
+| 每章额外一次摘要调用（draft、revise 各一次） | 24 次调用 / 135,233 字符（26.5%） | 摘要并入草稿/修订的同一枪（`<<<SUMMARY>>>` 分隔），模型没按格式给才回退独立调用 |
+| 同一章正文被投喂 4 次（draft 不回喂，summary/review/revise 各一次） | 约 146,184 字符（28.7%） | 摘要改为「首尾 + 旧摘要 + 审校意见」，修订后的摘要不再整章重投 |
+| 永久性错误（缺 key、超上下文、额度不足）被退避重试 3 次 | 每章白等 4s、付 3 遍输入 | `LLM_AUTH` / `LLM_CONTEXT` / `LLM_QUOTA` 不进 `RETRYABLE`，直接带配置提示报错 |
+
+改完后同一基准：**54 次调用 / 372,319 字符输入（−30.8% 调用、−27.0% 字符）**；最坏情况（模型 24 次都不按格式给摘要）回到 78 次 / 484,151 字符，仍比基线低 5.1%。
+
+估算口径同步校准：`recipe.estimate()` 现在按这次实测的聚合值推（每章 4 次调用、输入常量 25,279 字 + 章节线性项），12 章 × 3000 字给出 233,442 / 74,686 tokens，与实测 232,699 / 74,901 相差 0.3%；此前是按预算上限推的，偏高约 17%。
+
+#### 6.5.1 本轮新增的实现约定
+
+28. **截断检测**：`llm.js` 把 `finish.reason` 的 `length/max_tokens/max-tokens/max_output_tokens/truncated` 统一判为 `LLM_TRUNCATED`，只重试一次并把预算抬到 1.6×（上限 16000），第二次仍截断就抛给上层；被截断的稿子不会当成完成品继续用。
+29. **重试记账**：`generate()` 返回 `attempts/failedAttempts`，`#ctxGenerate` 按 `1 + failedAttempts` 记 `calls`、`estTokensIn` 并累加 `run.stats.retried`——失败的调用也进账，成本不再凭空消失。
+30. **JSON 抢救**：`text.js` 的 `extractJson` 依次尝试 raw → 所有 ``` 围栏 → 括号配平片段（状态机，跳过推理里的假 JSON）→ 去注释/去尾逗号的修复版；全失败才抛 `LLM_PARSE`。
+31. **schema 软化**：`novel` recipe 里只有 `brief.logline`、`cast[].name` 是硬必填，其余字段 `.catch('')` / `.catch([])` 降级——模型少写一个字段不该让已付费的整段调用作废，下游 prompt 对空值都有兜底文案。
+32. **摘要内联**：`draft`/`revise` 的 prompt 末尾追加 `<<<SUMMARY>>>` 契约（占位放最后，尽量不扰动可缓存前缀），`takeInlineSummary` 校验长度 16–2200 且含「发生/知情/钩子/时空」才认，否则回退 `prompts.summary` 独立调用。
+33. **失败尝试也记账**：`#ctxGenerate` 的 catch 分支按 `err.detail.attempts` 记 `calls` 与 `estTokensIn`——空文本三连、429 三连、额度不足、JSON 降级这些真花过钱的路径，`run.stats` 不再是 0。
+34. **摘要失败不丢稿**：draft/revise 的摘要调用失败（非取消）时，退回旧摘要或正文首段截取的「自动摘要」，正文照常落盘——已经付过费的整章不会因为一次 800 token 的摘要失败而作废。
+35. **空文本加倍上限**：`doublings < 2`（1→2→4，最坏 4× 原始输出预算），注释与代码口径一致。
+36. **成本可见性**：工作台总览的「模型调用」格显示估算 token 进出与重试次数；运行抽屉的进度行显示本次 run 的 `calls / tokens / retried`。
+37. **JSON 截断自愈**：`callJson` 发现输出「字符串外开括号多于闭括号」（`looksCutJson`）时，抬 1.6× 预算并追加「先把 JSON 写完整、条目宁可少」的重试说明再问一次；仍失败才抛 `LLM_PARSE`，错误信息带上输出字数与结尾 120 字（`parseFailureMessage`），不再只给一句「无法解析」。
+38. **细纲抢救**：`beats` 阶段两次都拿不到合法 JSON 时，`salvageScenes` 从截断文本里取出已经写完整的 `scenes` 项、重排编号后落盘，并在日志与 note 里标明「细纲被截断：只抢救到 N 场」——少几场也比整章没有细纲、草稿退回卷章大纲好。`beats` 的 `maxTokens` 由 2800 提到 3400（只是上限，不写也按实际计费）。
+39. **占位产物不算完成**：`draft` 阶段声明 `isStale`，`draft/*` 内容命中 `正文缺失 / 无法修订 / 无法摘要`（且长度 < 400）时，`#isComplete` 视为未完成，下次运行重新生成——历史版本把模型回声写成正文的项目不必手动删产物。
+40. **没有正文不跑审校/修订**：`review`、`revise` 在 `draft/*` 缺失或是占位符时直接跳过并给 note（「还没有正文」），既不再把「正文缺失」占位符喂给模型加工空气，也不白付一次调用。
 
 ---
 
@@ -655,3 +695,7 @@ export default {
 - 除 markdown/epub 外的导出（docx 以后可加）。
 - 自动发布到平台。
 - 无限并发：一章一章写，慢就是快。
+41. **人物性别是硬 canon**：`castSchema` 的 `gender` 只能填「男」或「女」，`characters` 阶段把它写进人物档案；缺性别时 `characters` 阶段在事件流里记一条 warn（`ctx.warn`），不阻断、不额外调模型。理由是性别原来只散落在 `voice`/`secret` 自由文本里，后文每章都要重新猜「他/她」。
+42. **代词对照注入**：`draftPrompt`/`revisePrompt`/`reviewPrompt` 都带「代词对照」小节（`pronounLine`），把每个人和「他/她」绑死；人物速查（`castBrief`/`castDump`）的行首也改成「性别·代词，角色」。新建参数 `protagonistGender`（`auto`/`男`/`女`）会在 `charactersPrompt` 里变成硬约束（「主角必须写成女性，代词固定用她」），`auto` 则交给模型按故事核心定。
+43. **确定性代词检查**：`craft.checkDraft({ cast })` 有两条规则——①同一段里只出现主角一人却用相反代词；②整章主角名 ≥3 次、正确代词 0 次、相反代词 ≥3 次。规则 1 为压误报做了两道收窄：段内已出现正确代词则不判（作者在用两个代词指不同的人），且只在「同句主角名之后出现相反代词」或「相反代词做下一句主语」时判。真实稿 `draft/ch01`、`draft/ch04` 上零误报。
+44. **`ctx.warn` 是给用户看的降级信号**：`warn(message, data)` 与 `log` 同路，但级别为 `warn`（前端事件流标黄），用于「不影响继续跑、但用户该知道并可能去改设置/档案」的情形，例如人物档案缺性别。

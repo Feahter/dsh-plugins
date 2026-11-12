@@ -8,6 +8,9 @@ import {
   paramsDefaults,
   paramsSchema,
   extractJson,
+  looksCutJson,
+  salvageScenes,
+  isPlaceholderText,
 } from '../src/recipes/novel/index.js'
 import {
   normalizeOutline,
@@ -34,6 +37,7 @@ import {
   stripChapterHeading,
 } from '../src/recipes/novel/export.js'
 import { validateRecipe } from '../src/forge/recipe.js'
+import { createPrompts } from '../src/recipes/novel/prompts/zh.js'
 import {
   createFakeCtx,
   createScriptedPrompts,
@@ -148,14 +152,20 @@ test('validateRecipe 接受 recipe，并返回同一对象', () => {
 test('estimate：调用数与章数/审校开关一致，参数被夹紧', () => {
   const withReview = novelRecipe.estimate({ ...paramsDefaults, chapters: 6, wordsPerChapter: 1200, autoReview: true })
   assert.equal(withReview.chapters, 6)
-  assert.equal(withReview.calls, 42) // 6 + 6 * (1 + 2 + 3)
+  assert.equal(withReview.calls, 30) // 6 个单次阶段 + 6 章 ×（细纲 + 草稿含摘要 + 审校 + 修订含摘要）
   assert.ok(withReview.estTokensIn > 0)
   assert.ok(withReview.estTokensOut > 0)
   assert.match(withReview.note, /6 章 × 1200 字/)
 
   const withoutReview = novelRecipe.estimate({ ...paramsDefaults, chapters: 6, autoReview: false })
-  assert.equal(withoutReview.calls, 24) // 6 + 6 * (1 + 2)
+  assert.equal(withoutReview.calls, 18) // 不开审校：每章只有细纲 + 草稿（摘要内联）
   assert.match(withoutReview.note, /不含审校/)
+
+  // 估算值要贴着实测走（12 章 × 3000 字实测 232,699 in / 74,901 out）
+  const measured = novelRecipe.estimate({ chapters: 12, wordsPerChapter: 3000, autoReview: true })
+  assert.equal(measured.calls, 54)
+  assert.ok(Math.abs(measured.estTokensIn - 232699) / 232699 < 0.03, `in 估算偏差过大：${measured.estTokensIn}`)
+  assert.ok(Math.abs(measured.estTokensOut - 74901) / 74901 < 0.03, `out 估算偏差过大：${measured.estTokensOut}`)
 
   const clamped = novelRecipe.estimate({ chapters: 999, wordsPerChapter: 1 })
   assert.equal(clamped.chapters, 120)
@@ -218,6 +228,23 @@ test('normalizeOutline：字段缺失抛 LLM_PARSE 并带 raw', () => {
   assertForgeError(() => normalizeOutline({}))
 })
 
+test('normalizeOutline：章节缺 when/where/conflict/turn/hook/pov/cast 仍能解析', () => {
+  const outline = normalizeOutline({
+    volumes: [{ title: '卷一', purpose: 'p', chapters: [{ title: '起', goal: 'g', cast: null }] }],
+  })
+  const chapter = outline.chapters[0]
+  assert.equal(outline.totalChapters, 1)
+  assert.equal(chapter.title, '起')
+  assert.equal(chapter.goal, 'g')
+  assert.equal(chapter.conflict, '')
+  assert.equal(chapter.turn, '')
+  assert.equal(chapter.hook, '')
+  assert.equal(chapter.pov, '')
+  assert.equal(chapter.when, '')
+  assert.equal(chapter.where, '')
+  assert.deepEqual(chapter.cast, [])
+})
+
 test('chaptersOf / chapterById 兼容多种 project 形状', () => {
   const outline = normalizeOutline(sampleVolumeOutline())
   assert.equal(chaptersOf(outline).length, 3)
@@ -232,6 +259,30 @@ test('extractJson 能从围栏与前后废话里取出 JSON', () => {
   assert.deepEqual(extractJson('```json\n{"a":1}\n```'), { a: 1 })
   assert.deepEqual(extractJson('好的，结果如下：\n{"a":[1,2]}\n以上。'), { a: [1, 2] })
   assert.equal(extractJson('完全不是 JSON'), undefined)
+})
+
+test('extractJson 能救回推理前缀、注释与尾逗号，并区分「被截断」', () => {
+  // 推理模型常在 JSON 前写一段带大括号的思考：不能从第一个 { 开始截
+  assert.deepEqual(extractJson('我先想想 {真假难辨}，然后：\n{"a":1}'), { a: 1 })
+  assert.deepEqual(extractJson('{"a":1,}'), { a: 1 })
+  assert.deepEqual(extractJson('{\n  // 这是注释\n  "a": [1,2,],\n}'), { a: [1, 2] })
+  // 正文里带逗号加花括号的字符串不能被改坏
+  assert.deepEqual(extractJson('{"say":"他说,}"}'), { say: '他说,}' })
+
+  assert.equal(looksCutJson('{"a":[1,2]'), true)
+  assert.equal(looksCutJson('{"a":[1,2]}\n'), false)
+  assert.equal(looksCutJson('{"a":"未闭合的引号'), true)
+  assert.equal(looksCutJson('完全不是 JSON'), false)
+})
+
+test('salvageScenes 只收写完的场，重排编号，救不出时返回空数组', () => {
+  const scenes = sampleBeats('ch07').scenes
+  const raw = `{"title":"x","scenes":[${JSON.stringify(scenes[0])},{"no":2,"where":"殡`
+  const salvaged = salvageScenes(raw)
+  assert.equal(salvaged.length, 1)
+  assert.equal(salvaged[0].no, 1)
+  assert.equal(salvageScenes('抱歉，写不了').length, 0)
+  assert.equal(salvageScenes('{"title":"x","scenes":[]}').length, 0)
 })
 
 // ------------------------------------------------------------------ ledger
@@ -511,15 +562,23 @@ test('premise：JSON 校验后写 brief；params.title 覆盖模型书名', asyn
   assert.equal(ctx.calls[0].phase, 'premise')
 })
 
-test('premise：JSON 缺字段 / 非 JSON 抛 LLM_PARSE 带 raw', async () => {
+test('premise：缺软字段降级成空串，缺 logline / 非 JSON 才失败', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
+  // 软字段缺失不该让整段已付费的调用作废（模型少写 theme/promise 很常见）
   const missing = createFakeCtx({ outputs: [jsonOut({ logline: '只有一句话' })] })
-  const error = await assertRejectsCode(stageOf(recipe, 'premise').run(missing))
-  assert.ok('raw' in error.detail)
+  const soft = await stageOf(recipe, 'premise').run(missing)
+  assert.equal(soft.artifacts.brief.content.logline, '只有一句话')
+  assert.equal(soft.artifacts.brief.content.theme, '')
+  assert.equal(soft.artifacts.brief.content.title, '未命名')
+
+  // logline 是这一阶段的唯一硬产出，空着就等于没写
+  const noLogline = createFakeCtx({ outputs: [jsonOut({ title: '无名' })] })
+  await assertRejectsCode(stageOf(recipe, 'premise').run(noLogline))
 
   const notJson = createFakeCtx({ outputs: [textOut('这不是 JSON')] })
-  await assertRejectsCode(stageOf(recipe, 'premise').run(notJson))
+  const error = await assertRejectsCode(stageOf(recipe, 'premise').run(notJson))
+  assert.ok('raw' in error.detail)
 })
 
 test('bible / characters / spine：文本补标题，JSON 过 schema', async () => {
@@ -572,7 +631,245 @@ test('beats stage：章节 id 用 item，场景 no 重排', async () => {
   assert.equal(beats.title, '起：雨夜')
 })
 
-test('draft stage：两次调用（正文+摘要），标题重建，maxTokens 按字数', async () => {
+test('beats stage：JSON 写到一半被截断时抬预算重试一次，而不是整章失败', async () => {
+  const prompts = createScriptedPrompts({ beats: { maxTokens: 2800 } })
+  const recipe = createNovelRecipe({ prompts })
+  const item = { id: 'ch07', title: '第七章', goal: 'g', turn: 't', cast: ['沈砚'] }
+  const full = JSON.stringify(sampleBeats('ch07'))
+  // 截断点落在第二场中间：括号没配平，普通解析必然失败
+  const cut = `${full.slice(0, Math.floor(full.length * 0.55))}`
+  const ctx = createFakeCtx({ item, outputs: [textOut(cut), jsonOut(sampleBeats('ch07'))] })
+  const out = await stageOf(recipe, 'beats').run(ctx)
+
+  assert.equal(ctx.calls.length, 2, '截断应当重试一次')
+  assert.match(ctx.calls[1].user, /上一次输出没能解析成 JSON/)
+  assert.ok(ctx.calls[1].maxTokens > ctx.calls[0].maxTokens, '重试应当抬预算')
+  assert.equal(ctx.calls[1].json, true)
+  assert.equal(out.artifacts['beats/ch07'].content.scenes.length, 2)
+  assert.ok(!out.note.includes('抢救'), '重试成功就不该走抢救路径')
+})
+
+test('beats stage：两次都被截断时抢救出已写完整的场，细纲不整章落空', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const item = { id: 'ch07', title: '第七章', goal: 'g', turn: 't', cast: ['沈砚'] }
+  const scenes = sampleBeats('ch07').scenes
+  const cut = `{"chapterId":"ch07","title":"起：雨夜","scenes":[${JSON.stringify(scenes[0])},${JSON.stringify(scenes[1])},{"no":3,"where":"殡仪`
+  const ctx = createFakeCtx({ item, outputs: [textOut(cut), textOut(cut)] })
+  const out = await stageOf(recipe, 'beats').run(ctx)
+
+  const beats = out.artifacts['beats/ch07'].content
+  assert.equal(beats.scenes.length, 2, '只保留已经写完整的场')
+  assert.deepEqual(beats.scenes.map((scene) => scene.no), [1, 2])
+  assert.equal(beats.chapterId, 'ch07')
+  assert.match(out.note, /细纲被截断：只抢救到 2 场/)
+  assert.ok(ctx.logs.some((line) => line.includes('细纲没写完整')), '要在日志里说清楚发生了什么')
+})
+
+test('beats stage：纯粹不是 JSON（没有截断迹象）不重试，省一次调用', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const item = { id: 'ch07', title: '第七章', goal: 'g', turn: 't', cast: ['沈砚'] }
+  const ctx = createFakeCtx({ item, outputs: [textOut('抱歉，这一段我不方便写。')] })
+  const error = await assertRejectsCode(stageOf(recipe, 'beats').run(ctx), 'LLM_PARSE')
+  assert.equal(ctx.calls.length, 1)
+  assert.match(error.message, /结尾是「/)
+  assert.match(error.message, /不是合法 JSON/)
+})
+
+test('人物档案：每个角色都带性别，主角代词在全链路可查', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: {
+      brief: { kind: 'json', content: sampleBrief() },
+      bible: { kind: 'md', content: '# 世界设定' },
+    },
+    outputs: [jsonOut(sampleCharacters())],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  assert.equal(out.artifacts.characters.content.cast[0].gender, '男', 'gender 不能被 schema 剥掉')
+  assert.equal(out.artifacts.characters.content.cast[1].gender, '女')
+
+  const prompt = prompts.calls.find((call) => call.id === 'characters')
+  assert.ok(prompt, 'characters prompt 被调用过')
+  const charsPrompt = createPrompts().characters(createFakeCtx({ params: { ...SAMPLE_PARAMS } }))
+  assert.match(charsPrompt.user, /性别与代词/)
+  assert.match(charsPrompt.user, /cast\[\]\.gender/)
+  assert.match(charsPrompt.user, /"gender": "女"/, '示例里必须示范性别写法')
+  assert.match(charsPrompt.user, /用户没有指定主角性别/, 'auto 时交给模型定')
+})
+
+test('主角性别参数：女/男 变成硬约束，auto 不约束', () => {
+  const prompts = createPrompts()
+  const female = prompts.characters(
+    createFakeCtx({ params: { ...SAMPLE_PARAMS, protagonistGender: '女' } })
+  )
+  assert.match(female.user, /用户已指定主角性别为「女」/)
+  assert.match(female.user, /代词固定用「她」/)
+  const male = prompts.characters(
+    createFakeCtx({ params: { ...SAMPLE_PARAMS, protagonistGender: '男' } })
+  )
+  assert.match(male.user, /代词固定用「他」/)
+})
+
+test('人物档案缺性别时留一条 warn，不阻断', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const cast = sampleCharacters()
+  delete cast.cast[0].gender
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(cast)],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  assert.ok(out.artifacts.characters, '没写性别也要落盘')
+  assert.ok(
+    ctx.warns.some((message) => /缺少性别/.test(message) && message.includes('沈砚')),
+    `应以 warn 级别记录缺性别，实际：${JSON.stringify(ctx.warns)}`
+  )
+})
+
+test('人物档案：模型写「主人公」时归一化成「主角」，主角保护与代词检查才认得出', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const cast = sampleCharacters()
+  cast.cast[0].role = '主人公'
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(cast)],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  assert.equal(out.artifacts.characters.content.cast[0].role, '主角')
+})
+
+test('人物档案：模型没标主角时把第一位当主角，并说明原因', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const cast = sampleCharacters()
+  for (const member of cast.cast) member.role = '配角'
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(cast)],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  assert.equal(out.artifacts.characters.content.cast[0].role, '主角')
+  assert.match(String(out.note ?? ''), /没标主角/)
+})
+
+test('人物档案：项目里定死的性别优先于模型，改回并写进 note', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const cast = sampleCharacters()
+  cast.cast[0].gender = '男'
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS, protagonistGender: '女' },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(cast)],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  assert.equal(out.artifacts.characters.content.cast[0].gender, '女')
+  assert.match(String(out.note ?? ''), /主角性别按你的选择定为「女」/)
+})
+
+test('代词对照：草稿/修订/审校 prompt 都带每个人物的代词', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const outline = normalizeOutline(sampleVolumeOutline())
+  const items = outline.chapters
+  const base = {
+    outline: { kind: 'json', content: outline },
+    brief: { kind: 'json', content: sampleBrief() },
+    characters: { kind: 'json', content: sampleCharacters() },
+    ledger: { kind: 'json', content: sampleLedger() },
+    'beats/ch01': { kind: 'json', content: sampleBeats() },
+    'draft/ch01': { kind: 'md', content: '## 第1章 起：雨夜\n\n旧正文。' },
+  }
+  const draftCtx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items,
+    item: items[0],
+    index: 0,
+    artifacts: base,
+    outputs: [textOut('## 第1章 起：雨夜\n\n新正文。\n\n<<<SUMMARY>>>\n发生：a\n知情：b\n钩子：c\n时空：d')],
+  })
+  await stageOf(recipe, 'draft').run(draftCtx)
+  const draftUser = prompts.calls.find((call) => call.id === 'draft').ctx
+  assert.ok(draftUser, 'draft prompt 被调用')
+  const draftPrompt = createPrompts().draft(draftCtx)
+  assert.match(draftPrompt.user, /代词对照/)
+  assert.match(draftPrompt.user, /沈砚＝「他」（男，主角）/)
+  assert.match(draftPrompt.user, /阿绫＝「她」（女，关键配角）/)
+  assert.match(draftPrompt.user, /同一个人全章只用/)
+
+  const reviewPrompt = createPrompts().review(
+    createFakeCtx({
+      params: { ...SAMPLE_PARAMS },
+      items,
+      item: items[0],
+      index: 0,
+      artifacts: base,
+    })
+  )
+  assert.match(reviewPrompt.user, /代词对照/)
+  assert.match(reviewPrompt.user, /性别/, '审校契约要允许「性别」这个 kind')
+
+  const revisePrompt = createPrompts().revise(
+    createFakeCtx({
+      params: { ...SAMPLE_PARAMS },
+      items,
+      item: items[0],
+      index: 0,
+      artifacts: base,
+    })
+  )
+  assert.match(revisePrompt.user, /代词对照/)
+  assert.match(revisePrompt.user, /按【代词对照】统一/)
+})
+
+test('draft stage：正文与摘要同一枪返回时只调一次模型', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const outline = normalizeOutline(sampleVolumeOutline())
+  const items = outline.chapters
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items,
+    item: items[0],
+    index: 0,
+    artifacts: {
+      outline: { kind: 'json', content: outline },
+      brief: { kind: 'json', content: sampleBrief() },
+      characters: { kind: 'json', content: sampleCharacters() },
+      ledger: { kind: 'json', content: sampleLedger() },
+      'beats/ch01': { kind: 'json', content: sampleBeats() },
+    },
+    outputs: [
+      textOut(
+        '以下是正文：\n\n## 第9章 旧标题\n\n雨下得很大。\n\n“你来了。”她说。\n\n<<<SUMMARY>>>\n发生：沈砚在雨夜见到回魂，听见父亲的名字。\n知情：他知道了名册被改。\n钩子：柜里有人呼吸。\n时空：殡仪馆，凌晨一点。',
+      ),
+    ],
+  })
+  const out = await stageOf(recipe, 'draft').run(ctx)
+  const draft = out.artifacts['draft/ch01'].content
+  assert.ok(draft.startsWith('## 第1章 起：雨夜'))
+  assert.ok(!draft.includes('第9章'))
+  assert.ok(draft.includes('雨下得很大。'))
+  assert.ok(!draft.includes('<<<SUMMARY>>>'))
+  assert.ok(out.artifacts['summary/ch01'].content.startsWith('发生：沈砚在雨夜见到回魂'))
+  // 一次调用就把正文与摘要都拿到，省掉整章第二次往返
+  assert.equal(ctx.calls.length, 1)
+  assert.equal(ctx.calls[0].json, false)
+  assert.equal(ctx.calls[0].maxTokens, Math.round(1200 * 2.2) + 400)
+  const draftPrompt = prompts.calls.find((call) => call.id === 'draft')
+  assert.ok(draftPrompt.ctx.materials.beats.includes('停尸间'))
+})
+
+test('draft stage：模型没按格式给摘要时回退独立摘要调用', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
   const outline = normalizeOutline(sampleVolumeOutline())
@@ -601,16 +898,42 @@ test('draft stage：两次调用（正文+摘要），标题重建，maxTokens �
   assert.ok(draft.includes('雨下得很大。'))
   assert.equal(out.artifacts['summary/ch01'].content, '沈砚在雨夜见到回魂，听见父亲的名字。')
   assert.equal(ctx.calls.length, 2)
-  assert.equal(ctx.calls[0].json, false)
   assert.equal(ctx.calls[1].phase, 'summary')
-  assert.equal(ctx.calls[0].maxTokens, Math.round(1200 * 2.2))
-  assert.equal(ctx.calls[1].maxTokens, 800)
-
-  const draftPrompt = prompts.calls.find((call) => call.id === 'draft')
-  assert.ok(draftPrompt.ctx.materials.beats.includes('停尸间'))
-  assert.ok(draftPrompt.ctx.materials.characters.includes('沈砚'))
   const summaryPrompt = prompts.calls.find((call) => call.id === 'summary')
   assert.equal(summaryPrompt.ctx.draft, draft)
+  assert.equal(summaryPrompt.ctx.draftText, draft)
+})
+
+test('draft stage：摘要调用失败时正文仍落盘，用自动摘要兜底', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const outline = normalizeOutline(sampleVolumeOutline())
+  const items = outline.chapters
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items,
+    item: items[0],
+    index: 0,
+    artifacts: {
+      outline: { kind: 'json', content: outline },
+      brief: { kind: 'json', content: sampleBrief() },
+      characters: { kind: 'json', content: sampleCharacters() },
+      ledger: { kind: 'json', content: sampleLedger() },
+      'beats/ch01': { kind: 'json', content: sampleBeats() },
+    },
+    outputs: [
+      textOut('## 第1章 起：雨夜\n\n雨下得很大。\n\n“你来了。”她说。'),
+      () => {
+        const error = new Error('模型返回了空文本')
+        error.code = 'LLM_EMPTY'
+        throw error
+      },
+    ],
+  })
+  const out = await stageOf(recipe, 'draft').run(ctx)
+  // 正文那一次已经付过费，不能因为摘要失败整章丢弃
+  assert.ok(out.artifacts['draft/ch01'].content.includes('雨下得很大。'))
+  assert.match(out.artifacts['summary/ch01'].content, /^自动摘要（模型未给出摘要/)
 })
 
 test('draft stage：上一章 summary 与下一章目标进入喂料', async () => {
@@ -649,6 +972,47 @@ test('draft stage：正文为空抛 LLM_PARSE', async () => {
     outputs: [textOut('   ')],
   })
   await assertRejectsCode(stageOf(recipe, 'draft').run(ctx))
+})
+
+test('summary prompt：正文从 ctx.draftText 取，不再退化成「正文缺失」', async () => {
+  const real = createPrompts()
+  const outline = normalizeOutline(sampleVolumeOutline())
+  const items = outline.chapters
+  const firstLine = '雨落在灵堂的玻璃上，像有人用指甲一下一下地敲。'
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items,
+    item: items[0],
+    index: 0,
+  })
+  // 关键：draft/ch01 还没进产物缓存（同一 stage.run 内），正文只能由调用方挂在上下文里。
+  const promptCtx = Object.assign(Object.create(ctx), { draftText: firstLine })
+  const direct = real.summary(promptCtx).user
+  assert.ok(direct.includes(firstLine))
+  assert.ok(!direct.includes('正文缺失'))
+
+  const seen = []
+  const recipe = createNovelRecipe({
+    prompts: {
+      ...real,
+      summary: (summaryCtx) => {
+        const spec = real.summary(summaryCtx)
+        seen.push(spec)
+        return spec
+      },
+    },
+  })
+  const runCtx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items,
+    item: items[0],
+    index: 0,
+    outputs: [textOut(firstLine), textOut('第一章摘要。')],
+  })
+  await stageOf(recipe, 'draft').run(runCtx)
+  assert.equal(seen.length, 1)
+  assert.ok(seen[0].user.includes(firstLine))
+  assert.ok(!seen[0].user.includes('正文缺失'))
 })
 
 test('review stage：LLM findings 与 craft 合并、排序、算 verdict、写回 ledger', async () => {
@@ -765,6 +1129,67 @@ test('review stage：无 ledgerPatch 时不写 ledger，全 note 时 verdict=pas
   assert.equal(out.artifacts['review/ch01'].content.verdict, 'pass')
 })
 
+test('review stage：verdict 规则为 block>0 或 warn≥3（2 warn→pass，3 warn→revise）', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const text = Array.from({ length: 15 }, () => '“走吧。”他说。').join('\n\n')
+  const verdictOf = async (warns, verdict) => {
+    const ctx = createFakeCtx({
+      params: { ...SAMPLE_PARAMS, wordsPerChapter: 60, pov: '第三人称全知' },
+      items: [{ id: 'ch01', title: '起' }],
+      item: { id: 'ch01', title: '起' },
+      artifacts: { 'draft/ch01': { kind: 'md', content: text } },
+      outputs: [
+        jsonOut({
+          findings: Array.from({ length: warns }, (_, index) => ({
+            severity: 'warn',
+            kind: 'pacing',
+            where: `第${index + 1}段`,
+            issue: '节奏拖',
+            fix: '删一句',
+          })),
+          ...(verdict ? { verdict } : {}),
+        }),
+      ],
+    })
+    const out = await stageOf(recipe, 'review').run(ctx)
+    return out.artifacts['review/ch01'].content.verdict
+  }
+  assert.equal(await verdictOf(2, 'revise'), 'pass') // 模型说 revise 也不算数：2 条 warn 不够
+  assert.equal(await verdictOf(3), 'revise') // verdict 缺失 → 按 warn 计数推断
+})
+
+test('review stage：缺 ledgerPatch 不丢 findings；整份不合契约时也抢救 findings', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const finding = { severity: 'warn', kind: '知情', where: '第 2 段', issue: '周迟说了他还不该知道的事', fix: '改成试探性问法' }
+  const makeCtx = (output) =>
+    createFakeCtx({
+      params: { ...SAMPLE_PARAMS, pov: '第三人称全知' },
+      items: [{ id: 'ch01', title: '起' }],
+      item: { id: 'ch01', title: '起' },
+      artifacts: {
+        'draft/ch01': { kind: 'md', content: '## 第1章 起\n\n他仿佛看见了什么。似乎有人。不禁后退。' },
+      },
+      outputs: [jsonOut(output)],
+    })
+
+  // 只漏 ledgerPatch / verdict：不算降级，findings 完整保留，ledger 不写。
+  const partial = makeCtx({ findings: [finding] })
+  const partialOut = await stageOf(recipe, 'review').run(partial)
+  const partialReview = partialOut.artifacts['review/ch01'].content
+  assert.ok(partialReview.findings.some((item) => item.where === '第 2 段'))
+  assert.ok(!partialOut.note.includes('仅保留确定性检查'))
+  assert.ok(!('ledger' in partialOut.artifacts))
+
+  // verdict 取值非法 → 整份解析失败，降级路径仍要保住已给的 findings。
+  const broken = makeCtx({ findings: [finding], verdict: 'maybe' })
+  const brokenOut = await stageOf(recipe, 'review').run(broken)
+  const brokenReview = brokenOut.artifacts['review/ch01'].content
+  assert.ok(brokenReview.findings.some((item) => item.where === '第 2 段'))
+  assert.ok(brokenOut.note.includes('仅保留确定性检查'))
+})
+
 test('skip 契约：autoReview=false 时 review/revise 跳过并给原因', () => {
   const recipe = novelRecipe
   assert.equal(stageOf(recipe, 'review').skip({ params: { autoReview: false } }), '未开启自动审校')
@@ -810,6 +1235,65 @@ test('revise stage：review 缺失时不冒充“无问题”', async () => {
   assert.equal(ctx.calls.length, 0)
 })
 
+test('review stage：没有正文时跳过审校，不花一次调用', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const outline = normalizeOutline(sampleVolumeOutline())
+  const item = outline.chapters[0]
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items: outline.chapters,
+    item,
+    index: 0,
+    artifacts: {
+      outline: { kind: 'json', content: outline },
+      brief: { kind: 'json', content: sampleBrief() },
+      characters: { kind: 'json', content: sampleCharacters() },
+      ledger: { kind: 'json', content: sampleLedger() },
+    },
+    outputs: [],
+  })
+  const out = await stageOf(recipe, 'review').run(ctx)
+  assert.deepEqual(out.artifacts, {})
+  assert.match(out.note, /还没有正文/)
+  assert.equal(ctx.calls.length, 0, '没有正文就不要调模型')
+})
+
+test('revise stage：正文是「正文缺失」这类占位符时跳过，不覆盖原产物', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items: [{ id: 'ch02', title: '承：旧照片' }],
+    item: { id: 'ch02', title: '承：旧照片' },
+    artifacts: {
+      'draft/ch02': { kind: 'md', content: '正文缺失，无法修订' },
+      'review/ch02': {
+        kind: 'json',
+        content: {
+          findings: [{ severity: 'block', kind: 'logic', where: 'ch02', issue: '时间线矛盾', fix: '调整顺序' }],
+          ledgerPatch: {},
+          verdict: 'revise',
+        },
+      },
+      ledger: { kind: 'json', content: sampleLedger() },
+    },
+    outputs: [],
+  })
+  const out = await stageOf(recipe, 'revise').run(ctx)
+  assert.deepEqual(out.artifacts, {}, '占位稿不能被当成正文再去修订')
+  assert.match(out.note, /还没有正文/)
+  assert.equal(ctx.calls.length, 0)
+})
+
+test('isPlaceholderText 只认占位符，不误伤正常正文', () => {
+  assert.equal(isPlaceholderText('正文缺失，无法修订'), true)
+  assert.equal(isPlaceholderText('发生：正文缺失，无法摘要'), true)
+  assert.equal(isPlaceholderText('（正文缺失：请在输出里写"正文缺失，无法摘要"，不要编造。）'), true)
+  assert.equal(isPlaceholderText('# 第1章\n\n他真的读到过「正文缺失」这个说法，' + '雨'.repeat(400)), false)
+  assert.equal(isPlaceholderText(''), false)
+})
+
 test('revise stage：有 block 时重写 draft + summary，findings 传入 prompt', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
@@ -818,7 +1302,7 @@ test('revise stage：有 block 时重写 draft + summary，findings 传入 promp
     items: [{ id: 'ch01', title: '起：雨夜' }],
     item: { id: 'ch01', title: '起：雨夜' },
     artifacts: {
-      'draft/ch01': { kind: 'md', content: '## 第1章 起：雨夜\n\n旧正文。' },
+      'draft/ch01': { kind: 'md', content: '## 第1章 起：雨夜\n\n旧正文一段。' },
       'review/ch01': {
         kind: 'json',
         content: {
@@ -829,16 +1313,46 @@ test('revise stage：有 block 时重写 draft + summary，findings 传入 promp
       },
       ledger: { kind: 'json', content: sampleLedger() },
     },
-    outputs: [textOut('## 第1章 起：雨夜\n\n修订后的正文。'), textOut('修订后的摘要。')],
+    outputs: [textOut('## 第1章 起：雨夜\n\n修订后正文。'), textOut('修订后的摘要。')],
   })
   const out = await stageOf(recipe, 'revise').run(ctx)
-  assert.ok(out.artifacts['draft/ch01'].content.includes('修订后的正文'))
+  assert.ok(out.artifacts['draft/ch01'].content.includes('修订后正文'))
   assert.equal(out.artifacts['summary/ch01'].content, '修订后的摘要。')
   assert.equal(ctx.calls.length, 2)
   assert.equal(ctx.calls[0].phase, 'revise')
   const revisePrompt = prompts.calls.find((call) => call.id === 'revise')
   assert.equal(revisePrompt.ctx.findings.length, 1)
   assert.ok(revisePrompt.ctx.draftText.includes('旧正文'))
+})
+
+test('revise stage：修订稿长度异常时抛 LLM_PARSE，不覆盖原正文', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const oldDraft = `## 第1章 起：雨夜\n\n${'雨落在灵堂的玻璃上。'.repeat(12)}`
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    items: [{ id: 'ch01', title: '起：雨夜' }],
+    item: { id: 'ch01', title: '起：雨夜' },
+    artifacts: {
+      'draft/ch01': { kind: 'md', content: oldDraft },
+      'review/ch01': {
+        kind: 'json',
+        content: {
+          findings: [{ severity: 'block', kind: 'logic', where: 'ch01', issue: '时间线矛盾', fix: '调整顺序' }],
+          ledgerPatch: {},
+          verdict: 'revise',
+        },
+      },
+    },
+    // 模型只回了一段（8 字 vs 113 字）：整章不能被这段碎片替换。
+    outputs: [textOut('## 第1章 起：雨夜\n\n雨停了。')],
+  })
+  const error = await assertRejectsCode(stageOf(recipe, 'revise').run(ctx))
+  assert.match(error.message, /修订稿长度异常/)
+  assert.match(error.message, /原 \d+ 字 → 新 \d+ 字/)
+  assert.match(error.message, /已丢弃未落盘/)
+  assert.equal(ctx._store.get('draft/ch01').content, oldDraft)
+  assert.equal(ctx.calls.length, 1)
 })
 
 test('blurb stage：书名/卖点/简介/标签，params.title 覆盖', async () => {

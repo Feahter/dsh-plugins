@@ -83,8 +83,15 @@ export function validateRecipe(recipe) {
       }
       if (stage.each.includes('*')) fail(`stage ${stage.id}.each 不能包含通配符`)
     }
+    if (stage.alwaysRun !== undefined && typeof stage.alwaysRun !== 'boolean') {
+      fail(`stage ${stage.id}.alwaysRun 必须是布尔值`)
+    }
     if (stage.skip !== undefined && typeof stage.skip !== 'function') {
       fail(`stage ${stage.id}.skip 必须是函数`)
+    }
+    // 产物「存在但其实是占位/空壳」时，允许 recipe 声明它不算完成，下次重跑时重新生成。
+    if (stage.isStale !== undefined && typeof stage.isStale !== 'function') {
+      fail(`stage ${stage.id}.isStale 必须是函数`)
     }
     if (stage.onItemError !== undefined) {
       if (!stage.each) fail(`stage ${stage.id} 声明了 onItemError 但没有 each`)

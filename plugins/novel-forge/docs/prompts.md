@@ -77,7 +77,7 @@ export default createPrompts
 | `beats` | `beats/*` | JSON | 本章章节卡、前后章目标、上一章摘要、账本、人物、文风 | 2800 | 0.75 | 10500 |
 | `draft` | `draft/*` + `summary/*` | markdown | 本章细纲、上一章摘要、账本、下一章目标、人物、文风 | `min(16000, max(1600, round(words×2.2)))` | 0.9 | 11800 |
 | `summary` | `summary/*` | markdown | 本章正文、细纲、上一章摘要 | 900 | 0.2 | 11500 |
-| `review` | `review/*` | JSON | 本章正文、细纲、账本、人物、前后章、预期字数 | 2600 | 0.1 | 15000 |
+| `review` | `review/*` | JSON | 本章正文、细纲、账本、人物、前后章、预期字数 | 4000 | 0.1 | 15000 |
 | `revise` | `draft/*` + `summary/*` | markdown | 本章正文 + findings、细纲、账本 | `min(16000, max(1600, round(words×2.2)))` | 0.5 | 17000 |
 | `blurb` | `blurb` | markdown | brief、spine、outline、characters | 1400 | 0.85 | 9000 |
 
@@ -86,6 +86,7 @@ export default createPrompts
 - `outline` 的 24 章默认值 → 4800 tokens；120 章上限 → 12000。
 - `draft`/`revise` 的 3000 字默认值 → 6600 tokens；8000 字上限 → 16000（与 §4.3 一致）。
 - `summary` 只有 900 tokens，因为它被硬限制在 300 字，不需要更多。
+- `review` 从 2600 提到 4000：推理模型会把预算烧在 reasoning 上，2600 时经常返回空正文（`LLM_EMPTY`），见 architecture §6.4 #13。
 
 ---
 
@@ -168,7 +169,9 @@ export default createPrompts
 
 ### 7.3 characters：压力下的预测模型
 
-- 每人八字段：`name`、`role`、`want`、`fear`、`secret`、`voice`、`arc`、`relations`。
+- 每人八字段：`name`、`role`、`want`、`fear`、`secret`、`voice`、`arc`、`relations`，外加 `gender`。
+- `gender` 只能是「男」或「女」，必填：它决定后文用「他」还是「她」。名字不暗示性别时（沈砚、周岩）更要写清；模型漏写时 `characters` 阶段在事件流里记一条 warn，不阻断。
+- 新建时可以用 `protagonistGender`（`auto`/`男`/`女`）把主角性别定死，prompt 里会变成硬约束。
 - `want` 与 `fear` 必须互相拉扯；`secret` 要能在中段爆炸；`arc` 由事件逼出来，不是顿悟。
 - `voice` 承载两句：第一句说话方式（句长／用词／口头禅／沉默时做什么），第二句行为底线（「他会……；绝不会……」）。这样不新增字段，也能给后文对白一个锚。
 - 关系不对称：A 以为是朋友，B 只在利用 A。

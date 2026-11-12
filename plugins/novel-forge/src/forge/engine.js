@@ -22,6 +22,9 @@ import { estimateTokens, fit, safeKey } from './text.js'
 import { newProjectId, newRunId } from './ids.js'
 
 const EVENT_LIMIT = 500
+// 高频事件（log/progress/llm）合并落盘：每个事件都全量重写 run.json 会让长跑变成 O(n²) 磁盘写。
+const PERSIST_DELAY_MS = 200
+const NOISY_EVENTS = new Set([EVENT.LOG, EVENT.PROGRESS, EVENT.LLM])
 const ITEM_ID = /^[A-Za-z0-9_.-]+$/
 const TERMINAL = new Set(['done', 'error', 'cancelled', 'interrupted'])
 
@@ -96,6 +99,11 @@ export class ForgeEngine {
     }
     /** 活跃 run：projectId → live 对象 */
     this.live = new Map()
+    /** 待合并落盘的 run：runId → timer */
+    this.pendingWrites = new Map()
+    // 同一个 run 的落盘串成一条链：合并写的 timer 与结构事件的即时写会并发，
+    // 谁最后 rename 谁赢；不串行就可能让「旧快照」盖掉刚写的 run-error。
+    this.writeChains = new Map()
   }
 
   #now() {
@@ -117,8 +125,8 @@ export class ForgeEngine {
     return itemId ? `${title} · ${itemId}` : title
   }
 
-  /** 事件：内存 seq + 落盘 run.json（log 事件同时 append run.log）。 */
-  async #emit(live, type, data = {}) {
+  /** 只写内存事件（不落盘），给「状态与终态事件必须同一次落盘」的收尾路径用。 */
+  #record(live, type, data = {}) {
     const run = live.run
     run.seq += 1
     const event = { seq: run.seq, ts: this.#now(), type, data }
@@ -128,11 +136,56 @@ export class ForgeEngine {
       run.events.splice(0, dropped)
       run.dropped = (run.dropped || 0) + dropped
     }
-    await this.store.writeRun(live.projectId, run)
+    return event
+  }
+
+  /** 事件：内存 seq + 落盘 run.json（log 事件同时 append run.log）。 */
+  async #emit(live, type, data = {}) {
+    const event = this.#record(live, type, data)
+    const run = live.run
+    await this.#persist(live, type)
     if (type === EVENT.LOG) {
       await this.store.appendRunLog(live.projectId, run.id, `[${event.ts}] ${data.message}`)
     }
     return event
+  }
+
+  /** 串行化同一 run 的落盘，保证最后一次写的一定是最新快照。 */
+  #write(live) {
+    const runId = live.run.id
+    const prev = this.writeChains.get(runId) ?? Promise.resolve()
+    const next = prev.catch(() => {}).then(() => this.store.writeRun(live.projectId, live.run))
+    this.writeChains.set(runId, next.then(() => {}, () => {}))
+    return next
+  }
+
+  /**
+   * 事件落盘策略：结构性事件（阶段/条目/产物/终止）立即写；
+   * 高频事件合并到 200ms 一次，避免每帧全量重写 run.json。
+   */
+  async #persist(live, type) {
+    const runId = live.run.id
+    if (NOISY_EVENTS.has(type)) {
+      if (this.pendingWrites.has(runId)) return
+      const handle = setTimeout(() => {
+        this.pendingWrites.delete(runId)
+        this.#write(live).catch(() => {})
+      }, PERSIST_DELAY_MS)
+      if (typeof handle.unref === 'function') handle.unref()
+      this.pendingWrites.set(runId, handle)
+      return
+    }
+    await this.#drain(live)
+    await this.#write(live)
+  }
+
+  /** 把排队中的合并写立刻冲掉（阶段边界、run 结束、失败收尾都用它）。 */
+  async #drain(live) {
+    const handle = this.pendingWrites.get(live.run.id)
+    if (!handle) return
+    clearTimeout(handle)
+    this.pendingWrites.delete(live.run.id)
+    await this.#write(live)
   }
 
   async #log(live, message, level = 'info', extra = {}) {
@@ -226,7 +279,8 @@ export class ForgeEngine {
     const run = await this.getRun(runId)
     const after = Number(afterSeq) || 0
     const events = (run.events || []).filter((event) => Number(event.seq) > after)
-    return { events, seq: Number(run.seq) || 0 }
+    // dropped：被 EVENT_LIMIT 挤掉的事件条数。调用方据此知道「历史被截断」，不要太早下结论。
+    return { events, seq: Number(run.seq) || 0, dropped: Number(run.dropped) || 0 }
   }
 
   async listRuns(projectId) {
@@ -448,12 +502,17 @@ export class ForgeEngine {
   async #execute(live, recipe, stages) {
     const { run } = live
     try {
-      live.cache = await this.#loadArtifactCache(live.project)
+      const loaded = await this.#loadArtifactCache(live.project)
+      live.cache = loaded.cache
+      if (loaded.lost.length) await this.store.saveProject(live.project)
       await this.#emit(live, EVENT.RUN_START, {
         stages: run.options.stages,
         items: run.options.items,
         autoApprove: run.options.autoApprove,
       })
+      for (const key of loaded.lost) {
+        await this.#log(live, `产物 ${key} 已丢失或损坏，已从记录中移除，本次会重新生成`, 'warn')
+      }
       let outcome = 'done'
       for (let i = 0; i < stages.length; i += 1) {
         if (this.#aborted(live)) {
@@ -482,6 +541,13 @@ export class ForgeEngine {
 
   async #finish(live, status) {
     const { run, project } = live
+    await this.#drain(live)
+    if (status === 'cancelled') {
+      // 取消时当前阶段停在 running，会让 UI 一直显示「在跑」直到下次运行或重启。
+      for (const state of Object.values(project.stages || {})) {
+        if (state && state.status === 'running') state.status = 'partial'
+      }
+    }
     run.endedAt = this.#now()
     run.current = { stage: null, item: null, label: null }
     project.activeRunId = null
@@ -489,19 +555,19 @@ export class ForgeEngine {
     // 先落项目再改内存状态：getRun 若在 saveProject 完成前看到 done，
     // 调用方随后读 project 会读到 activeRunId 还在的旧状态（测试/UI 竞态）。
     await this.store.saveProject(project)
-    run.status = status
-    if (status === 'cancelled') {
-      await this.#emit(live, EVENT.RUN_END, { status: 'cancelled' })
-    } else if (status === 'done') {
-      await this.#emit(live, EVENT.RUN_END, { status: 'done' })
-    } else {
-      // paused 没有额外事件，但内存里的 status 必须落盘
-      await this.store.writeRun(project.id, run)
+    if (status === 'cancelled' || status === 'done') {
+      // 先记终态事件、再改 status：任何读到 done/cancelled 的调用方，
+      // events 里一定已经有 run-end（UI 与集成测试都按后者判断「真的结束了」）。
+      this.#record(live, EVENT.RUN_END, { status })
     }
+    run.status = status
+    await this.#write(live)
+    this.writeChains.delete(run.id)
   }
 
   async #fail(live, err) {
     const { run, project } = live
+    await this.#drain(live)
     const fe = asForgeError(err)
     const current = run.current || {}
     const stageState = current.stage ? project.stages?.[current.stage] : null
@@ -509,7 +575,6 @@ export class ForgeEngine {
       stageState.status = 'error'
       if (current.item && stageState.items) stageState.items[current.item] = 'error'
     }
-    run.status = 'error'
     run.error = { code: fe.code, message: fe.message }
     if (fe.detail !== undefined) run.error.detail = fe.detail
     run.endedAt = this.#now()
@@ -524,7 +589,12 @@ export class ForgeEngine {
     project.updatedAt = run.endedAt
     run.current = { stage: null, item: null, label: null }
     await this.store.saveProject(project).catch(() => {})
-    await this.#emit(live, EVENT.RUN_ERROR, { message: fe.message, code: fe.code }).catch(() => {})
+    // 终态事件与 run.status 必须进同一次落盘：否则读盘方可能看到 status=error
+    // 但 events 里还没有 run-error（UI 与集成测试都按后者判断「真的结束了」）。
+    this.#record(live, EVENT.RUN_ERROR, { message: fe.message, code: fe.code })
+    run.status = 'error'
+    await this.#write(live).catch(() => {})
+    this.writeChains.delete(run.id)
   }
 
   /**
@@ -708,7 +778,22 @@ export class ForgeEngine {
       }
     }
 
-    state.status = hadError ? 'partial' : 'done'
+    // 只跑了一部分条目（例如 --items ch02 单章重跑、或某几条还没跑）时不能标 done，
+    // 否则阶段轨显示「完成」而实际缺章。
+    let stageStatus = hadError ? 'partial' : 'done'
+    if (!hadError && allItems) {
+      const items = state.items || {}
+      const covered = allItems.filter((item) => items[item.id] === 'done').length
+      if (covered < allItems.length) {
+        stageStatus = 'partial'
+        await this.#log(
+          live,
+          `${stage.title || stage.id} 仅完成 ${covered}/${allItems.length} 个条目，可再跑该阶段补齐`,
+          'warn',
+        )
+      }
+    }
+    state.status = stageStatus
     project.updatedAt = this.#now()
     await this.store.saveProject(project)
     await this.#emit(live, EVENT.STAGE_END, { stage: stage.id, status: state.status })
@@ -753,11 +838,26 @@ export class ForgeEngine {
   }
 
   async #isComplete(live, stage, itemId) {
+    // alwaysRun 的阶段（例如 revise 覆盖写 draft/*）永远不会被「产物已存在」跳过，
+    // 由 stage.run 自己判断这次要不要真干活。
+    if (stage.alwaysRun === true) return false
     const keys = artifactKeysFor(stage, itemId)
     if (keys.length === 0) return false
     for (const key of keys) {
       if (!live.project.artifacts?.[key]) return false
       if (!(await this.store.hasArtifact(live.projectId, key))) return false
+    }
+    // 占位产物（例如「正文缺失，无法修订」这种模型回声）不算完成：
+    // 否则项目会永久停在「已完成」，用户点重跑也跳过去，只能手动删产物自救。
+    if (typeof stage.isStale === 'function') {
+      for (const key of keys) {
+        const artifact = live.cache?.get(key)
+        try {
+          if (artifact && stage.isStale({ key, artifact }) === true) return false
+        } catch {
+          // 判定函数自己出错时不影响「已完成」的常规判断
+        }
+      }
     }
     return true
   }
@@ -810,11 +910,27 @@ export class ForgeEngine {
 
   async #loadArtifactCache(project) {
     const cache = new Map()
-    for (const key of Object.keys(project.artifacts || {})) {
-      const artifact = await this.store.readArtifact(project.id, key)
+    const lost = []
+    const metas = project.artifacts || {}
+    const keys = Object.keys(metas)
+    // 并发读 + 复用 project.artifacts 里的 meta：不再为每个产物重解析一遍 project.json。
+    const loaded = await Promise.all(
+      keys.map(async (key) => {
+        try {
+          return { key, artifact: await this.store.readArtifact(project.id, key, undefined, metas) }
+        } catch {
+          // 单个产物坏了（被外部删掉、复制中断、同步工具改写）不该锁死整个项目：
+          // 把它从记录里摘掉，让对应阶段重新生成。
+          return { key, artifact: null }
+        }
+      }),
+    )
+    for (const { key, artifact } of loaded) {
       if (artifact) cache.set(key, artifact)
+      else lost.push(key)
     }
-    return cache
+    for (const key of lost) delete project.artifacts[key]
+    return { cache, lost }
   }
 
   async #cacheArtifact(live, written, content) {
@@ -847,6 +963,9 @@ export class ForgeEngine {
       list: api.list,
       fit: (text, maxChars) => fit(text, maxChars),
       log: (message, data) => this.#log(live, String(message), 'info', data && typeof data === 'object' ? { data } : {}),
+      // recipe 想表达「不阻断但要注意」时用它：事件流里会以 warn 级别出现，
+      // 用户在工作台能直接看到，而不必翻 run.json。
+      warn: (message, data) => this.#log(live, String(message), 'warn', data && typeof data === 'object' ? { data } : {}),
       progress: (done, total) => this.#ctxProgress(live, done, total),
       llm: {
         generate: (opts) => this.#ctxGenerate(live, stage, unit, opts),
@@ -861,6 +980,24 @@ export class ForgeEngine {
     await this.#emit(live, EVENT.PROGRESS, { done: d, total: t })
   }
 
+  /**
+   * 调用成本记账：run 与 project 两级同增。
+   * 失败的尝试也要进来——不然「空文本三连 / 429 三连 / 摘要空」这些真花了钱的路径
+   * 在 stats 里全是 0，用户以为没花钱，我们也没法解释账单。
+   */
+  #account(live, { calls = 0, tokensIn = 0, tokensOut = 0, failed = 0 } = {}) {
+    const run = live.run
+    run.stats.calls += calls
+    run.stats.estTokensIn += tokensIn
+    run.stats.estTokensOut += tokensOut
+    if (failed) run.stats.retried = (run.stats.retried || 0) + failed
+    live.project.stats = live.project.stats || { calls: 0, estTokensIn: 0, estTokensOut: 0 }
+    live.project.stats.calls = (live.project.stats.calls || 0) + calls
+    live.project.stats.estTokensIn = (live.project.stats.estTokensIn || 0) + tokensIn
+    live.project.stats.estTokensOut = (live.project.stats.estTokensOut || 0) + tokensOut
+    if (failed) live.project.stats.retried = (live.project.stats.retried || 0) + failed
+  }
+
   async #ctxGenerate(live, stage, unit, opts = {}) {
     if (!this.llm || typeof this.llm.generate !== 'function') {
       throw new ForgeError('LLM_UNAVAILABLE', '模型服务未就绪，请先在设置里选择模型')
@@ -868,6 +1005,7 @@ export class ForgeEngine {
     if (this.#aborted(live)) throw new ForgeError('LLM_ABORTED', '模型调用已取消')
     const system = typeof opts.system === 'string' ? opts.system : ''
     const user = typeof opts.user === 'string' ? opts.user : ''
+    const perAttemptIn = estimateTokens(system.length + user.length)
     let result
     try {
       result = await this.llm.generate({
@@ -879,22 +1017,21 @@ export class ForgeEngine {
         sessionId: opts.sessionId || `dsh-forge-${live.run.id}`,
       })
     } catch (err) {
+      // 抛错也要记账：llm.generate 会把「尝试了几次」挂到 detail 上。
+      const attempts = Math.max(1, Number(err?.detail?.attempts) || 1)
+      this.#account(live, { calls: attempts, tokensIn: perAttemptIn * attempts, tokensOut: 0, failed: attempts - 1 })
       if (isAbort(err) || this.#aborted(live)) throw new ForgeError('LLM_ABORTED', '模型调用已取消')
       throw asForgeError(err, 'LLM_ERROR')
     }
     if (this.#aborted(live)) throw new ForgeError('LLM_ABORTED', '模型调用已取消')
     const text = typeof result?.text === 'string' ? result.text : ''
     const chars = typeof result?.chars === 'number' ? result.chars : text.length
-    const tokensIn = result?.usage?.inputTokens ?? estimateTokens(system.length + user.length)
+    const failed = Math.max(0, Number(result?.failedAttempts) || 0)
+    // 失败重试那几次的输入 token 是真花掉的：按「输入 × 尝试次数」记账，成本表才不会偏低。
+    const tokensIn = result?.usage?.inputTokens ?? perAttemptIn * (1 + failed)
     const tokensOut = result?.usage?.outputTokens ?? estimateTokens(chars)
-    const run = live.run
-    run.stats.calls += 1
-    run.stats.estTokensIn += tokensIn
-    run.stats.estTokensOut += tokensOut
-    live.project.stats = live.project.stats || { calls: 0, estTokensIn: 0, estTokensOut: 0 }
-    live.project.stats.calls = (live.project.stats.calls || 0) + 1
-    live.project.stats.estTokensIn = (live.project.stats.estTokensIn || 0) + tokensIn
-    live.project.stats.estTokensOut = (live.project.stats.estTokensOut || 0) + tokensOut
+    const calls = 1 + failed
+    this.#account(live, { calls, tokensIn, tokensOut, failed })
     const model = result?.model ?? null
     if (model) live.lastModel = model
     await this.#emit(live, EVENT.LLM, {
@@ -904,6 +1041,7 @@ export class ForgeEngine {
       label: opts.label ?? null,
       chars,
       model,
+      attempts: 1 + failed,
     })
     return result
   }
@@ -980,7 +1118,7 @@ export class ForgeEngine {
     if (!exporter || typeof exporter.run !== 'function') {
       throw new ForgeError('EXPORT_FAILED', `不支持的导出格式：${String(format)}`, { format })
     }
-    const api = this.#readApi(await this.#loadArtifactCache(project))
+    const api = this.#readApi((await this.#loadArtifactCache(project)).cache)
     const ctx = {
       project: deepFreeze(clone(project)),
       params: deepFreeze(clone(project.params || {})),

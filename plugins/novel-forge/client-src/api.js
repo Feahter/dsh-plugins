@@ -87,7 +87,8 @@ export const continueReview = (projectId, options = {}) =>
 
 // ------------------------------------------------------------------ 导出
 export const exportProject = (projectId, format) =>
-  request(`/projects/${id(projectId)}/export`, { method: 'POST', body: { format } }).then(data => data.export)
+  // 直接返回 { filename, path, mime, bytes }：再包一层 export 会让调用方二次解包成 undefined。
+  request(`/projects/${id(projectId)}/export`, { method: 'POST', body: { format } }).then(data => data?.export ?? data)
 
 // ------------------------------------------------------------------ 其他
 export const getRecipes = () => request('/recipes').then(data => data.recipes ?? [])
