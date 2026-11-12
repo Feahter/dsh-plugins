@@ -61,8 +61,8 @@
         "zh": "实时语音输入"
       },
       "description": {
-        "en": "Continuous dictation for the composer: speak, watch the words appear live, and every paused sentence is written into the input box by the local SenseVoice model.",
-        "zh": "输入框连续听写：边说边出字，停顿即断句并由本地 SenseVoice 写入输入框。"
+        "en": "Continuous dictation plus cleanup and dictation-translation: speak, and every two neighbouring phrases are polished together before landing in the field — fillers removed, self-corrections followed, Chinese spoken and English written. Exposes a voiceInput service other plugins can attach to.",
+        "zh": "连续听写 + 自动排版 + 口述翻译：两句相邻的话一起校对了再插入，去口头语、接住「不对，我是说…」、中文说成英文。并把能力暴露成 voiceInput 服务，别的输入插件可直接接入。"
       },
       "icon": "plugins/realtime-voice/icon.svg",
       "author": "Feahter",
@@ -74,18 +74,19 @@
       "metadata": {
         "category": "voice",
         "keywords": [
-          "realtime",
+          "voice",
           "dictation",
           "speech-to-text",
+          "translation",
+          "polish",
           "sensevoice",
-          "voice-input",
           "中文"
         ],
         "labels": [
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1793885748
+          "updated": 1794482916
         }
       },
       "versions": [
@@ -96,6 +97,19 @@
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "a483a06a0b8a4cae191a04cc91f308f123569842",
+            "path": "plugins/realtime-voice"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "0.3.0",
+          "publishTimestamp": 1794482916,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "a0d4785a840ee17e049cfd328288702f36f5835e",
             "path": "plugins/realtime-voice"
           },
           "engines": {
@@ -323,8 +337,8 @@
         "zh": "脑图创意画布"
       },
       "description": {
-        "en": "A mind map on an infinite canvas: press Tab to grow a branch, tidy the tree with d3-hierarchy, import inspirations from Media desk, or let the assistant branch a node with AI. Five theme presets plus a custom palette, and export to Markdown / OPML / FreeMind / JSON / PNG.",
-        "zh": "无限画布上的选题脑图：Tab 往右长、d3-hierarchy 一键整理成树、从自媒体工作台导入灵感、让助手 AI 发散一个节点。5 套预设主题 + 自定义配色，可导出 Markdown / OPML / FreeMind / JSON / PNG。"
+        "en": "A mind map on an infinite canvas: press Tab to grow a branch, tidy the tree with d3-hierarchy, import inspirations, or let the assistant branch a node with AI. Speak into any field with the built-in microphone button when realtime-voice is installed. Export to Markdown / OPML / FreeMind / JSON / PNG.",
+        "zh": "无限画布上的选题脑图：Tab 往右长、一键整理成树、从自媒体工作台导入灵感、让助手 AI 发散节点；装了 realtime-voice 后空态输入框和节点卡片都能直接说话。5 套主题 + 自定义配色，可导出 Markdown / OPML / FreeMind / JSON / PNG。"
       },
       "icon": "plugins/mind-canvas/icon.svg",
       "author": "Feahter",
@@ -344,10 +358,12 @@
           "opml",
           "freemind",
           "theme",
-          "panel"
+          "panel",
+          "voice",
+          "dictation"
         ],
         "sortKeys": {
-          "updated": 1794396811
+          "updated": 1794482916
         }
       },
       "versions": [
@@ -358,6 +374,19 @@
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
             "commit": "42bf4d63cb12bd45ba05b133d5a81914be788eb7",
+            "path": "plugins/mind-canvas"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "0.3.0",
+          "publishTimestamp": 1794482916,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "0026383366f7feeeb4a5440024e38b8692a7cd7f",
             "path": "plugins/mind-canvas"
           },
           "engines": {
