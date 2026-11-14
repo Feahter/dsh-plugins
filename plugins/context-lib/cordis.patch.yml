@@ -1,0 +1,16 @@
+# dsh-context-lib：宿主半片（/api/context-lib/* 路由 + context_lib_* 工具 + 上下文简报）
+# 与浏览器半片（侧栏「资源库」页面）。
+#
+# 可调项（都有默认值，需要时在 profile 的 cordis.patch.yml 覆盖）：
+#
+#   - id: context-lib
+#     name: 'dsh-context-lib'
+#     config:
+#       rootDir: ~/.dsh/context-lib
+#       briefing: context        # context | off
+#       protocolSection: true
+#       autoScan: false          # 加载时是否后台跑一次增量扫描
+#       maxEntries: 20000
+- insert:
+    - id: context-lib
+      name: 'dsh-context-lib'

@@ -1,0 +1,70 @@
+{
+  "name": "dsh-context-lib",
+  "version": "0.1.0",
+  "description": "上下文资源库：整合本机文档 / 脚本 / 图片 / 会话，提供 CRUD 面板与面向 agent 上下文的检索工具。",
+  "author": "Feahter",
+  "license": "MIT",
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/context-lib",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/context-lib"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "context",
+    "resource-library",
+    "files",
+    "search",
+    "markdown",
+    "wiki",
+    "memory",
+    "session",
+    "rag",
+    "preview"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "client.js",
+    "client-src",
+    "build.mjs",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "docs"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/store.test.mjs && node test/client-smoke.mjs && node .verify-host.mjs",
+    "verify": "node .verify-host.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  }
+}
