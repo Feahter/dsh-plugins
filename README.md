@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Eight plugins live side by side under [`plugins/`](./plugins).
+Nine plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -51,6 +51,14 @@ A mind map on an infinite canvas inside the sidebar. Jot a thought and press Ent
 - Agent tools: `mind_canvas_read` (outline + stats) and `mind_canvas_add` (branch a node by text match).
 - Requirements: DSH `>= 0.2.1-rc.4`. Data lives in `~/.dsh/mind-canvas/state.json`; the host half has zero runtime dependencies.
 
+### [Context library](./plugins/context-lib)
+
+One searchable index of what is already on this machine — Markdown notes, code, images, PDFs, Office files, session logs — plus the agent tools to use it as context. Sources are directories (with a depth cap and an extension whitelist); a scan registers files by size and mtime so rescans are incremental, and linked files are only ever described, never moved or deleted. The panel does the file-manager half: search, type/collection/tag filters, detail view with editing, notes, trash and restore. Previews use local tools instead of a JS parser zoo: `textutil` for doc/docx/rtf/odt, `qlmanage` for pdf/xlsx/ppt thumbnails (cached by file + size + mtime), HTML stripped to text.
+
+- Agent tools: `context_lib_search` (relevance scoring, Chinese phrase bonus, snippet), `read` (text or converted preview, line ranges), `put` / `update` / `delete` (notes and library copies), `scan`, `stats`, `sources`, `pack` (bundle several hits into one context block).
+- Every turn injects a short library briefing (counts, collections, recent items) so the model knows what exists before searching.
+- Requirements: DSH `>= 0.2.1-rc.4`; macOS for the `textutil` / `qlmanage` previews. Data lives in `~/.dsh/context-lib/` (`index.json`, `notes/`, `blobs/`, `cache/thumbs/`).
+
 ### [Task ledger](./plugins/task-ledger)
 
 State that outlives the session. Goals, decisions, evidence and next actions are written to an external ledger (`~/.dsh/task-ledger/`) instead of the transcript, so a task survives closing every conversation, switching model or switching agent: hand back the `task_id` and it resumes from the ledger. Five `task_*` tools — `task_list`, `task_open`, `task_resume` (takes the single-writer lease and returns a `run_id`), `task_checkpoint` (evidence, claims, decisions, next actions, optimistic `expected_version`) and `task_close` — plus a sidebar panel that reads the ledger directly.
@@ -84,6 +92,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/task-ledger"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/update-check"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/novel-forge"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/context-lib"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.

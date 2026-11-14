@@ -577,6 +577,63 @@
           }
         }
       ]
+    },
+    {
+      "name": "dsh-context-lib",
+      "title": {
+        "en": "Context library",
+        "zh": "上下文资源库"
+      },
+      "description": {
+        "en": "Indexes documents, scripts, images and session files on this machine into one searchable library, and gives the agent context tools to find and read them. Panel does full CRUD with trash, tags, collections and previews (docx/rtf via textutil, pdf/xlsx/ppt via qlmanage, html stripped to text); every turn injects a short library briefing, and linked files are never moved or deleted.",
+        "zh": "把本机的文档、脚本、图片、会话文件索引成一个可检索的资源库，并给 agent 上下文工具直接找与读。面板支持增删改查、回收站、标签、归类与格式预览（docx/rtf 走 textutil，pdf/xlsx/ppt 走 qlmanage，html 剥成纯文本）；每轮注入一段资源库简报，扫描来的原文件只登记不改动。"
+      },
+      "icon": "plugins/context-lib/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/context-lib",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/context-lib"
+      },
+      "metadata": {
+        "category": "context-engineering",
+        "keywords": [
+          "context",
+          "resource-library",
+          "files",
+          "search",
+          "markdown",
+          "wiki",
+          "memory",
+          "session",
+          "rag",
+          "preview",
+          "textutil",
+          "qlmanage",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794633171
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794633171,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "b7634e9c8534804b26b384d88f183a7d9cc59f80",
+            "path": "plugins/context-lib"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
     }
   ]
 }
