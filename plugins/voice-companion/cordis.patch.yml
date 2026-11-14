@@ -1,0 +1,8 @@
+# Bundle patch for dsh-voice-companion.
+#
+# One row only: the Host half registers its HTTP routes lazily through
+# `ctx.inject(['webServer'], ...)` and only watches agent status when the
+# plugin is active, so a profile without a web server simply never mounts.
+- insert:
+    - id: dsh-voice-companion
+      name: 'dsh-voice-companion'

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>大肥鱼 · 看板娘 形象自查</title>
+<style>
+  :root{--ink:#eaf0ff;--muted:#8ea3cc;--line:rgba(120,150,255,.18);--brand:#4d6bfe;--brand-hi:#6b85ff}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{min-height:100vh;background:radial-gradient(900px 500px at 15% -10%,rgba(77,107,254,.18),transparent 70%),radial-gradient(700px 420px at 95% 0%,rgba(107,133,255,.12),transparent 70%),#060a14;color:var(--ink);font:14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:26px 40px 34px}
+  main{max-width:1340px;margin:0 auto}
+  header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  h1{margin:0;font-size:23px;font-weight:700}
+  h1 span{color:var(--brand-hi)}
+  .sub{margin:2px 0 0;color:var(--muted);font-size:12px}
+  .rack{display:flex;gap:12px;padding:14px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(16,26,50,.55),rgba(9,15,30,.35))}
+  .cell{width:243px;flex:none}
+  .cell h2{margin:0;font-size:13px;font-weight:650}
+  .cell p{margin:3px 0 8px;color:var(--muted);font-size:11px}
+  .slot{width:243px;height:198px;overflow:hidden;border-radius:16px}
+  .slot [data-vc-avatar]{position:relative!important;right:auto!important;bottom:auto!important;left:auto!important;top:auto!important;width:320px!important;transform:scale(.759375);transform-origin:top left}
+  .cast{margin-top:20px;display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+  #live [data-vc-avatar]{position:relative!important;right:auto!important;bottom:auto!important;left:auto!important;top:auto!important}
+  .note{max-width:460px;color:var(--muted);font-size:12px}
+  .note b{color:#c9d6f5}
+  .note code{font:11px/1.5 ui-monospace,Menlo,monospace;color:#9db4ff}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>大肥鱼 <span>· 看板娘</span> 形象自查</h1>
+      <p class="sub">同一份 characters.js 渲染：五状态 + 两个形象 + 切换 / 对话·听写开关。改完 art 直接刷新这页。</p>
+    </div>
+  </header>
+
+  <section class="rack" id="rack"></section>
+
+  <section class="cast">
+    <div id="live"></div>
+    <div class="note">
+      <p><b>怎么验</b></p>
+      <p>1. 右上两个圆点切看板娘：<code>大</code> 胖鲸鱼 / <code>小</code> 二次元看板娘；切换后面板底色、字幕、音色都跟着换（音色由宿主侧 <code>host/voice.js</code> 决定）。</p>
+      <p>2. 右上「对话 / 听写」按钮切换麦克风去向：对话=回话，听写=写进输入框。</p>
+      <p>3. 下面一排是 <code>data-state</code> 五个状态的静态定格（真实动效由 CSS 关键帧驱动，这里为了并排展示被冻住）。</p>
+      <p>4. 按住面板顶部那条可以拖着走（松手记住位置）；右上「−」把它折成一颗胶囊，点胶囊又能展开。</p>
+    </div>
+  </section>
+</main>
+
+<script>
+  // The bundle talks to window.__ModuleLoader__; capture the factory instead of booting it.
+  window.__ModuleLoader__ = { load: (mod) => { window.__vcModule = mod; } };
+</script>
+<script src="../client.js"></script>
+<script>
+  const noRequire = () => { throw new Error('no module registry in the demo page'); };
+  const plugin = window.__vcModule.factory(noRequire);
+  const ctx = {
+    inject(deps, cb) { cb({ remote: { speech: { transcribe: async () => ({ ok: false }), prepare: async () => ({}) } } }); return () => {}; },
+    effect(fn) { fn(); return () => {}; },
+    logger: { info() {}, warn() {} },
+    get() { return null; },
+    on() { return () => {}; },
+    off() {},
+    emit() {},
+  };
+  // One plugin instance = one panel, exactly like the real host. ?character=chibi 换成看板娘。
+  plugin.apply(ctx);
+  const live = document.querySelector('#dsh-voice-companion-root [data-vc-avatar]');
+  const wanted = new URLSearchParams(location.search).get('character');
+  if (wanted && wanted !== 'whale') {
+    const chip = live.querySelector('.vc-chip[data-character="' + wanted + '"]');
+    if (chip) chip.click();
+  }
+  // Without the DSH composer dictation reports "输入框不可用"; keep the demo tidy.
+  const bubble = live.querySelector('.vc-bubble');
+  if (bubble) bubble.textContent = '点「开始通话」就能说话';
+  document.getElementById('live').appendChild(live);
+
+  const STATES = [
+    ['idle', '待命', '呼吸 + 眨眼，喷水孔偶尔冒泡'],
+    ['listening', '在听', '光晕 + 外圈波纹扩散'],
+    ['thinking', '在想', '眼睛上翻 + 三点跳'],
+    ['speaking', '在说', '嘴随音量开合，身体轻摆'],
+    ['error', '出错', '耷拉、字幕变灰'],
+  ];
+  const rack = document.getElementById('rack');
+  for (const [state, title, hint] of STATES) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.innerHTML = '<h2>' + title + ' · ' + state + '</h2><p>' + hint + '</p><div class="slot"></div>';
+    const clone = live.cloneNode(true);
+    clone.setAttribute('data-state', state);
+    cell.querySelector('.slot').appendChild(clone);
+    rack.appendChild(cell);
+  }
+</script>
+</body>
+</html>

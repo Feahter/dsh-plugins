@@ -1,0 +1,68 @@
+{
+  "name": "dsh-voice-companion",
+  "version": "0.2.0",
+  "description": "One voice plugin for DeepSeek Harness: call-mode conversation, dictation, global hotkey, two switchable mascots and adaptive TTS voices.",
+  "author": "Feahter",
+  "license": "MIT",
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/voice-companion"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "voice",
+    "speech",
+    "tts",
+    "dictation",
+    "hotkey",
+    "mascot",
+    "character",
+    "tts-voice",
+    "中文"
+  ],
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "icon.svg",
+    "host/",
+    "assets/",
+    "cordis.patch.yml",
+    "README.md",
+    "test/",
+    "docs/",
+    "src/",
+    "scripts/"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:client": "node test/client-harness.mjs && node test/avatar-harness.mjs && node test/hotkey-harness.mjs",
+    "check": "node --check index.js && node --check host/http.js && node --check host/persona.js && node --check host/tasks.js && node --check host/tts.js && node --check host/router.js && node --check host/voice.js && node --check host/command.js && node --check host/sessions.js && node --check src/client/characters.js && node --check src/client/avatar.js && node --check src/client/dictation.js && node --check src/client/hotkey.js && node --check src/client/polish.js && node --check src/client/audio.js && node --check src/client/index.js && node --check scripts/build-client.mjs",
+    "make-icon": "node scripts/make-icon.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}
