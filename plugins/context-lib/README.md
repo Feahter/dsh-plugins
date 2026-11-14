@@ -15,6 +15,8 @@
 | 检索 | AND 关键词 + 字段加权（标题 > 标签 > 归类 > 路径 > 摘要），中文整词支持，类型 / 归类 / 标签 / 来源过滤 |
 | 文件管理 | 浏览、详情、行范围读正文、改标题标签归类、软删 / 恢复 / 彻底删除、原始字节与缩略图预览 |
 | 格式预览 | docx/rtf/odt 用 `textutil` 转文本，html 剥标签，pdf/xlsx/ppt/key/pages 用 `qlmanage` 出 PNG 缩略图（缓存到 `<root>/cache/thumbs`） |
+| 展示形式 | 列表 / 卡片 / 表格 / 图库四视图，工具栏下拉切换（选择记在 `localStorage` 的 `clib:view`）；表格可按标题 / 大小 / 时间点表头排序，图库只铺图片；Markdown 笔记与 `ext=md` 条目在详情里可切「渲染 / 源码」，渲染器是自带的 94 行轻量实现（只用 React 文本节点，不用 `innerHTML`、不引依赖）；预览可一键全屏（Esc / 点遮罩 / 右上按钮退出，内容在卡片内滚动） |
+| 智能助手 | 右侧抽屉三页：**总结**（选中条目 → 摘要 + 建议标题 / 归类 / 标签，逐项应用）、**整理**（当前筛选前 15 条 → 归类与标签建议表，逐行或全部应用，失败行保留错误）、**提问**（自然语言 → 回答 + 可直接套用的检索过滤条件）。走宿主 `llm` + agent 默认模型，不另配密钥；未就绪时显示原因并禁用提交 |
 | 找原文件 | 详情里一键**复制路径**，或**在访达中显示**（macOS `open -R` 直接选中原文件；不经 shell，路径含空格引号也安全） |
 | agent 上下文 | 工具读写 + 运行时简报（条目数、归类、最近更新），集合打包 `context_lib_pack` 一次加载一个主题 |
 | 会话 / 记忆 | `kind=session` 与 `collection` 可把会话摘要、记忆片段按主题归档，供后续对话复用 |
@@ -27,7 +29,7 @@
 
 ```bash
 # 1. 作为 link 依赖装进 profile
-dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/default-workspace/context-lib
+dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/dsh-plugins/plugins/context-lib
 
 # 2. 确认 profile 的 package.json 里 dsh.profile.bundles 含 "dsh-context-lib"
 # 3. 重启 GUI（或 dsh web）加载新插件

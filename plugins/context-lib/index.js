@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process'
 
 import { LibraryError, createLibrary, resolveRoot } from './src/store.js'
 import { preview, previewThumb } from './src/preview.js'
+import { assistStatus, runAssist } from './src/assist.js'
 
 export const DEFAULTS = {
   rootDir: '',
@@ -708,6 +709,8 @@ function httpStatusFor(error) {
   if (code === 'too-large') return 413
   if (code === 'preview-unavailable') return 415
   if (code === 'unsupported-platform') return 501
+  if (code === 'assist-unavailable') return 503
+  if (code === 'assist-failed') return 502
   return 500
 }
 
@@ -721,7 +724,7 @@ function revealInFinder(target) {
   })
 }
 
-async function dispatchRoute({ method, pathname, searchParams, headers, bodyText, connection, root, getLibrary, briefer }) {
+async function dispatchRoute({ method, pathname, searchParams, headers, bodyText, connection, root, getLibrary, briefer, ctx }) {
   if (!connection || typeof connection.requestRejection !== 'function') {
     return {
       status: 503,
@@ -840,11 +843,17 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
         })
         return { status: 200, payload: { ok: true, data: result } }
       }
+      if (segments[0] === 'assist' && segments[1] === 'status' && segments.length === 2) {
+        return { status: 200, payload: { ok: true, data: assistStatus(ctx) } }
+      }
       return { status: 404, payload: { ok: false, error: { message: `Unknown route: GET ${route}`, code: 'not-found' } } }
     }
 
     if (verb === 'POST') {
       const body = parseJson(bodyText)
+      if (segments[0] === 'assist' && segments.length === 1) {
+        return { status: 200, payload: { ok: true, data: await runAssist({ ctx, lib, body }) } }
+      }
       if (segments[0] === 'items' && segments.length === 1) {
         const item = await lib.create({
           title: String(body.title || '').trim(),
@@ -993,6 +1002,7 @@ function createRouteHandler(services) {
         root: services.root,
         getLibrary: services.getLibrary,
         briefer: services.briefer,
+        ctx: services.ctx,
       })
       if (result.raw) {
         await sendRaw(res, method, result.raw.entry, result.raw.root)

@@ -1,8 +1,31 @@
 import React from 'react'
 import * as api from './api.js'
 import { format } from './strings.js'
+import { Markdown } from './markdown.js'
+import { AssistDrawer } from './assist.jsx'
 const h = React.createElement
 const PAGE = 50
+const VIEW_MODES = ['list', 'cards', 'table', 'gallery']
+const VIEW_LABEL = {
+  list: 'viewList',
+  cards: 'viewCards',
+  table: 'viewTable',
+  gallery: 'viewGallery',
+}
+/** localStorage 在 smoke / 非浏览器环境下不一定可用，读写都兜底。 */
+function readPref(key, fallback) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return fallback
+    return window.localStorage.getItem(key) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+function writePref(key, value) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) window.localStorage.setItem(key, value)
+  } catch { /* 隐私模式下忽略 */ }
+}
 const MAX_PREVIEW = 20000
 const MAX_LINES = 400
 /** 这些格式自己渲染不了，交给宿主用 textutil / qlmanage 出文本或缩略图。 */
@@ -23,6 +46,8 @@ const GLYPHS = {
   trash: [G('path', { d: 'M2.8 4.2h10.4M5.8 4.2V2.8h4.4v1.4M4.2 4.2l.7 9h6.2l.7-9M6.7 6.8v4M9.3 6.8v4' })],
   close: [G('path', { d: 'M4 4l8 8M12 4l-8 8' })],
   chevron: [G('path', { d: 'M6 3.6 10.4 8 6 12.4' })],
+  expand: [G('path', { d: 'M2.4 6V2.4H6M10 2.4h3.6V6M13.6 10v3.6H10M6 13.6H2.4V10' })],
+  collapse: [G('path', { d: 'M6 2.4V6H2.4M10 2.4V6h3.6M13.6 10H10v3.6M6 13.6V10H2.4' })],
   back: [G('path', { d: 'M13 8H3M7 4 3 8l4 4' })],
   book: [G('path', { d: 'M2 3.2h3.7c1.2 0 2.3.7 2.3 1.8v8c-.4-1.1-1.5-1.8-2.7-1.8H2zM8 5c0-1.1 1.1-1.8 2.3-1.8H14v8h-3.7c-1.2 0-2.3.7-2.3 1.8' })],
   doc: [G('path', { d: 'M4 1.8h4.7l3.5 3.5v8.9H4zM8.6 1.8v3.7h3.6' })],
@@ -38,6 +63,10 @@ const GLYPHS = {
   save: [G('path', { d: 'M2.8 2.8h8.8l1.6 1.6v8.8H2.8zM5 2.8v3.4h5V2.8M5 13.2V9.4h6v3.8' })],
   restore: [G('path', { d: 'M3 5.6A5.4 5.4 0 1 1 2.8 9M2.6 2.6v3.2h3.2' })],
   check: [G('path', { d: 'M3 8.4 6.4 12 13 4.6' })],
+  sparkle: [
+    G('path', { d: 'M7 1.8 8.5 6.2 12.9 7.7 8.5 9.2 7 13.6 5.5 9.2 1.1 7.7 5.5 6.2z' }),
+    G('path', { d: 'M12.6 10.6l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z' }),
+  ],
 }
 function Icon({ name, size = 14 }) {
   const body = GLYPHS[name] ?? GLYPHS.other
@@ -114,6 +143,7 @@ async function copyText(text) {
 function Toolbar({
   t, onExit, qInput, onQuery, kind, onKind, sort, onSort, status, trashCount,
   onToggleTrash, onScan, scanning, onNewNote, onRefresh, refreshing,
+  view, onView, assistOpen, onToggleAssist,
 }) {
   return h('div', { className: 'clib-toolbar' },
     h('button', {
@@ -143,6 +173,17 @@ function Toolbar({
       h(Icon, { name: 'plus', size: 13 }), t('newNote')),
     h('button', { type: 'button', className: `clib-btn${status === 'trashed' ? ' is-on' : ''}`, onClick: onToggleTrash, title: t('trashToggle') },
       h(Icon, { name: 'trash', size: 13 }), t('trashToggle'), trashCount > 0 ? ` ${trashCount}` : ''),
+    h('select', {
+      className: 'clib-select',
+      value: view,
+      title: t('viewLabel'),
+      'aria-label': t('viewLabel'),
+      onChange: event => onView(event.target.value),
+    }, VIEW_MODES.map(mode => h('option', { key: mode, value: mode }, t(VIEW_LABEL[mode])))),
+    h('button', {
+      type: 'button', className: `clib-btn${assistOpen ? ' is-on' : ''}`, onClick: onToggleAssist,
+      title: t('assistOpen'), 'aria-pressed': !!assistOpen,
+    }, h(Icon, { name: 'sparkle', size: 13 }), t('assistOpen')),
     h('button', { type: 'button', className: 'clib-btn clib-icon', onClick: onRefresh, disabled: refreshing, title: t('refresh'), 'aria-label': t('refresh') },
       h('span', { className: refreshing ? 'clib-spin' : undefined }, h(Icon, { name: 'refresh', size: 14 }))))
 }
@@ -252,6 +293,86 @@ function ItemRow({ t, item, active, sourceName, onClick }) {
       ? h('span', { className: 'clib-row-tags' }, item.tags.slice(0, 4).map(tag => h('span', { key: tag, className: 'clib-mini-tag' }, `#${tag}`)))
       : null))
 }
+function kindName(t, kind) {
+  return t(KIND_LABEL[kind] ?? 'kindOther')
+}
+function CardView({ t, items, selectedId, onSelect }) {
+  return h('div', { className: 'clib-cards' }, items.map(item => h('button', {
+    key: item.id,
+    type: 'button',
+    className: `clib-card${item.id === selectedId ? ' is-on' : ''}`,
+    onClick: () => onSelect(item.id),
+  },
+  h('div', { className: 'clib-card-thumb' },
+    item.kind === 'image'
+      ? h('img', { src: api.thumbUrl(item.id), alt: item.title || '', loading: 'lazy' })
+      : h('span', { className: 'clib-card-glyph' }, h(Icon, { name: kindGlyph(item.kind), size: 24 }))),
+  h('span', { className: 'clib-card-body' },
+    h('strong', { className: 'clib-card-title' }, item.title || t('untitled')),
+    h('span', { className: 'clib-card-meta' },
+      h('span', { className: 'clib-badge' }, kindName(t, item.kind)),
+      item.collection ? h('span', { className: 'clib-badge' }, item.collection) : null),
+    item.snippet ? h('span', { className: 'clib-card-snippet' }, item.snippet) : null,
+    item.tags?.length
+      ? h('span', { className: 'clib-card-tags' }, item.tags.slice(0, 3).map(tag => h('span', { key: tag, className: 'clib-mini-tag' }, `#${tag}`)))
+      : null,
+    h('span', { className: 'clib-card-meta' }, h('span', { className: 'clib-num' }, formatTime(item.updatedAt)))))))
+}
+function TableView({ t, items, selectedId, onSelect, sort, onSort }) {
+  const columns = [
+    { key: 'title', label: t('colTitle'), sort: 'title' },
+    { key: 'kind', label: t('colKind') },
+    { key: 'collection', label: t('colCollection') },
+    { key: 'tags', label: t('colTags') },
+    { key: 'size', label: t('colSize'), sort: 'size' },
+    { key: 'updated', label: t('colUpdated'), sort: 'updated' },
+  ]
+  return h('div', { className: 'clib-table-wrap' },
+    h('table', { className: 'clib-table' },
+      h('thead', null, h('tr', null, columns.map(column => h('th', {
+        key: column.key,
+        className: column.sort ? 'clib-th-sort' : undefined,
+        'aria-sort': column.sort && sort === column.sort ? 'ascending' : undefined,
+      }, column.sort
+        ? h('button', {
+          type: 'button',
+          className: `clib-th-btn${sort === column.sort ? ' is-on' : ''}`,
+          onClick: () => onSort(column.sort),
+        }, column.label, sort === column.sort ? h('span', { className: 'clib-sort-mark' }, '↑') : null)
+        : column.label)))),
+      h('tbody', null, items.map(item => h('tr', {
+        key: item.id,
+        className: item.id === selectedId ? 'is-on' : undefined,
+        tabIndex: 0,
+        onClick: () => onSelect(item.id),
+        onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(item.id) } },
+      },
+      h('td', null, h('span', { className: 'clib-td-title' },
+        h(Icon, { name: kindGlyph(item.kind), size: 12 }), item.title || t('untitled'))),
+      h('td', null, h('span', { className: 'clib-badge' }, kindName(t, item.kind))),
+      h('td', null, item.collection || '—'),
+      h('td', null, h('span', { className: 'clib-table-tags' },
+        item.tags?.length
+          ? item.tags.slice(0, 3).map(tag => h('span', { key: tag, className: 'clib-mini-tag' }, `#${tag}`))
+          : '—')),
+      h('td', { className: 'clib-num' }, formatBytes(item.size)),
+      h('td', { className: 'clib-num' }, formatTime(item.updatedAt)))))))
+}
+function GalleryView({ t, items, selectedId, onSelect }) {
+  const images = items.filter(item => item.kind === 'image')
+  if (!images.length) {
+    return h(Empty, { icon: 'image', title: t('galleryEmpty'), body: t('galleryEmptyBody') })
+  }
+  return h('div', { className: 'clib-gallery' }, images.map(item => h('button', {
+    key: item.id,
+    type: 'button',
+    className: `clib-gal${item.id === selectedId ? ' is-on' : ''}`,
+    title: item.title || t('untitled'),
+    onClick: () => onSelect(item.id),
+  },
+  h('img', { src: api.thumbUrl(item.id), alt: item.title || '', loading: 'lazy' }),
+  h('span', { className: 'clib-gal-cap' }, item.title || t('untitled')))))
+}
 function Skeleton() {
   return h(React.Fragment, null, Array.from({ length: 6 }, (_, index) => h('div', { key: index, className: 'clib-skel' },
     h('div', { className: 'clib-skel-avatar clib-shimmer' }),
@@ -271,7 +392,9 @@ function ItemList(props) {
   const {
     t, items, total, loading, moreLoading, selectedId, onSelect, onLoadMore,
     status, hasFilters, onClearFilters, sourceNames, onNewNote,
+    view, sort, onSort,
   } = props
+  const mode = VIEW_MODES.includes(view) ? view : 'list'
   let content
   if (loading && !items.length) {
     content = h(Skeleton)
@@ -294,6 +417,12 @@ function ItemList(props) {
           h(Icon, { name: 'plus', size: 13 }), t('newNote')),
       })
     }
+  } else if (mode === 'cards') {
+    content = h(CardView, { t, items, selectedId, onSelect })
+  } else if (mode === 'table') {
+    content = h(TableView, { t, items, selectedId, onSelect, sort, onSort })
+  } else if (mode === 'gallery') {
+    content = h(GalleryView, { t, items, selectedId, onSelect })
   } else {
     content = items.map(item => h(ItemRow, {
       key: item.id,
@@ -308,7 +437,7 @@ function ItemList(props) {
     h('div', { className: 'clib-list-head' },
       h('span', null, loading ? t('loading') : format(t('totalCount'), { n: total })),
       h('b', null, status === 'trashed' ? t('trashToggle') : '')),
-    h('div', { className: 'clib-list' }, content),
+    h('div', { className: `clib-list clib-list-${mode}` }, content),
     items.length < total
       ? h('div', { className: 'clib-list-foot' },
         h('button', { type: 'button', className: 'clib-btn', disabled: moreLoading, onClick: onLoadMore },
@@ -325,7 +454,7 @@ function detailInitial(item, content) {
     content: item.storage === 'note' ? (content?.text ?? '') : '',
   }
 }
-function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast, toastError }) {
+function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast, toastError, version = 0 }) {
   const [loading, setLoading] = React.useState(false)
   const [reloadKey, setReloadKey] = React.useState(0)
   const [item, setItem] = React.useState(null)
@@ -338,9 +467,33 @@ function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast
   const [previewError, setPreviewError] = React.useState(false)
   const [doc, setDoc] = React.useState(null)
   const [docLoading, setDocLoading] = React.useState(false)
+  const [mdView, setMdView] = React.useState('render')
+  const [fullscreen, setFullscreen] = React.useState(false)
+  const closeBtnRef = React.useRef(null)
+  const expandBtnRef = React.useRef(null)
+  const wasFullscreen = React.useRef(false)
+  // 切换条目（含删除后 id 变空）时退出全屏。
+  React.useEffect(() => { setFullscreen(false) }, [id])
+  React.useEffect(() => {
+    if (fullscreen) {
+      wasFullscreen.current = true
+      const node = closeBtnRef.current
+      if (node && typeof node.focus === 'function') node.focus()
+      const onKey = event => { if (event.key === 'Escape') setFullscreen(false) }
+      window.addEventListener('keydown', onKey)
+      return () => window.removeEventListener('keydown', onKey)
+    }
+    if (wasFullscreen.current) {
+      wasFullscreen.current = false
+      const node = expandBtnRef.current
+      if (node && typeof node.focus === 'function') node.focus()
+    }
+    return undefined
+  }, [fullscreen])
   React.useEffect(() => {
     if (!id) return undefined
     let alive = true
+    setMdView('render')
     setLoading(true)
     setError('')
     setConfirm('')
@@ -377,7 +530,7 @@ function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast
       toastError(err)
     })
     return () => { alive = false }
-  }, [id, reloadKey, t, toastError])
+  }, [id, reloadKey, version, t, toastError])
   if (!id) {
     return h('aside', { className: 'clib-detail' },
       h('div', { className: 'clib-placeholder' },
@@ -401,6 +554,7 @@ function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast
   const totalLines = content?.totalLines ?? item?.lines ?? allLines.length
   const truncated = content?.truncated || clipped
   const binary = content?.binary === true
+  const mdEligible = !!item && (item.kind === 'note' || item.storage === 'note' || /^md$/i.test(String(item.ext || '')))
   const sourceName = item?.sourceId ? (sourceNames[item.sourceId] ?? item.sourceId) : ''
   const setField = key => event => {
     const value = event.target.value
@@ -480,6 +634,60 @@ function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast
       setBusy('')
     }
   }
+  const renderPreview = () => {
+    if (!item) return null
+    if (isImage) {
+      return h('div', { className: 'clib-image-wrap' },
+        previewError
+          ? h('span', { className: 'clib-hint' }, t('previewFailed'))
+          : h('img', {
+            src: api.rawUrl(item.id),
+            alt: item.title || t('imagePreview'),
+            loading: 'lazy',
+            onError: () => setPreviewError(true),
+          }))
+    }
+    if (DOC_PREVIEW_EXTS.test(String(item.ext || ''))) {
+      if (docLoading) return h('div', { className: 'clib-hint' }, t('loading'))
+      if (doc?.kind === 'text') {
+        return h('div', { className: 'clib-doc-text' },
+          h('pre', { className: 'clib-code' }, String(doc.text || '').slice(0, MAX_PREVIEW)),
+          doc.note ? h('div', { className: 'clib-hint' }, doc.note) : null)
+      }
+      if (doc?.kind === 'thumb') {
+        return h('div', { className: 'clib-image-wrap' },
+          h('img', {
+            src: api.thumbUrl(item.id),
+            alt: item.title || t('fieldContent'),
+            loading: 'lazy',
+            onError: () => setPreviewError(true),
+          }))
+      }
+      return h('div', { className: 'clib-hint' }, doc?.note || t('binaryPreview'))
+    }
+    if (binary) return h('div', { className: 'clib-hint' }, t('binaryPreview'))
+    if (!text) return null
+    if (mdEligible && mdView === 'render') return h(Markdown, { text, className: 'is-plain' })
+    return h('div', { className: 'clib-code-wrap' },
+      h('pre', { className: 'clib-code-gutter' }, shownLines.map((_, index) => index + 1).join('\n')),
+      h('pre', { className: 'clib-code' }, shownLines.join('\n')))
+  }
+  const previewBody = renderPreview()
+  const modeToggle = () => mdEligible
+    ? h('div', { className: 'clib-fs-modes', role: 'group', 'aria-label': t('fieldContent') },
+      h('button', {
+        type: 'button',
+        className: `clib-fs-mode${mdView === 'render' ? ' is-on' : ''}`,
+        'aria-pressed': mdView === 'render',
+        onClick: () => setMdView('render'),
+      }, t('mdRender')),
+      h('button', {
+        type: 'button',
+        className: `clib-fs-mode${mdView === 'source' ? ' is-on' : ''}`,
+        'aria-pressed': mdView === 'source',
+        onClick: () => setMdView('source'),
+      }, t('mdSource')))
+    : null
   const head = h('div', { className: 'clib-detail-head' },
     h(Icon, { name: item ? kindGlyph(item.kind) : 'doc', size: 18 }),
     h('div', { className: 'clib-detail-titles' },
@@ -545,42 +753,35 @@ function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast
       h('div', { className: 'clib-preview' },
         h('div', { className: 'clib-preview-head' },
           h('span', null, isImage ? t('imagePreview') : t('fieldContent')),
-          h('span', null, isImage
-            ? `${formatBytes(item.size)}`
-            : truncated ? `${format(t('linesTotal'), { n: totalLines })} · ${t('truncated')}` : text ? format(t('linesTotal'), { n: totalLines }) : '')),
-        isImage
-          ? h('div', { className: 'clib-image-wrap' },
-            previewError
-              ? h('span', { className: 'clib-hint' }, t('previewFailed'))
-              : h('img', {
-                src: api.rawUrl(item.id),
-                alt: item.title || t('imagePreview'),
-                loading: 'lazy',
-                onError: () => setPreviewError(true),
-              }))
-          : DOC_PREVIEW_EXTS.test(String(item?.ext || ''))
-            ? docLoading
-              ? h('div', { className: 'clib-hint' }, t('loading'))
-              : doc?.kind === 'text'
-                ? h('div', { className: 'clib-doc-text' },
-                  h('pre', { className: 'clib-code' }, String(doc.text || '').slice(0, MAX_PREVIEW)),
-                  doc.note ? h('div', { className: 'clib-hint' }, doc.note) : null)
-                : doc?.kind === 'thumb'
-                  ? h('div', { className: 'clib-image-wrap' },
-                    h('img', {
-                      src: api.thumbUrl(item.id),
-                      alt: item.title || t('fieldContent'),
-                      loading: 'lazy',
-                      onError: () => setPreviewError(true),
-                    }))
-                  : h('div', { className: 'clib-hint' }, doc?.note || t('binaryPreview'))
-            : binary
-              ? h('div', { className: 'clib-hint' }, t('binaryPreview'))
-              : text
-                ? h('div', { className: 'clib-code-wrap' },
-                  h('pre', { className: 'clib-code-gutter' }, shownLines.map((_, index) => index + 1).join('\n')),
-                  h('pre', { className: 'clib-code' }, shownLines.join('\n')))
-                : null),
+          h('span', { className: 'clib-preview-tools' },
+            mdEligible
+              ? h('span', { className: 'clib-seg clib-seg-sm' },
+                h('button', {
+                  type: 'button',
+                  className: `clib-seg-btn${mdView === 'render' ? ' is-on' : ''}`,
+                  'aria-pressed': mdView === 'render',
+                  onClick: () => setMdView('render'),
+                }, t('mdRender')),
+                h('button', {
+                  type: 'button',
+                  className: `clib-seg-btn${mdView === 'source' ? ' is-on' : ''}`,
+                  'aria-pressed': mdView === 'source',
+                  onClick: () => setMdView('source'),
+                }, t('mdSource')))
+              : null,
+            h('span', null, isImage
+              ? `${formatBytes(item.size)}`
+              : truncated ? `${format(t('linesTotal'), { n: totalLines })} · ${t('truncated')}` : text ? format(t('linesTotal'), { n: totalLines }) : ''),
+            h('button', {
+              type: 'button',
+              className: 'clib-icon-btn clib-fs-open',
+              ref: expandBtnRef,
+              title: t('previewFullscreen'),
+              'aria-label': t('previewFullscreen'),
+              'aria-expanded': fullscreen,
+              onClick: () => setFullscreen(true),
+            }, h(Icon, { name: 'expand', size: 12 })))),
+        previewBody),
       confirm ? h('div', { className: 'clib-confirm' },
         h('b', null, confirm === 'purge'
           ? format(t('purgeConfirm'), { title: item.title })
@@ -624,7 +825,32 @@ function Detail({ t, id, collections, sourceNames, onClose, onChanged, pushToast
           type: 'button', className: 'clib-btn is-danger', disabled: !!busy || !item,
           onClick: () => setConfirm('delete'),
         }, h(Icon, { name: 'trash', size: 13 }), t('delete'))))
-  return h('aside', { className: 'clib-detail is-open' }, head, h('div', { className: 'clib-detail-body' }, body), footer)
+  const overlay = fullscreen
+    ? h('div', {
+      className: 'clib-fs',
+      role: 'dialog',
+      'aria-modal': 'true',
+      'aria-label': t('previewFullscreen'),
+      onMouseDown: event => { if (event.target === event.currentTarget) setFullscreen(false) },
+    },
+    h('div', { className: 'clib-fs-card' },
+      h('div', { className: 'clib-fs-head' },
+        h('span', { className: 'clib-fs-title' }, isImage ? t('imagePreview') : t('fieldContent')),
+        h('span', { className: 'clib-fs-tools' },
+          modeToggle(),
+          h('button', {
+            type: 'button',
+            className: 'clib-icon-btn clib-fs-close',
+            ref: closeBtnRef,
+            title: t('previewFullscreenExit'),
+            'aria-label': t('previewFullscreenExit'),
+            onClick: () => setFullscreen(false),
+          }, h(Icon, { name: 'collapse', size: 13 })))),
+      h('div', { className: 'clib-fs-body' }, previewBody)))
+    : null
+  return h(React.Fragment, null,
+    h('aside', { className: 'clib-detail is-open' }, head, h('div', { className: 'clib-detail-body' }, body), footer),
+    overlay)
 }
 /* ------------------------------------------------------------------ 弹窗 / toast */
 function NewNoteDialog({ t, defaultCollection, busy, onClose, onCreate }) {
@@ -698,6 +924,31 @@ export function ContextLibraryPage({ t, onExit }) {
   const [source, setSource] = React.useState('')
   const [collection, setCollection] = React.useState('')
   const [tag, setTag] = React.useState('')
+  const [view, setView] = React.useState(() => {
+    const stored = readPref('clib:view', 'list')
+    return VIEW_MODES.includes(stored) ? stored : 'list'
+  })
+  const [assistOpen, setAssistOpen] = React.useState(() => readPref('clib:assist', '0') === '1')
+  const [detailVersion, setDetailVersion] = React.useState(0)
+  const activeView = VIEW_MODES.includes(view) ? view : 'list'
+  React.useEffect(() => { writePref('clib:view', activeView) }, [activeView])
+  React.useEffect(() => { writePref('clib:assist', assistOpen ? '1' : '0') }, [assistOpen])
+  const selectedItem = React.useMemo(
+    () => items.find(entry => entry.id === selectedId) ?? null,
+    [items, selectedId],
+  )
+  function applyAssistFilters(filters) {
+    if (!filters || typeof filters !== 'object') return
+    if (status === 'trashed') setStatus('active')
+    if ('q' in filters) {
+      const next = filters.q == null ? '' : String(filters.q)
+      setQInput(next)
+      setQ(next)
+    }
+    if ('kind' in filters) setKind(filters.kind || '')
+    if ('collection' in filters) setCollection(filters.collection || '')
+    if ('tag' in filters) setTag(filters.tag || '')
+  }
   const listReq = React.useRef(0)
   const itemsRef = React.useRef(items)
   React.useEffect(() => { itemsRef.current = items }, [items])
@@ -771,6 +1022,11 @@ export function ContextLibraryPage({ t, onExit }) {
     } finally {
       setRefreshing(false)
     }
+  }
+  /** 助手改的是服务端数据，列表与详情都要重新取一次。 */
+  async function refreshAfterAssist() {
+    await refreshAll()
+    setDetailVersion(value => value + 1)
   }
   async function runScan() {
     if (scanning) return
@@ -892,6 +1148,10 @@ export function ContextLibraryPage({ t, onExit }) {
       onNewNote: () => setNewOpen(true),
       onRefresh: refreshAll,
       refreshing,
+      view: activeView,
+      onView: setView,
+      assistOpen,
+      onToggleAssist: () => setAssistOpen(open => !open),
     }),
     h('div', { className: 'clib-body' },
       h(Sidebar, {
@@ -919,6 +1179,9 @@ export function ContextLibraryPage({ t, onExit }) {
         onClearFilters: clearFilters,
         sourceNames,
         onNewNote: () => setNewOpen(true),
+        view: activeView,
+        sort,
+        onSort: setSort,
       }),
       h(Detail, {
         t,
@@ -927,6 +1190,19 @@ export function ContextLibraryPage({ t, onExit }) {
         sourceNames,
         onClose: () => setSelectedId(null),
         onChanged: refreshAll,
+        version: detailVersion,
+        pushToast,
+        toastError,
+      }),
+      h(AssistDrawer, {
+        t,
+        Icon,
+        open: assistOpen,
+        onClose: () => setAssistOpen(false),
+        item: selectedItem,
+        items,
+        onApplyFilters: applyAssistFilters,
+        onChanged: refreshAfterAssist,
         pushToast,
         toastError,
       })),

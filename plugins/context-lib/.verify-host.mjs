@@ -83,7 +83,15 @@ function makeCtx() {
   const contexts = []
   const routes = []
   const listeners = new Map()
-  const ref = { connection: { requestRejection: () => 0 } }
+  const ref = {
+    connection: { requestRejection: () => 0 },
+    // 智能助手用：默认不提供模型，测试里按需装 stub（verify 不依赖真实 Harness）。
+    llm: null,
+    agentDefaultModel: null,
+    modelReply: null,
+    streamFinish: null,
+    llmCalls: [],
+  }
   ref.value = ref.connection
   const ctx = {
     tools: {
@@ -118,7 +126,10 @@ function makeCtx() {
       return () => {}
     },
     get(name) {
-      return name === 'connection' ? ref.value : undefined
+      if (name === 'connection') return ref.value
+      if (name === 'llm') return ref.llm
+      if (name === 'agentDefaultModel') return ref.agentDefaultModel
+      return undefined
     },
     inject(_deps, cb) {
       const child = Object.create(ctx)
@@ -132,6 +143,60 @@ function makeCtx() {
     },
   }
   return { ctx, tools, sections, contexts, routes, listeners, ref }
+}
+
+// 默认按模式回一段合法 JSON；测试可用 ref.modelReply 覆盖成字符串或函数。
+function defaultModelReply(user) {
+  if (user.includes('请整理')) {
+    const ids = [...new Set(String(user).match(/cl_[0-9a-f]{12}/g) || [])]
+    return JSON.stringify({
+      items: [
+        ...ids.map((id) => ({ id, collection: 'assist', tags: ['整理', 'assist', '整理'], reason: '内容偏工具类。' })),
+        { id: 'cl_ffffffffffff', collection: 'bogus', tags: [], reason: '不存在的条目应被丢弃。' },
+      ],
+    })
+  }
+  if (user.includes('用户的问题')) {
+    return JSON.stringify({
+      answer: '库里有两类相关条目：KV-Net 笔记和验收笔记。',
+      filters: { q: 'KV 笔记', kind: 'weird-kind', collection: '不存在的归类', tag: '不存在的标签' },
+    })
+  }
+  return JSON.stringify({
+    summary: '这条资源记录了 KV-Net 的静态 KV 存储与 1.76× PPL 差距。',
+    tags: ['kv-cache', 'llm', 'kv-cache'],
+    collection: 'kv-notes',
+    title: 'KV-Net 摘要',
+  })
+}
+
+function installModel(ref, { provider = 'verify-provider', model = 'verify-model' } = {}) {
+  ref.agentDefaultModel = { currentSelection: () => ({ provider, model }) }
+  ref.llm = {
+    prepareCall: async (request, _signal, controls) => {
+      ref.llmCalls.push({ request })
+      const config = typeof controls === 'function' ? { ...request, ...controls({ ...request }, { model }) } : { ...request }
+      return {
+        config,
+        stream: async function* (params) {
+          ref.llmCalls[ref.llmCalls.length - 1].params = params
+          const user = params.messages?.[0]?.content?.[0]?.text || ''
+          const text =
+            typeof ref.modelReply === 'function' ? ref.modelReply(user, params.system || '') : ref.modelReply ?? defaultModelReply(user)
+          yield { type: 'text-delta', text }
+          yield { type: 'finish', reason: ref.streamFinish ?? { kind: 'stop' } }
+        },
+      }
+    },
+  }
+  return ref.llm
+}
+
+function removeModel(ref) {
+  ref.llm = null
+  ref.agentDefaultModel = null
+  ref.modelReply = null
+  ref.streamFinish = null
 }
 
 async function callTool(tools, name, args) {
@@ -514,6 +579,137 @@ async function run() {
     assert.equal(packed.res.status, 200)
     assert.equal(packed.json.data.total, 2)
     assert.match(packed.json.data.text, /A 内容/)
+  })
+
+  console.log('\n智能助手')
+
+  await checkAsync('GET /assist/status 无 llm → ready:false 且 reason 非空', async () => {
+    removeModel(ref)
+    const status = await request(routes, 'GET', `${PREFIX}/assist/status`)
+    assert.equal(status.res.status, 200)
+    assert.equal(status.json.data.ready, false)
+    assert.equal(status.json.data.model, null)
+    assert.equal(typeof status.json.data.reason, 'string')
+    assert.ok(status.json.data.reason.length > 0)
+  })
+
+  await checkAsync('GET /assist/status 有 llm → ready:true 且 model 正确', async () => {
+    installModel(ref, { model: 'verify-model' })
+    const status = await request(routes, 'GET', `${PREFIX}/assist/status`)
+    assert.equal(status.res.status, 200)
+    assert.equal(status.json.data.ready, true)
+    assert.equal(status.json.data.model, 'verify-model')
+    assert.equal(status.json.data.reason, null)
+  })
+
+  let assistNoteId = null
+  await checkAsync('POST /assist summary → text 与 actions.tags/collection 正确', async () => {
+    const created = await request(routes, 'POST', `${PREFIX}/items`, {
+      title: 'KV-Net 辅助笔记',
+      content: 'KV-Net 用静态 KV 存储，PPL 差距 1.76×。',
+      collection: 'verify',
+      tags: ['kv-cache'],
+    })
+    assert.equal(created.res.status, 201)
+    assistNoteId = created.json.data.item.id
+    const summary = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'summary', id: assistNoteId })
+    assert.equal(summary.res.status, 200)
+    assert.equal(summary.json.data.mode, 'summary')
+    assert.equal(summary.json.data.model, 'verify-model')
+    assert.match(summary.json.data.text, /1\.76×/)
+    assert.deepEqual(summary.json.data.actions.tags, ['kv-cache', 'llm'])
+    assert.equal(summary.json.data.actions.collection, 'kv-notes')
+    assert.equal(summary.json.data.actions.title, 'KV-Net 摘要')
+    assert.equal(ref.llmCalls.at(-1).request.model, 'verify-model')
+    assert.match(ref.llmCalls.at(-1).params.messages[0].content[0].text, /KV-Net 辅助笔记/)
+  })
+
+  await checkAsync('POST /assist summary 不存在的 id → 404 item-not-found', async () => {
+    const missing = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'summary', id: 'cl_000000000000' })
+    assert.equal(missing.res.status, 404)
+    assert.equal(missing.json.error.code, 'item-not-found')
+  })
+
+  await checkAsync('POST /assist organize → actions.items 只含输入 id', async () => {
+    const second = await request(routes, 'POST', `${PREFIX}/items`, {
+      title: 'probe 脚本笔记',
+      content: 'probe.py 是来源扫描的样本。',
+      collection: 'verify',
+    })
+    const secondId = second.json.data.item.id
+    const organized = await request(routes, 'POST', `${PREFIX}/assist`, {
+      mode: 'organize',
+      ids: [assistNoteId, secondId, 'cl_000000000000'],
+    })
+    assert.equal(organized.res.status, 200)
+    const items = organized.json.data.actions.items
+    assert.ok(Array.isArray(items) && items.length === 2)
+    for (const item of items) assert.ok([assistNoteId, secondId].includes(item.id))
+    assert.equal(items.find((item) => item.id === assistNoteId).collection, 'assist')
+    assert.deepEqual(items.find((item) => item.id === assistNoteId).tags, ['整理', 'assist'])
+  })
+
+  await checkAsync('POST /assist ask → filters 里非法 kind/collection/tag 被丢弃', async () => {
+    const asked = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'ask', question: 'KV-Net 的笔记在哪？' })
+    assert.equal(asked.res.status, 200)
+    assert.equal(asked.json.data.mode, 'ask')
+    assert.equal(asked.json.data.actions.filters.q, 'KV 笔记')
+    assert.equal(asked.json.data.actions.filters.kind, undefined)
+    assert.equal(asked.json.data.actions.filters.collection, undefined)
+    assert.equal(asked.json.data.actions.filters.tag, undefined)
+    assert.match(asked.json.data.text, /KV-Net/)
+  })
+
+  await checkAsync('POST /assist 非法参数 → 400 invalid-argument', async () => {
+    const badMode = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'explain', id: assistNoteId })
+    assert.equal(badMode.res.status, 400)
+    assert.equal(badMode.json.error.code, 'invalid-argument')
+    const emptyIds = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'organize', ids: [] })
+    assert.equal(emptyIds.res.status, 400)
+    const tooMany = await request(routes, 'POST', `${PREFIX}/assist`, {
+      mode: 'organize',
+      ids: Array.from({ length: 31 }, () => assistNoteId),
+    })
+    assert.equal(tooMany.res.status, 400)
+    const noQuestion = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'ask' })
+    assert.equal(noQuestion.res.status, 400)
+  })
+
+  await checkAsync('POST /assist 模型输出非 JSON → 502 assist-failed 且带原始文本', async () => {
+    installModel(ref)
+    ref.modelReply = '抱歉，我无法输出 JSON。'
+    const failed = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'summary', id: assistNoteId })
+    assert.equal(failed.res.status, 502)
+    assert.equal(failed.json.error.code, 'assist-failed')
+    assert.match(failed.json.error.message, /抱歉/)
+  })
+
+  await checkAsync('POST /assist 模型流报错 → 502 assist-failed', async () => {
+    installModel(ref)
+    ref.streamFinish = { kind: 'error', failure: { message: 'stub 模型报错' } }
+    const failed = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'ask', question: '会失败的问题' })
+    ref.streamFinish = null
+    assert.equal(failed.res.status, 502)
+    assert.equal(failed.json.error.code, 'assist-failed')
+    assert.match(failed.json.error.message, /stub 模型报错/)
+  })
+
+  await checkAsync('POST /assist 有 llm 但无默认模型 → 503 assist-unavailable', async () => {
+    installModel(ref)
+    ref.agentDefaultModel = null
+    const status = await request(routes, 'GET', `${PREFIX}/assist/status`)
+    assert.equal(status.json.data.ready, false)
+    assert.ok(status.json.data.reason.length > 0)
+    const unavailable = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'ask', question: '随便问问' })
+    assert.equal(unavailable.res.status, 503)
+    assert.equal(unavailable.json.error.code, 'assist-unavailable')
+  })
+
+  await checkAsync('POST /assist 无 llm → 503 assist-unavailable', async () => {
+    removeModel(ref)
+    const unavailable = await request(routes, 'POST', `${PREFIX}/assist`, { mode: 'ask', question: '随便问问' })
+    assert.equal(unavailable.res.status, 503)
+    assert.equal(unavailable.json.error.code, 'assist-unavailable')
   })
 
   console.log('\n上下文注入')

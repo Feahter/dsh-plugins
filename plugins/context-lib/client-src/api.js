@@ -130,3 +130,16 @@ export function removeSource(id, options) {
 export function getTrash({ limit = 50, offset = 0 } = {}, options) {
   return request(`/trash${buildQuery({ limit, offset })}`, options)
 }
+
+/** 智能助手就绪状态：{ready, model, reason}；未就绪时 model 为 null。 */
+export function getAssistStatus(options) {
+  return request('/assist/status', options)
+}
+
+/**
+ * 智能助手：{mode:'summary', id} / {mode:'organize', ids} / {mode:'ask', question}。
+ * 返回 {mode, model, text, actions}，错误沿用 request() 的抛错约定。
+ */
+export function assist(payload, options) {
+  return request('/assist', { ...options, method: 'POST', body: payload })
+}

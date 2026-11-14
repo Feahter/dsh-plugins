@@ -142,11 +142,19 @@ export async function createLibrary(root, options = {})  // -> Library；options
 | `DELETE /sources/:id` | — | `{id}` |
 | `GET /pack` | `collection,limit,maxChars` | `{text,total}` |
 | `POST /import` | `{path,collection?,tags?}` | `{item}`（把任意本机文件登记进来；文本复制进 blobs） |
+| `GET /assist/status` | — | `{ready,model,reason}`：无 `llm` 服务或无默认模型时 `ready:false`，`reason` 是给面板直接显示的原因 |
+| `POST /assist` | `{mode:'summary',id}` / `{mode:'organize',ids:1..30}` / `{mode:'ask',question:1..2000}` | `{mode,model,text,actions}`：summary 的 actions 为 `null` 或 `{title?,tags?,collection?}`；organize 为 `{items:[{id,collection,tags,reason}]}`（只含输入里存在的 id）；ask 为 `{filters:{q?,kind?,collection?,tag?}}`（非法值被丢弃） |
+
+智能助手的错误码：`400 invalid-argument`（mode 非法 / 缺 question / ids 为空或超 30）、`404 item-not-found`（summary 的 id 不存在）、`502 assist-failed`（模型报错或输出不是 JSON，message 带模型原始文本前 300 字符）、`503 assist-unavailable`（没有 llm 服务或没有默认模型）；模型调用 90 秒超时按 `assist-failed` 返回。
 
 ## 7. 面板（`client-src`，侧栏 id `context-lib`）
 
-- 布局：左侧「来源 / 归类 / 标签」树；中间检索框 + 类型筛选 + 列表；右侧详情（标题、标签、归类、备注可编辑；文本预览或图片；复制路径/内容、保存、删除、恢复）。
-- 顶部：`扫描` 按钮（显示每源结果 toast）、`新建笔记`、`回收站` 开关、刷新。
+- 布局：左侧「来源 / 归类 / 标签」树；中间检索框 + 类型筛选 + 视图；右侧详情（标题、标签、归类、备注可编辑；文本预览或图片；复制路径/内容、保存、删除、恢复）。
+- 顶部：`扫描` 按钮（显示每源结果 toast）、`新建笔记`、`回收站` 开关、刷新；另有「列表 / 卡片 / 表格 / 图库」下拉选择（原生 `select.clib-select`，`aria-label` 用 `viewLabel`）与助手按钮。
+- 展示形式：四视图由 `ItemList` 分派（`list` 沿用 `ItemRow`，`cards` / `table` / `gallery` 各自组件），选中态、加载态、空态、分页「加载更多」在四种视图下一致；表格的标题 / 大小 / 更新时间表头可点排序（复用列表 `sort` 状态）；图库只展示 `kind=image`。当前视图存 `localStorage.clib:view`。
+- Markdown：`kind=note` 或 `ext=md` 的条目，详情预览头出「渲染 / 源码」分段控件，默认渲染（`client-src/markdown.js`，仅用 React 文本节点，`dangerouslySetInnerHTML` 用量为 0）。
+- 全屏预览：预览头右侧「全屏」按钮把当前预览（文本行号视图 / Markdown 渲染 / 图片，含当时渲染-源码模式）铺进 `.clib-fs` 覆盖层——`position:absolute; inset:0`，锚在 `position:relative` 的 `.clib-body`（面板内覆盖，不用 portal、不挂 `document.body`）。关闭：右上按钮 / `Esc` / 点遮罩；打开焦点落关闭按钮、关闭回焦全屏按钮；切换条目自动退出；内容滚动发生在 `.clib-fs-body` 内。
 - 交互细节：搜索 250ms 防抖；列表项点击选中；删除需二次确认；`linked` 条目提示「只移除索引，不动原文件」。
-- 视觉：沿用 mind-canvas 的令牌风格（`client-src/theme.js` 可参考），深浅色跟随 `html[data-theme]`，不引入新依赖。
+- 智能助手（右侧 360px 抽屉，`localStorage.clib:assist` 记开关）：打开时 `GET /assist/status`，`ready:false` 时显示 `reason` 并禁用三页提交按钮；**总结**对当前选中条目调 `POST /assist {mode:'summary',id}`，把 `actions.title/tags/collection` 逐项 PATCH 回条目并刷新列表与详情；**整理**取当前筛选的前 15 条调 `{mode:'organize',ids}`，表格展示 `items[].reason`，可逐行或全部应用，失败行内保留错误；**提问**调 `{mode:'ask',question}`，回答按 Markdown 渲染，返回的 `filters` 一键写入检索条件（回收站视图中先切回在用）。
+- 视觉：`client-src/style.js` 自带 `clib-*` 样式与设计令牌，深浅色跟随 `html[data-theme]`，不引入新依赖。
 - 构建：`node build.mjs` 产出 `client.js`（esbuild cjs + `window.__ModuleLoader__.load` 包装，external react）。

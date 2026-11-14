@@ -1,6 +1,6 @@
 {
   "name": "dsh-context-lib",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "上下文资源库：整合本机文档 / 脚本 / 图片 / 会话，提供 CRUD 面板与面向 agent 上下文的检索工具。",
   "author": "Feahter",
   "license": "MIT",
