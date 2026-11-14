@@ -14,6 +14,13 @@ const EVENTS_TIMEOUT_MS = 2_000
 const SUMMARY_MAX = 200
 const SPOKEN_DETAIL_MAX = 40
 
+/** Permission preset a dispatched Session should run under. */
+export const TASK_PERMISSION_PRESET = 'danger-full-access'
+/** Reasoning effort a dispatched Session should use when the model supports it. */
+export const TASK_REASONING_EFFORT = 'high'
+/** Preference order when the model does not offer `high`. */
+const EFFORT_FALLBACKS = [TASK_REASONING_EFFORT, 'max', 'medium', 'low', 'off']
+
 /**
  * @param {number} status
  * @param {string} code
@@ -113,11 +120,169 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
   let unwatch = []
 
   function controller() {
-    const found = typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined
+    const found = service('sessionController')
     if (found === undefined || found === null) {
       throw boardError(503, 'service-missing', 'sessionController 不在本机')
     }
     return found
+  }
+
+  /**
+   * All optional Host services are looked up through here: a Host that does not
+   * expose one simply yields `undefined`, and callers treat that as "skip".
+   * @param {string} name
+   */
+  function service(name) {
+    return typeof ctx.get === 'function' ? ctx.get(name) : undefined
+  }
+
+  /**
+   * Resolve the preset name to apply: the canonical name when the profile has
+   * it, otherwise the first preset whose sandbox mode matches.
+   * @param {any} presets
+   * @returns {string | undefined}
+   */
+  function pickPresetName(presets) {
+    if (presets === null || presets === undefined) return undefined
+    const listed = typeof presets.names === 'function' ? presets.names() : presets.names
+    const names = Array.isArray(listed) ? listed.filter((name) => typeof name === 'string') : []
+    if (names.includes(TASK_PERMISSION_PRESET)) return TASK_PERMISSION_PRESET
+    for (const name of names) {
+      let resolved
+      try {
+        resolved = typeof presets.resolve === 'function' ? presets.resolve(name) : undefined
+      } catch {
+        resolved = undefined
+      }
+      if (resolved?.sandbox === TASK_PERMISSION_PRESET) return name
+    }
+    return undefined
+  }
+
+  /**
+   * Read a preset name out of `current(session)` whether it hands back a string
+   * or the resolved preset object.
+   * @param {unknown} value
+   * @returns {string}
+   */
+  function currentPresetName(value) {
+    if (typeof value === 'string') return value
+    if (value !== null && typeof value === 'object') {
+      if (typeof value.name === 'string') return value.name
+      if (typeof value.preset === 'string') return value.preset
+    }
+    return ''
+  }
+
+  /**
+   * Switch the Session to the full-access preset before the prompt is queued.
+   * Idempotent: a Session already on the target preset is left alone.
+   * @param {string} sessionId
+   */
+  function applyPermission(sessionId) {
+    const presets = service('permissionPresets')
+    if (presets === null || presets === undefined || typeof presets.set !== 'function') return
+    const sessions = service('sessions')
+    const session = typeof sessions?.get === 'function' ? sessions.get(sessionId) : undefined
+    if (session === undefined || session === null) return
+    const name = pickPresetName(presets)
+    if (name === undefined) {
+      logger.warn?.(`[voice-companion] permission preset "${TASK_PERMISSION_PRESET}" is not available`)
+      return
+    }
+    if (typeof presets.current === 'function') {
+      let current
+      try {
+        current = presets.current(session)
+      } catch {
+        current = undefined
+      }
+      if (currentPresetName(current) === name) return
+    }
+    presets.set(session, name)
+  }
+
+  /**
+   * Ask the model registry which reasoning efforts this model accepts.
+   * `resolveModelInfo` may return a Promise, so the whole read is awaited.
+   * @param {string} provider
+   * @param {string} modelId
+   * @returns {Promise<string[] | undefined>}
+   */
+  async function readEfforts(provider, modelId) {
+    const llm = service('llm')
+    if (llm === null || llm === undefined || typeof llm.resolveModelInfo !== 'function') return undefined
+    let info
+    try {
+      info = await llm.resolveModelInfo(provider, modelId)
+    } catch (error) {
+      logger.warn?.(`[voice-companion] could not resolve model info: ${errorMessage(error)}`)
+      return undefined
+    }
+    const reasoning = info?.reasoning
+    if (reasoning === null || reasoning === undefined) return undefined
+    const raw = typeof reasoning === 'string' || Array.isArray(reasoning) ? reasoning : reasoning.efforts
+    if (typeof raw === 'string') return [raw]
+    if (!Array.isArray(raw)) return undefined
+    return raw
+      .map((entry) => (typeof entry === 'string' ? entry : entry?.id))
+      .filter((entry) => typeof entry === 'string' && entry !== '')
+  }
+
+  /**
+   * Select high reasoning effort for the Session's next step. Falls back along
+   * EFFORT_FALLBACKS; when the model advertises nothing we still try `high` and
+   * let a rejection be warned about, never thrown.
+   * @param {string} sessionId
+   */
+  async function applyEffort(sessionId) {
+    const agents = service('agents')
+    const agent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
+    if (agent === null || agent === undefined) return
+    const model = agent.model
+    if (model === null || model === undefined || typeof model !== 'object') return
+
+    let current
+    try {
+      current = typeof model.current === 'function' ? await model.current() : undefined
+    } catch (error) {
+      logger.warn?.(`[voice-companion] could not read current model: ${errorMessage(error)}`)
+      return
+    }
+    const provider = current?.provider
+    const modelId = current?.model
+    if (typeof provider !== 'string' || provider === '' || typeof modelId !== 'string' || modelId === '') return
+
+    let effort = TASK_REASONING_EFFORT
+    const efforts = await readEfforts(provider, modelId)
+    if (Array.isArray(efforts) && efforts.length > 0) {
+      const supported = EFFORT_FALLBACKS.find((candidate) => efforts.includes(candidate))
+      if (supported !== undefined) effort = supported
+    }
+    if (typeof model.select !== 'function') return
+    try {
+      await model.select({ provider, model: modelId, reasoningEffort: effort })
+    } catch (error) {
+      logger.warn?.(`[voice-companion] could not select reasoning effort: ${errorMessage(error)}`)
+    }
+  }
+
+  /**
+   * Apply permission + reasoning defaults for a Session. Every step is
+   * best-effort: a missing service or a failing call must never fail dispatch.
+   * @param {string} sessionId
+   */
+  async function applyDefaults(sessionId) {
+    try {
+      applyPermission(sessionId)
+    } catch (error) {
+      logger.warn?.(`[voice-companion] could not apply permission preset: ${errorMessage(error)}`)
+    }
+    try {
+      await applyEffort(sessionId)
+    } catch (error) {
+      logger.warn?.(`[voice-companion] could not apply reasoning effort: ${errorMessage(error)}`)
+    }
   }
 
   /**
@@ -214,6 +379,18 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
     await settle(entry, 'task-failed', payload?.error)
   }
 
+  /**
+   * A freshly created Session has no Agent yet at dispatch time; `agent/created`
+   * is the earliest point where model defaults can be applied to it.
+   * @param {any} payload
+   */
+  async function onAgentCreated(payload) {
+    const sessionId = agentSessionId(payload?.agent)
+    if (sessionId === '') return
+    if (!tracked.has(sessionId)) return
+    await applyDefaults(sessionId)
+  }
+
   function watch() {
     if (watching) return () => stopWatching()
     watching = true
@@ -231,6 +408,7 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
     }
     subscribe('agent/status', onAgentStatus)
     subscribe('agent/error', onAgentError)
+    subscribe('agent/created', onAgentCreated)
     unwatch = cleanups
     return () => stopWatching()
   }
@@ -270,6 +448,9 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
       const taskTitle = truncate(asString(title) || body, 12) || '新任务'
       const taskId = `vc-task-${now()}-${Math.random().toString(16).slice(2, 8)}`
       const entry = { taskId, sessionId: targetSessionId, title: taskTitle, text: body, dispatchedAt: now() }
+      // Apply permission/reasoning defaults before the prompt is queued. The
+      // 20s prompt timeout still bounds the whole dispatch.
+      await applyDefaults(targetSessionId)
       // Track before prompting: the Session may start and finish fast, and the
       // status event must find an entry by then.
       tracked.set(targetSessionId, entry)

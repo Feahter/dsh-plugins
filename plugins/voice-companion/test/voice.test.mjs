@@ -6,11 +6,22 @@ import {
   VOICE_IDS,
   CHARACTER_VOICES,
   detectEmotion,
+  normalizeVoiceMap,
   resolveVoiceMode,
   selectVoice,
   selectVoices,
   voiceCatalog,
 } from '../host/voice.js'
+import {
+  DEFAULT_PROFILE,
+  SPEED_MAX,
+  SPEED_MIN,
+  VOICE_KEY,
+  clampSpeed,
+  normalizeProfile,
+  readVoiceProfile,
+  writeVoiceProfile,
+} from '../src/client/voice-profile.js'
 
 test('catalog and character mapping match the design', () => {
   assert.deepEqual(VOICE_CATALOG, [
@@ -157,4 +168,131 @@ test('voiceCatalog returns a detached copy', () => {
     { id: 'tide', label: '温柔', tone: 'warm' },
   ])
   assert.notEqual(voiceCatalog(), voiceCatalog())
+})
+
+test('normalizeVoiceMap keeps only known slots with available ids', () => {
+  assert.deepEqual(normalizeVoiceMap({ base: 'stella', bright: 'tide', soft: '' }), {
+    base: 'stella',
+    bright: 'tide',
+  })
+  assert.deepEqual(normalizeVoiceMap({ base: 'stella', soft: '  tide  ' }, ['stella', 'tide']), {
+    base: 'stella',
+    soft: 'tide',
+  })
+  assert.deepEqual(normalizeVoiceMap({ base: 'stella', bright: 'tide' }, ['tide']), { bright: 'tide' })
+  assert.deepEqual(normalizeVoiceMap({ base: 'nova' }, ['stella', 'tide']), {})
+  assert.deepEqual(normalizeVoiceMap({ loud: 'stella', base: 7 }, ['stella']), {})
+  assert.deepEqual(normalizeVoiceMap(null), {})
+  assert.deepEqual(normalizeVoiceMap(['tide']), {})
+  assert.deepEqual(normalizeVoiceMap('stella'), {})
+})
+
+test('selectVoices: a custom voiceMap overrides one slot and keeps the rest', () => {
+  // whale bright is stella by default; the profile moves it to tide.
+  assert.deepEqual(
+    selectVoices({ character: 'whale', sentences: ['好耶！', '太棒了'], voiceMap: { bright: 'tide' } }),
+    ['tide', 'tide'],
+  )
+  // chibi soft is tide by default; the profile moves it to stella.
+  assert.deepEqual(
+    selectVoices({ character: 'chibi', sentences: ['好的', '抱歉'], voiceMap: { soft: 'stella' } }),
+    ['stella', 'stella'],
+  )
+})
+
+test('selectVoices: the first sentence follows the base slot even when customised', () => {
+  const sentences = ['好耶！', '好的']
+  assert.deepEqual(selectVoices({ character: 'whale', sentences }), ['tide', 'tide'])
+  assert.deepEqual(selectVoices({ character: 'whale', sentences, voiceMap: { base: 'stella' } }), [
+    'stella',
+    'stella',
+  ])
+  // A custom bright slot never promotes the opening line.
+  assert.deepEqual(selectVoices({ character: 'whale', sentences: ['好耶！'], voiceMap: { bright: 'tide' } }), [
+    'tide',
+  ])
+})
+
+test('selectVoices: missing slots and unknown voices fall back to the character mapping', () => {
+  assert.deepEqual(
+    selectVoices({ character: 'chibi', sentences: ['好的', '抱歉'], voiceMap: { base: 'tide' } }),
+    ['tide', 'tide'],
+  )
+  assert.deepEqual(
+    selectVoices({ character: 'whale', sentences: ['好的', '好耶！'], voiceMap: { bright: 'nova' } }),
+    ['tide', 'stella'],
+  )
+})
+
+test('selectVoices: available still narrows a custom mapping', () => {
+  assert.deepEqual(
+    selectVoices({
+      character: 'whale',
+      sentences: ['好的', '好耶！'],
+      voiceMap: { bright: 'stella' },
+      available: ['tide'],
+    }),
+    ['tide', 'tide'],
+  )
+})
+
+test('selectVoice honours voiceMap on a single sentence', () => {
+  assert.equal(selectVoice({ character: 'whale', text: '好耶！' }), 'stella')
+  assert.equal(selectVoice({ character: 'whale', text: '好耶！', voiceMap: { bright: 'tide' } }), 'tide')
+  assert.equal(selectVoice({ character: 'whale', text: '好的', voiceMap: { base: 'stella' } }), 'stella')
+  assert.equal(selectVoice({ character: 'whale', text: '好耶！', voiceMap: { bright: 'nova' } }), 'stella')
+})
+
+test('voice profile: clamps speed to the shared window', () => {
+  assert.equal(SPEED_MIN, 0.75)
+  assert.equal(SPEED_MAX, 1.35)
+  assert.equal(clampSpeed(1), 1)
+  assert.equal(clampSpeed(0.1), 0.75)
+  assert.equal(clampSpeed(9), 1.35)
+  assert.equal(clampSpeed(1.234), 1.23)
+  assert.equal(clampSpeed('1.2'), 1)
+  assert.equal(clampSpeed(Number.NaN), 1)
+  assert.equal(clampSpeed(undefined), 1)
+})
+
+test('voice profile: drops unknown slots and voices, keeps the known ones', () => {
+  assert.deepEqual(DEFAULT_PROFILE, { map: {}, speed: 1 })
+  assert.deepEqual(normalizeProfile(undefined), { map: {}, speed: 1 })
+  assert.deepEqual(
+    normalizeProfile({
+      map: { base: 'stella', bright: 'nova', soft: '', loud: 'tide', extra: 7 },
+      speed: 9,
+    }),
+    { map: { base: 'stella' }, speed: 1.35 },
+  )
+  assert.deepEqual(normalizeProfile({ map: { soft: '  tide  ' }, speed: 0.2 }), {
+    map: { soft: 'tide' },
+    speed: 0.75,
+  })
+})
+
+test('voice profile: round-trips through localStorage and survives bad data', () => {
+  const cells = new Map()
+  global.window = {
+    localStorage: {
+      getItem: (key) => (cells.has(key) ? cells.get(key) : null),
+      setItem: (key, value) => cells.set(key, String(value)),
+    },
+  }
+  try {
+    assert.deepEqual(readVoiceProfile(), { map: {}, speed: 1 })
+
+    const written = writeVoiceProfile({ map: { base: 'stella', bright: 'nova' }, speed: 9 })
+    assert.deepEqual(written, { map: { base: 'stella' }, speed: 1.35 })
+    assert.deepEqual(JSON.parse(cells.get(VOICE_KEY)), written)
+    assert.deepEqual(readVoiceProfile(), written)
+
+    cells.set(VOICE_KEY, 'not json')
+    assert.deepEqual(readVoiceProfile(), { map: {}, speed: 1 })
+
+    delete global.window
+    assert.deepEqual(readVoiceProfile(), { map: {}, speed: 1 })
+  } finally {
+    delete global.window
+  }
 })

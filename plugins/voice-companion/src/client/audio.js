@@ -327,6 +327,15 @@ function createAudioEngine(deps) {
   }
 
   // -------------------------------------------------------------- playback
+  /**
+   * Playback rate is a presentation detail: clamp it so a corrupted profile can
+   * never turn a sentence into a chipmunk or a 10x speedup.
+   */
+  function clampPlaybackRate(rate) {
+    if (typeof rate !== 'number' || !Number.isFinite(rate)) return 1;
+    return Math.min(2, Math.max(0.5, rate));
+  }
+
   function prefetch(entries) {
     for (const entry of entries) {
       if (prefetched.has(entry.index)) continue;
@@ -335,13 +344,20 @@ function createAudioEngine(deps) {
     }
   }
 
-  async function playOne(bytes) {
+  async function playOne(bytes, rate) {
+    // A settings-panel audition may play outside a call, before start() created the
+    // context; create it on demand (the click is the user gesture Chrome wants).
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    }
+    if (audioContext.state === 'suspended') await audioContext.resume();
     const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 512;
     const data = new Float32Array(analyser.fftSize);
     const src = audioContext.createBufferSource();
     src.buffer = buffer;
+    src.playbackRate.value = clampPlaybackRate(rate);
     src.connect(analyser);
     analyser.connect(audioContext.destination);
     currentSource = src;
@@ -384,10 +400,13 @@ function createAudioEngine(deps) {
       return;
     }
     interrupt();
-    // Entries are either plain sentences or `{ text, voiceId }` pairs, so the host can
-    // give every sentence its own voice without the engine knowing about characters.
+    // Entries are either plain sentences or `{ text, voiceId, rate }` triples, so the
+    // host can give every sentence its own voice and speed without the engine
+    // knowing about characters.
     playQueue = sentences.map((entry, index) =>
-      typeof entry === 'string' ? { text: entry, index } : { text: entry.text, voiceId: entry.voiceId, index },
+      typeof entry === 'string'
+        ? { text: entry, index }
+        : { text: entry.text, voiceId: entry.voiceId, rate: entry.rate, index },
     );
     prefetch(playQueue.slice(0, 2));
     playing = true;
@@ -409,7 +428,7 @@ function createAudioEngine(deps) {
       // Prefetch the next two while this one plays, never re-fetching a played index.
       prefetch(playQueue.slice(0, 2));
       try {
-        await playOne(base64ToBytes(payload.audioBase64));
+        await playOne(base64ToBytes(payload.audioBase64), item.rate);
       } catch (_error) {
         /* decode failure: skip */
       }
@@ -482,7 +501,9 @@ function createAudioEngine(deps) {
         if (running) stop();
       });
     });
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    }
     if (audioContext.state === 'suspended') await audioContext.resume();
     source = audioContext.createMediaStreamSource(media);
     processor = audioContext.createScriptProcessor(1024, 1, 1);

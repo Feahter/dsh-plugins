@@ -3,10 +3,17 @@
 // ModuleLoader factory. Depends on `createCharacter` art in characters.js, `createAvatar`
 // (avatar.js), `createAudioEngine` (audio.js), `polish` (polish.js), `createDictation`
 // (dictation.js) and `createHotkey` (hotkey.js) — build-client.mjs keeps that order.
+// `voice-profile.js` is the one real ESM import: it is also loaded by node tests, so
+// the build script must inline it as well.
+
+import { clampSpeed, normalizeProfile, readVoiceProfile, writeVoiceProfile } from './voice-profile.js';
 
 const API = '/api/voice-companion';
 const POLL_MS = 1500;
 const CHARACTER_KEY = 'dsh.voice-companion.character';
+// The face store is owned by avatar.js; the bundle inlines both modules into one
+// scope, so this module keeps its own alias instead of redeclaring FACE_KEY.
+const FACE_STORE_KEY = 'dsh.voice-companion.face';
 const MODE_KEY = 'dsh.voice-companion.mode';
 // Pre-synthesised so the first 0.9 s after the user stops talking is never dead air:
 // the filler starts playing while the model is still thinking.
@@ -25,6 +32,16 @@ function storeValue(key, value) {
     window.localStorage.setItem(key, value);
   } catch (_error) {
     /* private mode: the choice just does not survive a reload */
+  }
+}
+
+// 刷新后若只存了 'custom' 而图被清掉（换设备、清缓存），回落到内置形象。
+function storedFace() {
+  try {
+    const value = JSON.parse(storedValue(FACE_STORE_KEY));
+    return value && typeof value.src === 'string' && /^data:image\//.test(value.src) ? value : null;
+  } catch (_error) {
+    return null;
   }
 }
 
@@ -79,7 +96,8 @@ function apply(ctx) {
     fillerIndex: 0,
     active: false,
     sessionId: undefined,
-    character: resolveCharacter(storedValue(CHARACTER_KEY)).id,
+    character: resolveCharacter(storedValue(CHARACTER_KEY), storedFace()).id,
+    voiceProfile: readVoiceProfile(),
     mode: storedValue(MODE_KEY) === 'dictation' ? 'dictation' : 'call',
     logger: (ctx && ctx.logger) || null,
   };
@@ -100,7 +118,7 @@ function apply(ctx) {
   };
 
   async function speak(text, voiceId) {
-    const body = { text, character: runtime.character };
+    const body = { text, character: runtime.character, voiceMap: runtime.voiceProfile.map };
     if (voiceId) body.voiceId = voiceId;
     const payload = await requestJson('/speak', { method: 'POST', body }, 30000);
     return payload;
@@ -110,7 +128,11 @@ function apply(ctx) {
     if (runtime.fillers.length) return;
     const payloads = await Promise.all(
       FILLERS.map((text) =>
-        requestJson('/speak', { method: 'POST', body: { text, character: runtime.character } }, 30000).catch(
+        requestJson(
+          '/speak',
+          { method: 'POST', body: { text, character: runtime.character, voiceMap: runtime.voiceProfile.map } },
+          30000,
+        ).catch(
           () => null,
         ),
       ),
@@ -149,7 +171,15 @@ function apply(ctx) {
     try {
       reply = await requestJson(
         '/turn',
-        { method: 'POST', body: { utterance, character: runtime.character, history: runtime.history.slice(-6) } },
+        {
+          method: 'POST',
+          body: {
+            utterance,
+            character: runtime.character,
+            history: runtime.history.slice(-6),
+            voiceMap: runtime.voiceProfile.map,
+          },
+        },
         45000,
       );
     } catch (error) {
@@ -166,7 +196,9 @@ function apply(ctx) {
     // The host picks a voice per sentence (character base, bright or soft); keep the
     // pairing so one reply never changes timbre halfway through.
     const voices = Array.isArray(reply.voices) ? reply.voices : [];
-    await runtime.engine.speak(say.map((text, index) => ({ text, voiceId: voices[index] })));
+    await runtime.engine.speak(
+      say.map((text, index) => ({ text, voiceId: voices[index], rate: runtime.voiceProfile.speed })),
+    );
   }
 
   async function pollEvents() {
@@ -231,7 +263,7 @@ function apply(ctx) {
    * @param {string} id
    */
   function setCharacter(id) {
-    const next = resolveCharacter(id).id;
+    const next = resolveCharacter(id, storedFace()).id;
     if (next === runtime.character) return runtime.character;
     runtime.character = next;
     storeValue(CHARACTER_KEY, next);
@@ -239,11 +271,42 @@ function apply(ctx) {
     runtime.fillerIndex = 0;
     if (runtime.avatar) {
       runtime.avatar.setCharacter(next);
-      const labels = resolveCharacter(next).labels || {};
+      const labels = resolveCharacter(next, storedFace()).labels || {};
       runtime.avatar.setSubtitle(labels.idle || '');
     }
     log('character', { id: next });
     return next;
+  }
+
+  /**
+   * Persist one voice profile and drop the pre-warmed fillers so the next line
+   * already uses the new voice. The settings panel calls this; it touches no
+   * call state, only the profile.
+   * @param {{ map?: Record<string, string>, speed?: number }} profile
+   */
+  function setVoiceProfile(profile) {
+    runtime.voiceProfile = writeVoiceProfile(normalizeProfile(profile));
+    runtime.fillers = [];
+    runtime.fillerIndex = 0;
+    log('voice', { map: runtime.voiceProfile.map, speed: runtime.voiceProfile.speed });
+    return runtime.voiceProfile;
+  }
+
+  /**
+   * Audition one voice without starting or stopping a call: a fixed line at the
+   * current speed, no history and no polling.
+   * @param {unknown} voiceId
+   */
+  function previewVoice(voiceId) {
+    if (!runtime.engine) return;
+    const id = typeof voiceId === 'string' && voiceId.trim() !== '' ? voiceId.trim() : undefined;
+    void runtime.engine.speak([
+      {
+        text: '你好呀，我是大肥鱼，现在的声音就是这样。',
+        voiceId: id,
+        rate: clampSpeed(runtime.voiceProfile.speed),
+      },
+    ]);
   }
 
   /**
@@ -275,6 +338,9 @@ function apply(ctx) {
         if (name === 'end') endCall();
         if (name === 'character') setCharacter(value);
         if (name === 'mode') setMode(value);
+        if (name === 'face') log('face', value);
+        if (name === 'voice') setVoiceProfile(value && typeof value === 'object' && value.profile ? value.profile : value);
+        if (name === 'preview') previewVoice(value && typeof value === 'object' ? value.voiceId : value);
       },
     });
 
@@ -348,6 +414,8 @@ function apply(ctx) {
       say: (text) => runtime.engine.speak([text]),
       character: (id) => (id === undefined ? runtime.character : setCharacter(id)),
       mode: (next) => (next === undefined ? runtime.mode : setMode(next)),
+      voice: () => runtime.voiceProfile,
+      setVoice: (profile) => setVoiceProfile(profile),
       session: (id) => {
         if (id !== undefined) runtime.sessionId = id;
         return runtime.sessionId;

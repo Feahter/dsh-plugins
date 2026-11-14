@@ -341,6 +341,41 @@ const CHARACTERS = [
 
 const DEFAULT_CHARACTER = CHARACTERS[0].id;
 
+// 与 host/voice.js 的 VOICE_CATALOG 同义：浏览器端只需要 id 和中文名。
+const VOICE_OPTIONS = [
+  { id: 'stella', label: '明亮' },
+  { id: 'tide', label: '温柔' },
+];
+
+const CUSTOM_CHARACTER_ID = 'custom';
+const CUSTOM_FACE_NAME = '我的形象';
+// 自定义形象不知道名字，文案就不拼名字，只描述状态。
+const CUSTOM_LABELS = {
+  idle: '待命中',
+  listening: '在听',
+  thinking: '在想',
+  speaking: '在说',
+  error: '信号不太好',
+};
+
+// 只接受 dataURL，挡掉 javascript: 之类的 src。
+function customFaceOf(face) {
+  if (!face || typeof face !== 'object') return null;
+  const src = typeof face.src === 'string' ? face.src.trim() : '';
+  if (!/^data:image\//.test(src)) return null;
+  const name = typeof face.name === 'string' && face.name.trim() ? face.name.trim() : CUSTOM_FACE_NAME;
+  return { name, src };
+}
+
+function buildCustomFace(doc, face) {
+  const img = doc.createElement('img');
+  img.setAttribute('class', 'vc-fish-img');
+  img.setAttribute('src', face.src);
+  img.setAttribute('alt', face.name);
+  img.setAttribute('draggable', 'false');
+  return { svg: img, mouth: null, mouthPath: null };
+}
+
 function listCharacters() {
   return CHARACTERS.map((entry) => ({
     id: entry.id,
@@ -358,7 +393,20 @@ function characterById(id) {
   return null;
 }
 
-function resolveCharacter(id) {
+function resolveCharacter(id, face) {
+  if (String(id) === CUSTOM_CHARACTER_ID) {
+    const custom = customFaceOf(face);
+    // 存了 custom 但没有可用图片时回落到默认内置形象。
+    if (!custom) return CHARACTERS[0];
+    return {
+      id: CUSTOM_CHARACTER_ID,
+      name: custom.name,
+      tagline: '自定义形象',
+      voice: CHARACTERS[0].voice,
+      labels: CUSTOM_LABELS,
+      build: (doc) => buildCustomFace(doc, custom),
+    };
+  }
   return characterById(id) || CHARACTERS[0];
 }
 
@@ -374,8 +422,8 @@ function mouthPathFor(id, level) {
   return character.id === 'chibi' ? chibiMouthPath(level) : whaleMouthPath(level);
 }
 
-function renderCharacter(doc, id) {
-  const character = resolveCharacter(id);
+function renderCharacter(doc, id, face) {
+  const character = resolveCharacter(id, face);
   const art = character.build(doc);
   return {
     id: character.id,
@@ -390,7 +438,10 @@ function renderCharacter(doc, id) {
 
 export {
   CHARACTERS,
+  CUSTOM_CHARACTER_ID,
   DEFAULT_CHARACTER,
+  VOICE_OPTIONS,
+  buildCustomFace,
   characterById,
   listCharacters,
   mouthPathFor,

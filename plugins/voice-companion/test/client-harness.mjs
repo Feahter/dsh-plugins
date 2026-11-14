@@ -326,7 +326,9 @@ const modeButton = () => findAll(body, (n) => hasClass(n, 'vc-mode'))[0] || stub
 const labelNode = () => findAll(body, (n) => hasClass(n, 'vc-label'))[0] || stub;
 
 group('character picker (看板娘切换)');
-check('two character chips rendered', chips().length === 2, chips().map((c) => c.getAttribute('data-character')));
+const builtinChips = () => chips().filter((c) => ['whale', 'chibi'].includes(c.getAttribute('data-character')));
+check('two builtin character chips rendered', builtinChips().length === 2, chips().map((c) => c.getAttribute('data-character')));
+check('custom-face add chip is present', chips().some((c) => hasClass(c, 'vc-add')));
 check('whale chip pressed at start', chipAt(0).getAttribute('aria-pressed') === 'true');
 check('stage starts on the whale', avatarRoot().getAttribute('data-character') === 'whale');
 chipAt(1).dispatch('click');
@@ -356,6 +358,40 @@ check(
 );
 modeButton().dispatch('click');
 check('clicking again returns to 对话', modeButton().textContent === '对话');
+
+group('voice settings drawer (built bundle)');
+const byClass = (name) => findAll(body, (n) => hasClass(n, name))[0] || stub;
+const gear = byClass('vc-gear');
+const sheet = byClass('vc-sheet');
+check('gear button exists', gear !== stub);
+check('drawer starts closed', sheet.getAttribute('data-open') === '0', sheet.getAttribute('data-open'));
+gear.dispatch('click');
+check('gear opens the drawer', sheet.getAttribute('data-open') === '1', sheet.getAttribute('data-open'));
+const slotSelects = ['base', 'bright', 'soft'].map((slot) =>
+  findAll(body, (n) => hasClass(n, 'vc-slot') && n.getAttribute('data-slot') === slot)[0] || stub,
+);
+check('three voice slots rendered', slotSelects.every((node) => node !== stub), slotSelects.length);
+const optionsFor = (node) => (node.children || []).map((child) => child.getAttribute('value'));
+check('slot options come from the voice catalog', optionsFor(slotSelects[0]).includes('tide') && optionsFor(slotSelects[0]).includes('stella'), optionsFor(slotSelects[0]));
+const speedInput = byClass('vc-speed');
+speedInput.value = '1.2';
+speedInput.dispatch('input');
+check('speed label follows the slider', /×1\.20/.test(byClass('vc-speed-value').textContent), byClass('vc-speed-value').textContent);
+slotSelects[0].value = 'tide';
+slotSelects[1].value = 'tide';
+byClass('vc-save').dispatch('click');
+const savedProfile = window.__dshVoiceCompanion.voice();
+check('save reports the profile back to the orchestrator', savedProfile.speed === 1.2, savedProfile);
+check('save keeps the chosen bright slot', savedProfile.map.bright === 'tide', savedProfile.map);
+const previewsBefore = calls.length;
+byClass('vc-preview').dispatch('click');
+await new Promise((r) => setTimeout(r, 60));
+const previewCall = calls.slice(previewsBefore).filter((c) => c.url.endsWith('/speak')).pop();
+check('preview asks for audio with the chosen voice', previewCall !== undefined && previewCall.body.voiceId === 'tide', previewCall && previewCall.body);
+byClass('vc-reset').dispatch('click');
+check('reset restores defaults', window.__dshVoiceCompanion.voice().speed === 1 && Object.keys(window.__dshVoiceCompanion.voice().map).length === 0, window.__dshVoiceCompanion.voice());
+gear.dispatch('click');
+check('gear closes the drawer again', sheet.getAttribute('data-open') === '0', sheet.getAttribute('data-open'));
 
 group('teardown');
 window.__dshVoiceCompanion.stop();

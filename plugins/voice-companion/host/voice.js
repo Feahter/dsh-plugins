@@ -11,6 +11,7 @@
 /** @typedef {'whale' | 'chibi'} CharacterId */
 /** @typedef {'auto' | 'bright' | 'calm'} VoiceMode */
 /** @typedef {'bright' | 'soft' | 'calm'} Emotion */
+/** @typedef {{ base?: string, bright?: string, soft?: string }} VoiceMap */
 
 /** @type {ReadonlyArray<Voice>} */
 export const VOICE_CATALOG = Object.freeze([
@@ -33,6 +34,9 @@ export const CHARACTER_VOICES = Object.freeze({
 
 const DEFAULT_CHARACTER = 'whale'
 const FALLBACK_VOICE = 'tide'
+
+/** Slots of CHARACTER_VOICES that a custom profile may override. */
+const VOICE_SLOTS = ['base', 'bright', 'soft']
 
 /** @type {ReadonlyArray<string>} */
 const BRIGHT_WORDS = ['哈哈', '太棒', '好耶', '厉害']
@@ -104,6 +108,32 @@ export function resolveVoiceMode(mode) {
 }
 
 /**
+ * Validate a client-supplied voice map.
+ *
+ * Only `base` / `bright` / `soft` survive, values must be non-empty strings
+ * inside `available` (or the built-in catalog when `available` is omitted), and
+ * the result is always a new object — possibly empty.
+ * @param {unknown} map
+ * @param {Array<unknown>} [available] non-empty array restricts values to its ids
+ * @returns {VoiceMap}
+ */
+export function normalizeVoiceMap(map, available) {
+  /** @type {VoiceMap} */
+  const normalized = {}
+  if (typeof map !== 'object' || map === null || Array.isArray(map)) return normalized
+
+  const allowed = Array.isArray(available) && available.length > 0 ? available : VOICE_IDS
+  for (const slot of VOICE_SLOTS) {
+    const value = map[slot]
+    if (typeof value !== 'string') continue
+    const voiceId = value.trim()
+    if (voiceId === '' || !allowed.includes(voiceId)) continue
+    normalized[slot] = voiceId
+  }
+  return normalized
+}
+
+/**
  * @param {unknown} character
  * @param {string} [fallback]
  * @returns {{ base: string, bright: string, soft: string }}
@@ -111,6 +141,20 @@ export function resolveVoiceMode(mode) {
 function mappingFor(character, fallback = DEFAULT_CHARACTER) {
   const key = typeof character === 'string' ? character : ''
   return CHARACTER_VOICES[key] ?? CHARACTER_VOICES[fallback]
+}
+
+/**
+ * The effective mapping for one speaker: the character default with any valid
+ * custom slot layered on top. Missing or invalid slots keep the default.
+ * @param {unknown} character
+ * @param {unknown} voiceMap
+ * @returns {{ base: string, bright: string, soft: string }}
+ */
+function resolveMapping(character, voiceMap) {
+  const mapping = mappingFor(character)
+  const custom = normalizeVoiceMap(voiceMap)
+  if (Object.keys(custom).length === 0) return mapping
+  return { ...mapping, ...custom }
 }
 
 /**
@@ -140,12 +184,13 @@ function narrowToAvailable(desired, base, available) {
  * @param {unknown} [input.total]
  * @param {unknown} [input.mode]
  * @param {unknown} [input.available] non-empty array restricts the result to its ids
+ * @param {unknown} [input.voiceMap] per-slot overrides, missing slots use the character mapping
  * @returns {string}
  */
-export function selectVoice({ character, text, index, total, mode, available } = {}) {
+export function selectVoice({ character, text, index, total, mode, available, voiceMap } = {}) {
   void index
   void total
-  const mapping = mappingFor(character)
+  const mapping = resolveMapping(character, voiceMap)
   const resolved = resolveVoiceMode(mode)
 
   /** @type {string} */
@@ -176,11 +221,12 @@ export function selectVoice({ character, text, index, total, mode, available } =
  * @param {unknown} [input.sentences]
  * @param {unknown} [input.mode]
  * @param {unknown} [input.available]
+ * @param {unknown} [input.voiceMap] per-slot overrides, missing slots use the character mapping
  * @returns {string[]}
  */
-export function selectVoices({ character, sentences, mode, available } = {}) {
+export function selectVoices({ character, sentences, mode, available, voiceMap } = {}) {
   if (!Array.isArray(sentences) || sentences.length === 0) return []
-  const mapping = mappingFor(character)
+  const mapping = resolveMapping(character, voiceMap)
   const total = sentences.length
 
   return sentences.map((sentence, index) => {
@@ -190,7 +236,7 @@ export function selectVoices({ character, sentences, mode, available } = {}) {
       }
       return mapping.base
     }
-    return selectVoice({ character, text: sentence, index, total, mode, available })
+    return selectVoice({ character, text: sentence, index, total, mode, available, voiceMap })
   })
 }
 

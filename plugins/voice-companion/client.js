@@ -348,6 +348,41 @@ const CHARACTERS = [
 
 const DEFAULT_CHARACTER = CHARACTERS[0].id;
 
+// 与 host/voice.js 的 VOICE_CATALOG 同义：浏览器端只需要 id 和中文名。
+const VOICE_OPTIONS = [
+  { id: 'stella', label: '明亮' },
+  { id: 'tide', label: '温柔' },
+];
+
+const CUSTOM_CHARACTER_ID = 'custom';
+const CUSTOM_FACE_NAME = '我的形象';
+// 自定义形象不知道名字，文案就不拼名字，只描述状态。
+const CUSTOM_LABELS = {
+  idle: '待命中',
+  listening: '在听',
+  thinking: '在想',
+  speaking: '在说',
+  error: '信号不太好',
+};
+
+// 只接受 dataURL，挡掉 javascript: 之类的 src。
+function customFaceOf(face) {
+  if (!face || typeof face !== 'object') return null;
+  const src = typeof face.src === 'string' ? face.src.trim() : '';
+  if (!/^data:image\//.test(src)) return null;
+  const name = typeof face.name === 'string' && face.name.trim() ? face.name.trim() : CUSTOM_FACE_NAME;
+  return { name, src };
+}
+
+function buildCustomFace(doc, face) {
+  const img = doc.createElement('img');
+  img.setAttribute('class', 'vc-fish-img');
+  img.setAttribute('src', face.src);
+  img.setAttribute('alt', face.name);
+  img.setAttribute('draggable', 'false');
+  return { svg: img, mouth: null, mouthPath: null };
+}
+
 function listCharacters() {
   return CHARACTERS.map((entry) => ({
     id: entry.id,
@@ -365,7 +400,20 @@ function characterById(id) {
   return null;
 }
 
-function resolveCharacter(id) {
+function resolveCharacter(id, face) {
+  if (String(id) === CUSTOM_CHARACTER_ID) {
+    const custom = customFaceOf(face);
+    // 存了 custom 但没有可用图片时回落到默认内置形象。
+    if (!custom) return CHARACTERS[0];
+    return {
+      id: CUSTOM_CHARACTER_ID,
+      name: custom.name,
+      tagline: '自定义形象',
+      voice: CHARACTERS[0].voice,
+      labels: CUSTOM_LABELS,
+      build: (doc) => buildCustomFace(doc, custom),
+    };
+  }
   return characterById(id) || CHARACTERS[0];
 }
 
@@ -381,8 +429,8 @@ function mouthPathFor(id, level) {
   return character.id === 'chibi' ? chibiMouthPath(level) : whaleMouthPath(level);
 }
 
-function renderCharacter(doc, id) {
-  const character = resolveCharacter(id);
+function renderCharacter(doc, id, face) {
+  const character = resolveCharacter(id, face);
   const art = character.build(doc);
   return {
     id: character.id,
@@ -393,6 +441,87 @@ function renderCharacter(doc, id) {
     mouth: art.mouth,
     mouthPath: art.mouthPath,
   };
+}
+
+// ---- src/client/voice-profile.js ----
+// Voice profile: which TTS voice fills each slot, plus playback speed.
+//
+// This is a Browser module (no imports) so it also loads in node tests: the
+// storage calls are guarded and fall back to the defaults outside a window.
+
+/** localStorage key holding the profile. */
+const VOICE_KEY = 'dsh.voice-companion.voice';
+
+/** Playback-rate window shared with the host /characters response. */
+const SPEED_MIN = 0.75;
+const SPEED_MAX = 1.35;
+
+/** Slots of the character -> voice mapping that can be overridden. */
+const VOICE_SLOTS = ['base', 'bright', 'soft'];
+
+/** Product default: follow each character's mapping, normal speed. */
+const DEFAULT_PROFILE = {
+  map: {},
+  speed: 1,
+};
+
+const KNOWN_VOICES = ['stella', 'tide'];
+const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Coerce a stored speed into [0.75, 1.35], rounded to 2 decimals. Anything that
+ * is not a finite number (including the string "1.2") becomes 1.
+ */
+function clampSpeed(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1;
+  const clamped = Math.min(SPEED_MAX, Math.max(SPEED_MIN, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+/**
+ * Return a fresh, valid profile: unknown slots and unknown voice ids are
+ * dropped, the speed is clamped, and any malformed input becomes the default.
+ */
+function normalizeProfile(profile) {
+  const source = isRecord(profile) ? profile : {};
+  const incoming = isRecord(source.map) ? source.map : {};
+  const map = {};
+
+  for (const slot of VOICE_SLOTS) {
+    const value = incoming[slot];
+    if (typeof value !== 'string') continue;
+    const voiceId = value.trim();
+    if (voiceId === '' || !KNOWN_VOICES.includes(voiceId)) continue;
+    map[slot] = voiceId;
+  }
+
+  return { map, speed: clampSpeed(source.speed) };
+}
+
+/** Read the profile from localStorage; corrupted or missing data yields defaults. */
+function readVoiceProfile() {
+  try {
+    const raw = window.localStorage.getItem(VOICE_KEY);
+    if (!raw) return normalizeProfile(DEFAULT_PROFILE);
+    return normalizeProfile(JSON.parse(raw));
+  } catch (_error) {
+    return normalizeProfile(DEFAULT_PROFILE);
+  }
+}
+
+/**
+ * Persist one profile and return the normalized copy that was written. Storage
+ * failures (private mode, quota) are swallowed: the in-memory profile stays
+ * usable for the current page.
+ */
+function writeVoiceProfile(profile) {
+  const normalized = normalizeProfile(profile);
+  try {
+    window.localStorage.setItem(VOICE_KEY, JSON.stringify(normalized));
+  } catch (_error) {
+    // Storage is best-effort; the caller keeps the returned profile in memory.
+  }
+  return normalized;
 }
 
 // ---- src/client/avatar.js ----
@@ -408,10 +537,25 @@ function renderCharacter(doc, id) {
 // in sync when the silhouette changes.
 
 
+
 const SUBTITLE_MAX = 60;
 const BLINK_MIN_MS = 3000;
 const BLINK_MAX_MS = 6000;
 const BLINK_HOLD_MS = 150;
+
+const FACE_KEY = 'dsh.voice-companion.face';
+const FACE_MAX_BYTES = 800 * 1024;
+const FACE_MAX_EDGE = 512;
+const FACE_QUALITY = 0.85;
+const FACE_NAME = '我的形象';
+const FACE_TOO_BIG = '图片太大了，换一张小一点的吧（上限 800KB）';
+
+// 抽屉里的中文文案与保存反馈时长。
+const SHEET_TITLE = '声音与形象';
+const SHEET_SAVED_MS = 800;
+const SLOT_LABELS = { base: '基础声音', bright: '开心时', soft: '温柔时' };
+const VOICE_FALLBACK = 'tide';
+
 
 // ------------------------------------------------------------------- styling
 
@@ -465,6 +609,37 @@ const STYLE_TEXT = `
 [data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:118px;display:grid;place-items:center;overflow:hidden;border-radius:14px}
 [data-vc-avatar] .vc-fish{position:relative;display:grid;place-items:center;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35));transition:filter .3s ease,transform .3s ease}
 [data-vc-avatar] .vc-fish-svg{display:block;width:186px;height:155px;overflow:visible}
+[data-vc-avatar] .vc-fish-img{display:block;width:186px;height:155px;object-fit:contain;border-radius:18px;transition:transform .3s ease,filter .3s ease}
+[data-vc-avatar] .vc-file{display:none}
+/* Settings drawer: an overlay inside the panel, closed by backdrop or Escape.
+   Built from plain elements on purpose so the offline DOM stub can drive it. */
+[data-vc-avatar] .vc-gear{appearance:none;flex:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 12px/1 system-ui,sans-serif;cursor:pointer;display:grid;place-items:center;transition:background .15s ease,border-color .15s ease}
+[data-vc-avatar] .vc-gear:hover{background:rgba(255,255,255,.14)}
+[data-vc-avatar] .vc-gear:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
+[data-vc-avatar] .vc-gear[aria-expanded="true"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(200,216,255,.55);color:#fff}
+[data-vc-avatar] .vc-sheet{position:absolute;inset:0;z-index:6;display:none;padding:10px;border-radius:18px;background:linear-gradient(165deg,rgba(15,24,50,.97),rgba(6,11,24,.98));overflow:auto}
+[data-vc-avatar] .vc-sheet[data-open="1"]{display:block}
+[data-vc-avatar] .vc-sheet-backdrop{position:absolute;inset:0;border-radius:18px;cursor:pointer}
+[data-vc-avatar] .vc-sheet-card{position:relative;display:flex;flex-direction:column;gap:6px}
+[data-vc-avatar] .vc-sheet-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#dbe4ff;letter-spacing:.02em;margin-bottom:1px}
+[data-vc-avatar] .vc-sheet-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-vc-avatar] .vc-sheet-close{appearance:none;flex:none;width:20px;height:20px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 12px/1 system-ui,sans-serif;cursor:pointer;display:grid;place-items:center}
+[data-vc-avatar] .vc-sheet-close:hover{background:rgba(255,255,255,.14)}
+[data-vc-avatar] .vc-field{display:flex;align-items:center;gap:7px;font-size:11px;color:#a9b8dd;min-height:22px}
+[data-vc-avatar] .vc-field-label{flex:none;width:52px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-vc-avatar] .vc-slot{appearance:none;flex:1 1 auto;min-width:0;height:22px;padding:0 6px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#e8eeff;font:600 11px/1 system-ui,sans-serif;cursor:pointer}
+[data-vc-avatar] .vc-slot:focus-visible{outline:2px solid #9db4ff;outline-offset:1px}
+[data-vc-avatar] .vc-speed{flex:1 1 auto;min-width:0;height:22px;margin:0;accent-color:#7d95ff;cursor:pointer}
+[data-vc-avatar] .vc-speed-value{flex:none;width:38px;text-align:right;font-variant-numeric:tabular-nums;color:#dbe4ff}
+[data-vc-avatar] .vc-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-name[readonly]{opacity:.65;cursor:default}
+[data-vc-avatar] .vc-name:focus{outline:none;border-color:rgba(157,180,255,.7)}
+[data-vc-avatar] .vc-sheet-actions{display:flex;gap:6px;margin-top:2px}
+[data-vc-avatar] .vc-sheet-actions .vc-btn{flex:1 1 0;padding:5px 0;text-align:center}
+[data-vc-avatar] .vc-sheet-btn[data-kind="major"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(190,210,255,.4);color:#fff}
+[data-vc-avatar] .vc-sheet-btn[data-kind="quiet"]{background:rgba(255,255,255,.04);color:#9fb0d6}
+[data-vc-avatar][data-collapsed] .vc-gear{display:none}
+[data-vc-avatar] .vc-chip.vc-add{font-size:15px;line-height:1}
 [data-vc-avatar] .vc-swap{animation:vc-swap .32s ease-out}
 [data-vc-avatar] .vc-ripple{position:absolute;left:50%;top:50%;width:196px;height:196px;margin:-98px 0 0 -98px;border-radius:50%;border:2px solid rgba(107,133,255,.55);opacity:0;display:none;pointer-events:none}
 [data-vc-avatar][data-state="listening"] .vc-ripple{display:block;animation:vc-ripple 2.6s ease-out infinite}
@@ -493,6 +668,10 @@ const STYLE_TEXT = `
 [data-vc-avatar][data-state="thinking"] .vc-pupil{transform:translateY(-7px)}
 [data-vc-avatar][data-state="error"] .vc-eye{transform:scaleY(.5)}
 [data-vc-avatar][data-state="error"] .vc-whale{transform:translateY(5px)}
+[data-vc-avatar][data-state="idle"] .vc-fish-img{animation:vc-sway 5.4s ease-in-out infinite}
+[data-vc-avatar][data-state="listening"] .vc-fish-img{transform:rotate(-2.5deg) translateY(-2px)}
+[data-vc-avatar][data-state="error"] .vc-fish-img{transform:translateY(5px)}
+[data-vc-avatar] .vc-fish-img.vc-swap{animation:vc-swap .32s ease-out}
 [data-vc-avatar][data-state="idle"] .vc-fish{animation:vc-breathe 3.8s ease-in-out infinite}
 [data-vc-avatar][data-state="speaking"] .vc-fish{animation:vc-bob .4s ease-in-out infinite alternate}
 [data-vc-avatar][data-state="error"] .vc-panel{transform:translateY(2px)}
@@ -571,7 +750,12 @@ function createAvatar(options = {}) {
 
   ensureStyles(doc);
 
-  const initial = resolveCharacter(options.character);
+  // readStore 依赖 win；形象要在 picker 里出现，所以提前取。
+  const win = (doc && doc.defaultView) || null;
+  let face = readFace();
+  let faceChip = null;
+
+  const initial = resolveCharacter(options.character, face);
 
   const root = element(doc, 'div', {
     'data-vc-avatar': '',
@@ -605,6 +789,55 @@ function createAvatar(options = {}) {
     return { id: entry.id, node: chip };
   });
 
+  const addChip = element(doc, 'button', {
+    class: 'vc-chip vc-add',
+    type: 'button',
+    'aria-label': '添加自定义形象',
+    title: '添加自定义形象',
+  }, '＋');
+  if (typeof addChip.addEventListener === 'function') {
+    addChip.addEventListener('click', () => openFacePicker());
+  }
+  picker.appendChild(addChip);
+
+  const fileInput = element(doc, 'input', {
+    class: 'vc-file',
+    type: 'file',
+    accept: 'image/*',
+    'aria-hidden': 'true',
+    tabindex: '-1',
+  });
+
+  // 自定义形象 chip 排在 ＋ 前；卸载/重排不依赖 insertBefore，离线 stub 也能用。
+  function mountFaceChip() {
+    if (!face) return;
+    if (!faceChip) {
+      faceChip = element(doc, 'button', {
+        class: 'vc-chip',
+        type: 'button',
+        'data-character': CUSTOM_CHARACTER_ID,
+        'aria-pressed': initial.id === CUSTOM_CHARACTER_ID ? 'true' : 'false',
+        'aria-label': face.name,
+        title: face.name + ' · 自定义形象',
+      }, face.name.slice(0, 1));
+      if (typeof faceChip.addEventListener === 'function') {
+        faceChip.addEventListener('click', () => selectCharacter(CUSTOM_CHARACTER_ID, true));
+      }
+      chips.push({ id: CUSTOM_CHARACTER_ID, node: faceChip });
+    } else {
+      faceChip.textContent = face.name.slice(0, 1);
+      faceChip.setAttribute('aria-label', face.name);
+      faceChip.setAttribute('title', face.name + ' · 自定义形象');
+    }
+    if (typeof picker.removeChild === 'function') {
+      if (faceChip.parentNode === picker) picker.removeChild(faceChip);
+      picker.removeChild(addChip);
+    }
+    picker.appendChild(faceChip);
+    picker.appendChild(addChip);
+  }
+  if (face) mountFaceChip();
+
   // 对话 / 听写: one microphone feed, two destinations. The switch is a button rather
   // than a setting so the current mode is always on screen.
   const modeButton = element(doc, 'button', {
@@ -619,6 +852,15 @@ function createAvatar(options = {}) {
       if (onAction) onAction('mode', next);
     });
   }
+
+  // 设置抽屉的入口：一个齿轮，放在模式按钮和收起按钮之间。
+  const gearButton = element(doc, 'button', {
+    class: 'vc-gear',
+    type: 'button',
+    'aria-expanded': 'false',
+    'aria-label': '声音与形象设置',
+    title: '声音与形象设置',
+  }, '\u2699');
 
   // Fold / unfold. Kept in the head so the same gesture that drags also hides it.
   const minButton = element(doc, 'button', {
@@ -638,6 +880,7 @@ function createAvatar(options = {}) {
   head.appendChild(label);
   head.appendChild(picker);
   head.appendChild(modeButton);
+  head.appendChild(gearButton);
   head.appendChild(minButton);
   head.appendChild(actions);
 
@@ -659,11 +902,126 @@ function createAvatar(options = {}) {
   const bubble = element(doc, 'div', { class: 'vc-bubble', 'data-role': 'assistant', 'aria-live': 'polite' });
   const partial = element(doc, 'div', { class: 'vc-partial', 'aria-live': 'polite' });
 
+  // 设置抽屉：声音槽、语速、名字、换图/移除。纯 createElement + setAttribute，
+  // 不碰 innerHTML / querySelector，离线 stub 与真实浏览器走同一条路径。
+  const sheet = element(doc, 'div', {
+    class: 'vc-sheet',
+    'data-open': '0',
+    role: 'dialog',
+    'aria-label': SHEET_TITLE,
+    'aria-hidden': 'true',
+  });
+  const backdrop = element(doc, 'div', { class: 'vc-sheet-backdrop', 'aria-hidden': 'true' });
+  const sheetCard = element(doc, 'div', { class: 'vc-sheet-card' });
+
+  const sheetHead = element(doc, 'div', { class: 'vc-sheet-head' });
+  sheetHead.appendChild(element(doc, 'span', { class: 'vc-sheet-title' }, SHEET_TITLE));
+  const closeButton = element(doc, 'button', {
+    class: 'vc-sheet-close',
+    type: 'button',
+    'aria-label': '关闭设置',
+    title: '关闭设置',
+  }, '\u00d7');
+  sheetHead.appendChild(closeButton);
+  sheetCard.appendChild(sheetHead);
+
+  const slotSelects = Object.create(null);
+  for (const slot of VOICE_SLOTS) {
+    const field = element(doc, 'label', { class: 'vc-field' });
+    field.appendChild(element(doc, 'span', { class: 'vc-field-label' }, SLOT_LABELS[slot] || slot));
+    const select = element(doc, 'select', {
+      class: 'vc-slot',
+      'data-slot': slot,
+      'aria-label': SLOT_LABELS[slot] || slot,
+    });
+    for (const voice of VOICE_OPTIONS) {
+      select.appendChild(element(doc, 'option', { value: voice.id }, voice.label));
+    }
+    slotSelects[slot] = select;
+    field.appendChild(select);
+    sheetCard.appendChild(field);
+  }
+
+  const speedField = element(doc, 'label', { class: 'vc-field' });
+  speedField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '语速'));
+  const speedInput = element(doc, 'input', {
+    class: 'vc-speed',
+    type: 'range',
+    min: String(SPEED_MIN),
+    max: String(SPEED_MAX),
+    step: '0.05',
+    'aria-label': '语速',
+  });
+  const speedValue = element(doc, 'span', { class: 'vc-speed-value' }, '×1.00');
+  speedField.appendChild(speedInput);
+  speedField.appendChild(speedValue);
+  sheetCard.appendChild(speedField);
+
+  const nameField = element(doc, 'label', { class: 'vc-field' });
+  nameField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '名字'));
+  const nameInput = element(doc, 'input', {
+    class: 'vc-name',
+    type: 'text',
+    maxlength: '12',
+    'aria-label': '形象名字',
+  });
+  nameField.appendChild(nameInput);
+  sheetCard.appendChild(nameField);
+
+  const faceField = element(doc, 'div', { class: 'vc-field' });
+  faceField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '形象'));
+  const changeFaceButton = element(doc, 'button', {
+    class: 'vc-btn vc-change-face',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '换一张图');
+  const removeFaceButton = element(doc, 'button', {
+    class: 'vc-btn vc-remove-face',
+    type: 'button',
+    'data-kind': 'quiet',
+    hidden: 'hidden',
+  }, '移除自定义形象');
+  faceField.appendChild(changeFaceButton);
+  faceField.appendChild(removeFaceButton);
+  sheetCard.appendChild(faceField);
+
+  const sheetActions = element(doc, 'div', { class: 'vc-sheet-actions' });
+  const previewButton = element(doc, 'button', {
+    class: 'vc-btn vc-preview',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '试听');
+  const saveButton = element(doc, 'button', {
+    class: 'vc-btn vc-save',
+    type: 'button',
+    'data-kind': 'major',
+  }, '保存');
+  const resetButton = element(doc, 'button', {
+    class: 'vc-btn vc-reset',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '恢复默认');
+  sheetActions.appendChild(previewButton);
+  sheetActions.appendChild(saveButton);
+  sheetActions.appendChild(resetButton);
+  sheetCard.appendChild(sheetActions);
+
+  sheet.appendChild(backdrop);
+  sheet.appendChild(sheetCard);
+
+  let sheetTimer = null;
+  let sheetOpen = false;
+
   panel.appendChild(head);
   panel.appendChild(stage);
   panel.appendChild(bubble);
   panel.appendChild(partial);
+  panel.appendChild(sheet);
   root.appendChild(panel);
+  root.appendChild(fileInput);
+  if (typeof fileInput.addEventListener === 'function') {
+    fileInput.addEventListener('change', onFaceChosen);
+  }
   mount.appendChild(root);
 
   let state = 'idle';
@@ -676,9 +1034,19 @@ function createAvatar(options = {}) {
   }
 
   function applyCharacter(id, animate) {
-    const next = renderCharacter(doc, id);
+    const next = renderCharacter(doc, id, face);
     clearStage();
-    if (animate) next.svg.setAttribute('class', 'vc-fish-svg vc-swap');
+    if (animate) {
+      const base = next.svg.getAttribute('class') || '';
+      next.svg.setAttribute('class', base + ' vc-swap');
+      // 一次性动画结束后摘掉 class，否则它会压住 idle 的呼吸/摇摆。
+      if (typeof next.svg.addEventListener === 'function') {
+        next.svg.addEventListener('animationend', () => {
+          const current = next.svg.getAttribute('class') || '';
+          next.svg.setAttribute('class', current.replace(/\s+vc-swap\b/, ''));
+        }, { once: true });
+      }
+    }
     fishWrap.appendChild(next.svg);
     art = next;
     root.setAttribute('data-character', next.id);
@@ -699,7 +1067,7 @@ function createAvatar(options = {}) {
   // click, so restoring a saved character never fires onAction.
   function selectCharacter(id, notify) {
     if (disposed) return characterId();
-    const wanted = resolveCharacter(id).id;
+    const wanted = resolveCharacter(id, face).id;
     if (art && art.id === wanted) return wanted;
     applyCharacter(wanted, true);
     if (notify && onAction) onAction('character', wanted);
@@ -727,7 +1095,6 @@ function createAvatar(options = {}) {
   // ------------------------------------------------------------ window state
   // The panel sits on top of the app, so it has to get out of the way: drag it by
   // the head, fold it to a pill, and remember both facts for next launch.
-  const win = (doc && doc.defaultView) || null;
   const POS_KEY = 'dsh.voice-companion.pos';
   const FOLD_KEY = 'dsh.voice-companion.collapsed';
 
@@ -744,6 +1111,151 @@ function createAvatar(options = {}) {
       if (win && win.localStorage) { win.localStorage.setItem(key, value); return; }
       if (typeof localStorage !== 'undefined') localStorage.setItem(key, value);
     } catch (error) { /* ignore */ }
+  }
+
+  // ------------------------------------------------------------- custom face
+  // face 存 localStorage：{name, src}。src 只收 dataURL，挡掉远程和脚本 URL。
+  function parseFace(raw) {
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw);
+      if (!value || typeof value !== 'object') return null;
+      const src = typeof value.src === 'string' ? value.src : '';
+      if (!/^data:image\//.test(src)) return null;
+      const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : FACE_NAME;
+      return { name, src };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function readFace() {
+    return parseFace(readStore(FACE_KEY));
+  }
+
+  function openFacePicker() {
+    if (disposed || !fileInput || typeof fileInput.click !== 'function') return;
+    fileInput.click();
+  }
+
+  function notifyFace(message) {
+    setSubtitle(message);
+    if (onAction) onAction('face', { action: 'error', message });
+  }
+
+  function readImageFile(file, done) {
+    if (!file) { done(new Error('图片读取失败')); return; }
+    const Reader = (win && win.FileReader) || (typeof FileReader !== 'undefined' ? FileReader : null);
+    if (!Reader) { done(new Error('当前环境不支持读取图片')); return; }
+    try {
+      const reader = new Reader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        if (/^data:image\//.test(result)) done(null, result);
+        else done(new Error('图片读取失败'));
+      };
+      reader.onerror = () => done(new Error('图片读取失败'));
+      reader.readAsDataURL(file);
+    } catch (error) {
+      done(error instanceof Error ? error : new Error('图片读取失败'));
+    }
+  }
+
+  function encodeFace(canvas) {
+    const attempts = [['image/webp', FACE_QUALITY], ['image/png'], ['image/jpeg', FACE_QUALITY]];
+    for (const attempt of attempts) {
+      try {
+        const data = canvas.toDataURL(attempt[0], attempt[1]);
+        if (typeof data === 'string' && /^data:image\//.test(data)) return data;
+      } catch (error) { /* 换下一种格式 */ }
+    }
+    return null;
+  }
+
+  // 没有 canvas/Image（测试 stub、极端隐私模式）时保留原图，由调用方统一查体积。
+  function shrinkImage(dataUrl, done) {
+    let canvas = null;
+    let ctx = null;
+    try {
+      canvas = doc.createElement('canvas');
+      ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+    } catch (error) {
+      canvas = null;
+      ctx = null;
+    }
+    const ImageCtor = (win && win.Image) || (typeof Image !== 'undefined' ? Image : null);
+    if (!canvas || !ctx || !ImageCtor) { done(null, dataUrl); return; }
+    let image;
+    try {
+      image = new ImageCtor();
+    } catch (error) {
+      done(null, dataUrl);
+      return;
+    }
+    image.onload = () => {
+      try {
+        const width = Number(image.naturalWidth || image.width) || 0;
+        const height = Number(image.naturalHeight || image.height) || 0;
+        if (!width || !height) { done(null, dataUrl); return; }
+        const scale = Math.min(1, FACE_MAX_EDGE / Math.max(width, height));
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        done(null, encodeFace(canvas) || dataUrl);
+      } catch (error) {
+        done(null, dataUrl);
+      }
+    };
+    image.onerror = () => done(new Error('图片解码失败'));
+    image.src = dataUrl;
+  }
+
+  function importFace(file) {
+    if (file && typeof file.type === 'string' && file.type && !/^image\//.test(file.type)) {
+      notifyFace('请选择图片文件');
+      return;
+    }
+    readImageFile(file, (readError, dataUrl) => {
+      if (disposed) return;
+      if (readError || !dataUrl) {
+        notifyFace((readError && readError.message) || '图片读取失败');
+        return;
+      }
+      shrinkImage(dataUrl, (shrinkError, shrunk) => {
+        if (disposed) return;
+        if (shrinkError) {
+          notifyFace(shrinkError.message || '图片读取失败');
+          return;
+        }
+        const src = shrunk || dataUrl;
+        if (src.length > FACE_MAX_BYTES) {
+          notifyFace(FACE_TOO_BIG);
+          return;
+        }
+        face = { name: FACE_NAME, src };
+        writeStore(FACE_KEY, JSON.stringify(face));
+        mountFaceChip();
+        // 换图时 id 仍是 'custom'，selectCharacter 会跳过，所以直接重绘舞台。
+        applyCharacter(CUSTOM_CHARACTER_ID, true);
+        if (state !== 'speaking') setMouth(0);
+        if (sheetOpen) syncSheet();
+        if (onAction) {
+          onAction('character', CUSTOM_CHARACTER_ID);
+          onAction('face', { action: 'select', name: face.name });
+        }
+      });
+    });
+  }
+
+  function onFaceChosen(event) {
+    if (disposed) return;
+    const target = event && event.target;
+    const file = target && target.files && target.files[0];
+    // 同一个文件选第二次不会再触发 change，先清 value。
+    if (target) {
+      try { target.value = ''; } catch (error) { /* stub 里可能只读 */ }
+    }
+    if (file) importFace(file);
   }
 
   function viewport() {
@@ -798,7 +1310,7 @@ function createAvatar(options = {}) {
     let current = node;
     while (current && current !== root) {
       const cls = current.getAttribute ? current.getAttribute('class') : null;
-      if (cls && /(^|\s)(vc-chip|vc-btn|vc-mode|vc-min)(\s|$)/.test(cls)) return true;
+      if (cls && /(^|\s)(vc-chip|vc-btn|vc-mode|vc-min|vc-gear)(\s|$)/.test(cls)) return true;
       current = current.parentNode;
     }
     return false;
@@ -934,7 +1446,8 @@ function createAvatar(options = {}) {
   }
 
   function setMouth(level) {
-    if (!art) return;
+    // 自定义形象没有嘴部 path，静音即可。
+    if (!art || !art.mouth || typeof art.mouthPath !== 'function') return;
     art.mouth.setAttribute('d', art.mouthPath(level));
   }
 
@@ -970,6 +1483,220 @@ function createAvatar(options = {}) {
     else partial.removeAttribute('data-visible');
   }
 
+  // ------------------------------------------------------------ settings sheet
+  // 角色 -> 槽位默认声音。custom 没有自己的映射时按鲸鱼的默认值走；chibi 全是 stella。
+  function voiceDefaults(id) {
+    if (id === 'chibi') return { base: 'stella', bright: 'stella', soft: 'stella' };
+    return { base: 'tide', bright: 'stella', soft: 'tide' };
+  }
+
+  function defaultVoice(slot) {
+    const defaults = voiceDefaults(characterId());
+    return defaults[slot] || VOICE_FALLBACK;
+  }
+
+  function profileNow() {
+    const profile = readVoiceProfile();
+    const map = profile && profile.map && typeof profile.map === 'object' ? profile.map : {};
+    const speed = profile && Number.isFinite(profile.speed) ? profile.speed : 1;
+    return { map, speed };
+  }
+
+  function optionsOf(select) {
+    const list = [];
+    if (!select || !select.children) return list;
+    for (const child of select.children) {
+      if (String(child.tagName).toLowerCase() === 'option') list.push(child);
+    }
+    return list;
+  }
+
+  // Sets both the option flags and select.value; the offline stub has no
+  // native <select> behaviour, so the component cannot rely on the browser here.
+  function setSelectValue(select, options, voiceId) {
+    let chosen = voiceId;
+    const known = options.map((option) => option.getAttribute('value'));
+    if (!known.includes(chosen)) chosen = known.length ? known[0] : '';
+    for (const option of options) {
+      option.selected = option.getAttribute('value') === chosen;
+    }
+    select.value = chosen;
+    return chosen;
+  }
+
+  function syncFaceFields() {
+    const custom = characterId() === CUSTOM_CHARACTER_ID && !!face;
+    const display = custom ? face.name : resolveCharacter(characterId(), face).name;
+    nameInput.value = display;
+    if (custom) nameInput.removeAttribute('readonly');
+    else nameInput.setAttribute('readonly', 'readonly');
+    if (face) removeFaceButton.removeAttribute('hidden');
+    else removeFaceButton.setAttribute('hidden', 'hidden');
+  }
+
+  function syncSheet(profile) {
+    const current = profile || profileNow();
+    for (const slot of VOICE_SLOTS) {
+      const select = slotSelects[slot];
+      if (!select) continue;
+      const wanted = current.map[slot] || defaultVoice(slot);
+      setSelectValue(select, optionsOf(select), wanted);
+    }
+    const speed = clampSpeed(current.speed);
+    speedInput.value = String(speed);
+    speedValue.textContent = '×' + speed.toFixed(2);
+    syncFaceFields();
+  }
+
+  // 自定义形象改名：回车/失焦落盘，并同步 chip 文案与无障碍标签。
+  function commitName() {
+    if (disposed || !face || characterId() !== CUSTOM_CHARACTER_ID) return;
+    const next = String(nameInput.value || '').trim().slice(0, 12);
+    if (!next || next === face.name) {
+      nameInput.value = face.name;
+      return;
+    }
+    face = { name: next, src: face.src };
+    writeStore(FACE_KEY, JSON.stringify(face));
+    if (faceChip) {
+      faceChip.textContent = next.slice(0, 1);
+      faceChip.setAttribute('aria-label', next);
+      faceChip.setAttribute('title', next + ' · 自定义形象');
+    }
+    if (art && art.id === CUSTOM_CHARACTER_ID) art.svg.setAttribute('alt', next);
+    root.setAttribute('aria-label', next + '语音管家');
+    nameInput.value = next;
+  }
+
+  function removeCustomFace() {
+    if (disposed) return;
+    try {
+      if (win && win.localStorage) win.localStorage.removeItem(FACE_KEY);
+    } catch (error) { /* storage blocked: the in-memory face still goes away */ }
+    face = null;
+    if (faceChip) {
+      if (faceChip.parentNode && typeof faceChip.parentNode.removeChild === 'function') {
+        faceChip.parentNode.removeChild(faceChip);
+      }
+      const index = chips.findIndex((entry) => entry.id === CUSTOM_CHARACTER_ID);
+      if (index >= 0) chips.splice(index, 1);
+      faceChip = null;
+    }
+    if (characterId() === CUSTOM_CHARACTER_ID) {
+      selectCharacter(listCharacters()[0].id, true);
+    }
+    syncSheet();
+    saveButton.textContent = '保存';
+  }
+
+  function setSheetOpen(next) {
+    if (disposed) return false;
+    const wanted = !!next;
+    if (wanted) {
+      syncSheet();
+    } else {
+      // 关抽屉时把正在编辑的名字落盘，避免「输入了却没保存」。
+      commitName();
+      cancel(sheetTimer);
+      sheetTimer = null;
+      saveButton.textContent = '保存';
+    }
+    sheetOpen = wanted;
+    sheet.setAttribute('data-open', wanted ? '1' : '0');
+    sheet.setAttribute('aria-hidden', wanted ? 'false' : 'true');
+    gearButton.setAttribute('aria-expanded', wanted ? 'true' : 'false');
+    return wanted;
+  }
+
+  const handleGear = () => setSheetOpen(!sheetOpen);
+  const handleSheetClose = () => setSheetOpen(false);
+  const handleSpeedInput = () => {
+    const value = clampSpeed(Number(speedInput.value));
+    speedValue.textContent = '×' + value.toFixed(2);
+  };
+  const handlePreview = () => {
+    if (disposed) return;
+    const select = slotSelects.base;
+    const voiceId = (select && select.value) || defaultVoice('base');
+    if (onAction) onAction('preview', { voiceId });
+  };
+  const handleSave = () => {
+    if (disposed) return;
+    const map = {};
+    for (const slot of VOICE_SLOTS) {
+      const select = slotSelects[slot];
+      map[slot] = (select && select.value) || defaultVoice(slot);
+    }
+    const saved = writeVoiceProfile({ map, speed: clampSpeed(Number(speedInput.value)) });
+    if (onAction) onAction('voice', { profile: saved });
+    saveButton.textContent = '已保存';
+    cancel(sheetTimer);
+    sheetTimer = later(() => {
+      sheetTimer = null;
+      if (!disposed) saveButton.textContent = '保存';
+    }, SHEET_SAVED_MS);
+  };
+  const handleReset = () => {
+    if (disposed) return;
+    const profile = writeVoiceProfile(DEFAULT_PROFILE);
+    if (onAction) onAction('voice', { profile: DEFAULT_PROFILE });
+    syncSheet(profile);
+    saveButton.textContent = '保存';
+  };
+  const handleChangeFace = () => openFacePicker();
+  const handleRemoveFace = () => removeCustomFace();
+  const handleNameKey = (event) => {
+    if (!event) return;
+    if (event.key === 'Enter' || event.key === 'Return') {
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      commitName();
+    }
+  };
+
+  if (typeof gearButton.addEventListener === 'function') {
+    gearButton.addEventListener('click', handleGear);
+  }
+  if (typeof closeButton.addEventListener === 'function') {
+    closeButton.addEventListener('click', handleSheetClose);
+  }
+  if (typeof backdrop.addEventListener === 'function') {
+    backdrop.addEventListener('click', handleSheetClose);
+  }
+  if (typeof speedInput.addEventListener === 'function') {
+    speedInput.addEventListener('input', handleSpeedInput);
+    speedInput.addEventListener('change', handleSpeedInput);
+  }
+  if (typeof nameInput.addEventListener === 'function') {
+    nameInput.addEventListener('keydown', handleNameKey);
+    nameInput.addEventListener('change', commitName);
+    nameInput.addEventListener('blur', commitName);
+  }
+  if (typeof previewButton.addEventListener === 'function') {
+    previewButton.addEventListener('click', handlePreview);
+  }
+  if (typeof saveButton.addEventListener === 'function') {
+    saveButton.addEventListener('click', handleSave);
+  }
+  if (typeof resetButton.addEventListener === 'function') {
+    resetButton.addEventListener('click', handleReset);
+  }
+  if (typeof changeFaceButton.addEventListener === 'function') {
+    changeFaceButton.addEventListener('click', handleChangeFace);
+  }
+  if (typeof removeFaceButton.addEventListener === 'function') {
+    removeFaceButton.addEventListener('click', handleRemoveFace);
+  }
+  const handleSheetKeydown = (event) => {
+    if (!sheetOpen || !event) return;
+    if (event.key === 'Escape' || event.key === 'Esc') {
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      setSheetOpen(false);
+    }
+  };
+  if (typeof doc.addEventListener === 'function') {
+    doc.addEventListener('keydown', handleSheetKeydown);
+  }
+
   function dispose() {
     if (disposed) return;
     disposed = true;
@@ -990,6 +1717,34 @@ function createAvatar(options = {}) {
     }
     if (win && typeof win.removeEventListener === 'function') {
       win.removeEventListener('resize', onViewportResize);
+    }
+    if (typeof fileInput.removeEventListener === 'function') {
+      fileInput.removeEventListener('change', onFaceChosen);
+    }
+    if (typeof doc.removeEventListener === 'function') {
+      doc.removeEventListener('keydown', handleSheetKeydown);
+    }
+    const unbind = (node, type, handler) => {
+      if (node && typeof node.removeEventListener === 'function') node.removeEventListener(type, handler);
+    };
+    unbind(gearButton, 'click', handleGear);
+    unbind(closeButton, 'click', handleSheetClose);
+    unbind(backdrop, 'click', handleSheetClose);
+    unbind(speedInput, 'input', handleSpeedInput);
+    unbind(speedInput, 'change', handleSpeedInput);
+    unbind(nameInput, 'keydown', handleNameKey);
+    unbind(nameInput, 'change', commitName);
+    unbind(nameInput, 'blur', commitName);
+    unbind(previewButton, 'click', handlePreview);
+    unbind(saveButton, 'click', handleSave);
+    unbind(resetButton, 'click', handleReset);
+    unbind(changeFaceButton, 'click', handleChangeFace);
+    unbind(removeFaceButton, 'click', handleRemoveFace);
+    cancel(sheetTimer);
+    sheetTimer = null;
+    sheetOpen = false;
+    if (fileInput.parentNode && typeof fileInput.parentNode.removeChild === 'function') {
+      fileInput.parentNode.removeChild(fileInput);
     }
     if (root.parentNode && typeof root.parentNode.removeChild === 'function') {
       root.parentNode.removeChild(root);
@@ -1037,6 +1792,7 @@ function createAvatar(options = {}) {
     get mode() {
       return modeButton.getAttribute('data-mode');
     },
+    getCharacter: () => characterId(),
     dispose,
   };
 }
@@ -1378,6 +2134,15 @@ function createAudioEngine(deps) {
   }
 
   // -------------------------------------------------------------- playback
+  /**
+   * Playback rate is a presentation detail: clamp it so a corrupted profile can
+   * never turn a sentence into a chipmunk or a 10x speedup.
+   */
+  function clampPlaybackRate(rate) {
+    if (typeof rate !== 'number' || !Number.isFinite(rate)) return 1;
+    return Math.min(2, Math.max(0.5, rate));
+  }
+
   function prefetch(entries) {
     for (const entry of entries) {
       if (prefetched.has(entry.index)) continue;
@@ -1386,13 +2151,20 @@ function createAudioEngine(deps) {
     }
   }
 
-  async function playOne(bytes) {
+  async function playOne(bytes, rate) {
+    // A settings-panel audition may play outside a call, before start() created the
+    // context; create it on demand (the click is the user gesture Chrome wants).
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    }
+    if (audioContext.state === 'suspended') await audioContext.resume();
     const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 512;
     const data = new Float32Array(analyser.fftSize);
     const src = audioContext.createBufferSource();
     src.buffer = buffer;
+    src.playbackRate.value = clampPlaybackRate(rate);
     src.connect(analyser);
     analyser.connect(audioContext.destination);
     currentSource = src;
@@ -1435,10 +2207,13 @@ function createAudioEngine(deps) {
       return;
     }
     interrupt();
-    // Entries are either plain sentences or `{ text, voiceId }` pairs, so the host can
-    // give every sentence its own voice without the engine knowing about characters.
+    // Entries are either plain sentences or `{ text, voiceId, rate }` triples, so the
+    // host can give every sentence its own voice and speed without the engine
+    // knowing about characters.
     playQueue = sentences.map((entry, index) =>
-      typeof entry === 'string' ? { text: entry, index } : { text: entry.text, voiceId: entry.voiceId, index },
+      typeof entry === 'string'
+        ? { text: entry, index }
+        : { text: entry.text, voiceId: entry.voiceId, rate: entry.rate, index },
     );
     prefetch(playQueue.slice(0, 2));
     playing = true;
@@ -1460,7 +2235,7 @@ function createAudioEngine(deps) {
       // Prefetch the next two while this one plays, never re-fetching a played index.
       prefetch(playQueue.slice(0, 2));
       try {
-        await playOne(base64ToBytes(payload.audioBase64));
+        await playOne(base64ToBytes(payload.audioBase64), item.rate);
       } catch (_error) {
         /* decode failure: skip */
       }
@@ -1533,7 +2308,9 @@ function createAudioEngine(deps) {
         if (running) stop();
       });
     });
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    }
     if (audioContext.state === 'suspended') await audioContext.resume();
     source = audioContext.createMediaStreamSource(media);
     processor = audioContext.createScriptProcessor(1024, 1, 1);
@@ -3317,10 +4094,16 @@ const __hotkeyTest = {
 // ModuleLoader factory. Depends on `createCharacter` art in characters.js, `createAvatar`
 // (avatar.js), `createAudioEngine` (audio.js), `polish` (polish.js), `createDictation`
 // (dictation.js) and `createHotkey` (hotkey.js) — build-client.mjs keeps that order.
+// `voice-profile.js` is the one real ESM import: it is also loaded by node tests, so
+// the build script must inline it as well.
+
 
 const API = '/api/voice-companion';
 const POLL_MS = 1500;
 const CHARACTER_KEY = 'dsh.voice-companion.character';
+// The face store is owned by avatar.js; the bundle inlines both modules into one
+// scope, so this module keeps its own alias instead of redeclaring FACE_KEY.
+const FACE_STORE_KEY = 'dsh.voice-companion.face';
 const MODE_KEY = 'dsh.voice-companion.mode';
 // Pre-synthesised so the first 0.9 s after the user stops talking is never dead air:
 // the filler starts playing while the model is still thinking.
@@ -3339,6 +4122,16 @@ function storeValue(key, value) {
     window.localStorage.setItem(key, value);
   } catch (_error) {
     /* private mode: the choice just does not survive a reload */
+  }
+}
+
+// 刷新后若只存了 'custom' 而图被清掉（换设备、清缓存），回落到内置形象。
+function storedFace() {
+  try {
+    const value = JSON.parse(storedValue(FACE_STORE_KEY));
+    return value && typeof value.src === 'string' && /^data:image\//.test(value.src) ? value : null;
+  } catch (_error) {
+    return null;
   }
 }
 
@@ -3393,7 +4186,8 @@ function apply(ctx) {
     fillerIndex: 0,
     active: false,
     sessionId: undefined,
-    character: resolveCharacter(storedValue(CHARACTER_KEY)).id,
+    character: resolveCharacter(storedValue(CHARACTER_KEY), storedFace()).id,
+    voiceProfile: readVoiceProfile(),
     mode: storedValue(MODE_KEY) === 'dictation' ? 'dictation' : 'call',
     logger: (ctx && ctx.logger) || null,
   };
@@ -3414,7 +4208,7 @@ function apply(ctx) {
   };
 
   async function speak(text, voiceId) {
-    const body = { text, character: runtime.character };
+    const body = { text, character: runtime.character, voiceMap: runtime.voiceProfile.map };
     if (voiceId) body.voiceId = voiceId;
     const payload = await requestJson('/speak', { method: 'POST', body }, 30000);
     return payload;
@@ -3424,7 +4218,11 @@ function apply(ctx) {
     if (runtime.fillers.length) return;
     const payloads = await Promise.all(
       FILLERS.map((text) =>
-        requestJson('/speak', { method: 'POST', body: { text, character: runtime.character } }, 30000).catch(
+        requestJson(
+          '/speak',
+          { method: 'POST', body: { text, character: runtime.character, voiceMap: runtime.voiceProfile.map } },
+          30000,
+        ).catch(
           () => null,
         ),
       ),
@@ -3463,7 +4261,15 @@ function apply(ctx) {
     try {
       reply = await requestJson(
         '/turn',
-        { method: 'POST', body: { utterance, character: runtime.character, history: runtime.history.slice(-6) } },
+        {
+          method: 'POST',
+          body: {
+            utterance,
+            character: runtime.character,
+            history: runtime.history.slice(-6),
+            voiceMap: runtime.voiceProfile.map,
+          },
+        },
         45000,
       );
     } catch (error) {
@@ -3480,7 +4286,9 @@ function apply(ctx) {
     // The host picks a voice per sentence (character base, bright or soft); keep the
     // pairing so one reply never changes timbre halfway through.
     const voices = Array.isArray(reply.voices) ? reply.voices : [];
-    await runtime.engine.speak(say.map((text, index) => ({ text, voiceId: voices[index] })));
+    await runtime.engine.speak(
+      say.map((text, index) => ({ text, voiceId: voices[index], rate: runtime.voiceProfile.speed })),
+    );
   }
 
   async function pollEvents() {
@@ -3545,7 +4353,7 @@ function apply(ctx) {
    * @param {string} id
    */
   function setCharacter(id) {
-    const next = resolveCharacter(id).id;
+    const next = resolveCharacter(id, storedFace()).id;
     if (next === runtime.character) return runtime.character;
     runtime.character = next;
     storeValue(CHARACTER_KEY, next);
@@ -3553,11 +4361,42 @@ function apply(ctx) {
     runtime.fillerIndex = 0;
     if (runtime.avatar) {
       runtime.avatar.setCharacter(next);
-      const labels = resolveCharacter(next).labels || {};
+      const labels = resolveCharacter(next, storedFace()).labels || {};
       runtime.avatar.setSubtitle(labels.idle || '');
     }
     log('character', { id: next });
     return next;
+  }
+
+  /**
+   * Persist one voice profile and drop the pre-warmed fillers so the next line
+   * already uses the new voice. The settings panel calls this; it touches no
+   * call state, only the profile.
+   * @param {{ map?: Record<string, string>, speed?: number }} profile
+   */
+  function setVoiceProfile(profile) {
+    runtime.voiceProfile = writeVoiceProfile(normalizeProfile(profile));
+    runtime.fillers = [];
+    runtime.fillerIndex = 0;
+    log('voice', { map: runtime.voiceProfile.map, speed: runtime.voiceProfile.speed });
+    return runtime.voiceProfile;
+  }
+
+  /**
+   * Audition one voice without starting or stopping a call: a fixed line at the
+   * current speed, no history and no polling.
+   * @param {unknown} voiceId
+   */
+  function previewVoice(voiceId) {
+    if (!runtime.engine) return;
+    const id = typeof voiceId === 'string' && voiceId.trim() !== '' ? voiceId.trim() : undefined;
+    void runtime.engine.speak([
+      {
+        text: '你好呀，我是大肥鱼，现在的声音就是这样。',
+        voiceId: id,
+        rate: clampSpeed(runtime.voiceProfile.speed),
+      },
+    ]);
   }
 
   /**
@@ -3589,6 +4428,9 @@ function apply(ctx) {
         if (name === 'end') endCall();
         if (name === 'character') setCharacter(value);
         if (name === 'mode') setMode(value);
+        if (name === 'face') log('face', value);
+        if (name === 'voice') setVoiceProfile(value && typeof value === 'object' && value.profile ? value.profile : value);
+        if (name === 'preview') previewVoice(value && typeof value === 'object' ? value.voiceId : value);
       },
     });
 
@@ -3662,6 +4504,8 @@ function apply(ctx) {
       say: (text) => runtime.engine.speak([text]),
       character: (id) => (id === undefined ? runtime.character : setCharacter(id)),
       mode: (next) => (next === undefined ? runtime.mode : setMode(next)),
+      voice: () => runtime.voiceProfile,
+      setVoice: (profile) => setVoiceProfile(profile),
       session: (id) => {
         if (id !== undefined) runtime.sessionId = id;
         return runtime.sessionId;

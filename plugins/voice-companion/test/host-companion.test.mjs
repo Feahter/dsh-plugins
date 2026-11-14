@@ -263,11 +263,12 @@ test('GET /health exposes providers, voices, key state and tracked tasks', async
   })
   assert.equal(response.status, 200)
   assert.equal(response.json.ok, true)
-  assert.equal(response.json.version, '0.2.0')
+  assert.equal(response.json.version, '0.3.0')
   assert.deepEqual(response.json.tts.voices, ['stella', 'tide'])
   assert.equal(response.json.tts.apiKeyConfigured, true)
   assert.deepEqual(response.json.asr.providers, ['sensevoice', 'parakeet'])
   assert.equal(response.json.tasks.tracked, 0)
+  assert.deepEqual(response.json.tasks.defaults, { permission: 'danger-full-access', reasoningEffort: 'high' })
   assert.equal(response.json.character, 'whale')
   assert.deepEqual(response.json.characters, ['whale', 'chibi'])
   assert.equal(response.json.commands.sessions, true)
@@ -286,6 +287,8 @@ test('GET /characters lists the cast with the voice each one speaks', async () =
   assert.deepEqual(response.json.characters.map((entry) => entry.voice), ['tide', 'stella'])
   assert.equal(response.json.characters[1].name, '小肥鱼')
   assert.deepEqual(response.json.voices.map((voice) => voice.id), ['stella', 'tide'])
+  // The client clamps playback speed to the same window.
+  assert.deepEqual(response.json.speed, { min: 0.75, max: 1.35 })
 })
 
 test('POST /turn answers a chat turn without dispatching', async () => {
@@ -404,6 +407,37 @@ test('POST /turn returns one voice per sentence for the active character', async
   const whale = setup({ replies: ['{"say":"好的，我这就去看。"}'] })
   const whaleResponse = await call(whale.route('/turn'), post({ utterance: '看看日志' }))
   assert.deepEqual(whaleResponse.json.voices, ['tide'])
+})
+
+test('POST /turn honours a custom voiceMap from the client', async () => {
+  const app = setup({ replies: ['{"say":"好耶！太棒了。"}'] })
+  const response = await call(
+    app.route('/turn'),
+    post({ utterance: '看看日志', character: 'whale', voiceMap: { bright: 'tide' } }),
+  )
+
+  assert.equal(response.status, 200)
+  assert.equal(response.json.say.length, 2)
+  // Opening stays on the whale base; the bright second sentence follows the map
+  // (tide instead of the whale default stella).
+  assert.deepEqual(response.json.voices, ['tide', 'tide'])
+})
+
+test('POST /speak honours a custom voiceMap and drops invalid slots', async () => {
+  const app = setup()
+
+  const custom = await call(
+    app.route('/speak'),
+    post({ text: '好耶！', character: 'whale', voiceMap: { bright: 'tide' } }),
+  )
+  assert.equal(custom.json.voiceId, 'tide')
+
+  // An unknown slot value is ignored, so the whale default bright voice wins.
+  const invalid = await call(
+    app.route('/speak'),
+    post({ text: '好耶！', character: 'whale', voiceMap: { bright: 'nova' } }),
+  )
+  assert.equal(invalid.json.voiceId, 'stella')
 })
 
 test('POST /plan rejects an empty utterance with 400', async () => {

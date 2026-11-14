@@ -18,14 +18,20 @@ import { join } from 'node:path'
 import { getRoute, httpError, jsonRoute } from './host/http.js'
 import { createBrain, splitSentences } from './host/persona.js'
 import { createSentenceSpeaker, VOICES } from './host/tts.js'
-import { createTaskBoard } from './host/tasks.js'
+import { TASK_PERMISSION_PRESET, TASK_REASONING_EFFORT, createTaskBoard } from './host/tasks.js'
 import { createCommandService } from './host/command.js'
-import { CHARACTER_VOICES, selectVoice, selectVoices, voiceCatalog } from './host/voice.js'
+import {
+  CHARACTER_VOICES,
+  normalizeVoiceMap,
+  selectVoice,
+  selectVoices,
+  voiceCatalog,
+} from './host/voice.js'
 import { DEFAULT_CHARACTER, listCharacters, resolveCharacter } from './src/client/characters.js'
 
 export const name = 'voice-companion'
 export const ROUTE_PREFIX = '/api/voice-companion'
-export const VERSION = '0.2.0'
+export const VERSION = '0.3.0'
 
 const CONFIG_PATH = join(homedir(), '.deepseek', 'config.toml')
 const CONFIG_TTL_MS = 60_000
@@ -185,6 +191,7 @@ export function apply(ctx, options = {}) {
       sentences,
       mode: payload?.voiceMode,
       available: VOICES,
+      voiceMap: normalizeVoiceMap(payload?.voiceMap, VOICES),
     })
   }
 
@@ -243,6 +250,7 @@ export function apply(ctx, options = {}) {
         total: payload.total,
         mode: payload.voiceMode,
         available: VOICES,
+        voiceMap: normalizeVoiceMap(payload.voiceMap, VOICES),
       })
     }
     const result = await speaker.speak(text, { voiceId: requestedVoice })
@@ -285,6 +293,7 @@ export function apply(ctx, options = {}) {
           voice: CHARACTER_VOICES[entry.id]?.base ?? entry.voice,
         })),
         voices: voiceCatalog(),
+        speed: { min: 0.75, max: 1.35 },
       },
     }
   }
@@ -378,7 +387,13 @@ export function apply(ctx, options = {}) {
           apiKeyConfigured: typeof key === 'string' && key.trim() !== '',
         },
         asr: { providers: asrProviderIds(ctx) },
-        tasks: { tracked: board.tracked },
+        tasks: {
+          tracked: board.tracked,
+          defaults: {
+            permission: TASK_PERMISSION_PRESET,
+            reasoningEffort: TASK_REASONING_EFFORT,
+          },
+        },
         commands: {
           sessions:
             typeof ctx.get === 'function' &&

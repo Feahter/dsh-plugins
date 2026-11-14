@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PARTS = [
   'characters.js',
+  'voice-profile.js',
   'avatar.js',
   'audio.js',
   'polish.js',
