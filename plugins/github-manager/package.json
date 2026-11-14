@@ -1,7 +1,7 @@
 {
   "name": "dsh-github-manager",
-  "version": "1.0.0",
-  "description": "GitHub project manager for the DeepSeek Harness: a sidebar panel for repositories, issues and pull requests, plus github_* agent tools.",
+  "version": "1.1.0",
+  "description": "GitHub project manager for the DeepSeek Harness: a sidebar panel for repositories, branches, issues and pull requests, plus github_* agent tools.",
   "license": "MIT",
   "author": "Feahter",
   "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/github-manager",
@@ -15,6 +15,7 @@
     "dsh-bundle",
     "github",
     "repositories",
+    "branches",
     "issues",
     "pull-requests",
     "gh-cli",

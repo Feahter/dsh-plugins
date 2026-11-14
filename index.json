@@ -178,8 +178,8 @@
         "zh": "GitHub 项目管理"
       },
       "description": {
-        "en": "Sidebar panel plus github_* agent tools to browse repositories, triage issues, inspect pull requests, and create or close issues. Reuses your local gh CLI login (or GH_TOKEN) without exposing the token to the browser.",
-        "zh": "侧边栏面板 + github_* 工具：浏览仓库、处理 Issue、查看 Pull Request、新建或关闭 Issue；自动复用本机 gh CLI 登录（或 GH_TOKEN），token 不下发浏览器。"
+        "en": "Sidebar panel plus github_* agent tools to browse repositories and branches, triage issues, inspect pull requests, and create or close issues. Reuses your local gh CLI login (or GH_TOKEN) without exposing the token to the browser.",
+        "zh": "侧边栏面板 + github_* 工具：浏览仓库与分支、处理 Issue、查看 Pull Request、新建或关闭 Issue；自动复用本机 gh CLI 登录（或 GH_TOKEN），token 不下发浏览器。"
       },
       "icon": "plugins/github-manager/icon.svg",
       "author": "Feahter",
@@ -197,13 +197,27 @@
           "pull-requests",
           "gh-cli",
           "panel",
-          "github-management"
+          "github-management",
+          "branches"
         ],
         "sortKeys": {
-          "updated": 1793890084
+          "updated": 1794656510
         }
       },
       "versions": [
+        {
+          "version": "1.1.0",
+          "publishTimestamp": 1794656510,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "e2499d3",
+            "path": "plugins/github-manager"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
         {
           "version": "1.0.0",
           "publishTimestamp": 1793890084,
