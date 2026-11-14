@@ -119,6 +119,59 @@
       ]
     },
     {
+      "name": "dsh-voice-companion",
+      "title": {
+        "en": "Voice companion",
+        "zh": "语音看板娘"
+      },
+      "description": {
+        "en": "One panel for the whole voice surface: call mode (energy VAD + sentence splitting, every reply spoken sentence by sentence while task progress is read back), composer dictation with filler-word cleanup, and a global Ctrl+Shift+Space hotkey that turns a held-down phrase into a planned turn. The mascot is original inline SVG in two switchable looks (whale, anime stand-in); the panel drags anywhere and folds into a pill. TTS voice is picked per character and per sentence mood — an apology comes out soft, good news comes out bright.",
+        "zh": "一个面板吃掉整条语音链路：通话模式（能量 VAD + 断句，回复逐句朗读、任务进度读出来）、输入框听写（去口头语）、Ctrl+Shift+Space 按住说话松手即计划并发送。看板娘是原创内联 SVG，两种形象可切换（鲸鱼、二次元小妹）；面板能拖到任意位置，也能折成一枚胶囊。音色按形象和每句话的情绪自适应——道歉是温柔的，好消息是明亮的。"
+      },
+      "icon": "plugins/voice-companion/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/voice-companion"
+      },
+      "metadata": {
+        "category": "voice",
+        "keywords": [
+          "voice",
+          "speech",
+          "tts",
+          "dictation",
+          "hotkey",
+          "mascot",
+          "character",
+          "sensevoice",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794651845
+        }
+      },
+      "versions": [
+        {
+          "version": "0.2.0",
+          "publishTimestamp": 1794651845,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "dbee81185870973e1fe94f704f0654e9a328bcc2",
+            "path": "plugins/voice-companion"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
+    },
+    {
       "name": "dsh-github-manager",
       "title": {
         "en": "GitHub project manager",

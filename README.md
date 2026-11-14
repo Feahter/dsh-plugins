@@ -2,7 +2,7 @@
 
 Feahter's [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugins, served from one repository and one self-hosted plugin market index.
 
-Nine plugins live side by side under [`plugins/`](./plugins).
+Ten plugins live side by side under [`plugins/`](./plugins).
 
 ## Add the plugin market index
 
@@ -21,6 +21,14 @@ In the Harness Web UI open **Plugins → Discover** (or Settings → Plugins →
 Continuous dictation for the composer: click the microphone once, speak, and each paused sentence is written into the input box. Recognition runs entirely on your machine with SenseVoiceSmall (ONNX, int8) — audio never leaves the device and no model tokens are consumed.
 
 - Requirements: DSH `>= 0.2.1-rc.4` with the experimental **Voice input** bundle enabled (it provides the local SenseVoice recognizer and the `speech` Host Remote), plus a microphone.
+
+### [Voice companion](./plugins/voice-companion)
+
+One panel that covers the whole voice surface: **call mode** (energy VAD + sentence splitting, replies spoken sentence by sentence, task progress read back aloud), **composer dictation** (filler-word polished, written into the input box) and a **global hotkey** (`Ctrl+Shift+Space`, hold to talk, release to plan and send). The mascot is original inline SVG — a whale and an anime stand-in — switchable from the panel; the panel itself drags anywhere on screen and folds into a pill when it is in the way. TTS voices are picked per character and per sentence mood, so an apology comes out soft and good news comes out bright.
+
+- Requirements: DSH `>=0.2.1-rc.4` with the experimental **Voice input** bundle enabled (local SenseVoice recognizer + `speech` Host Remote), a microphone, and a TTS provider on the Host for `/speak`.
+- Routes: `GET /api/voice-companion/health`, `/characters`; `POST /turn`, `/speak`, `/dispatch`, `/events`, `/transcribe`, `/plan`, `/send`.
+- Absorbs the older `dsh-realtime-voice` (dictation) and `dsh-voice-control` (hotkey) plugins; both halves live here now.
 
 ### [GitHub project manager](./plugins/github-manager)
 
@@ -93,6 +101,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/update-check"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/novel-forge"
 dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/context-lib"
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/voice-companion"
 ```
 
 or point the plugin manager at a checkout of the corresponding directory.
