@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+// Verifies the README pair, llms.txt and index.json stay internally consistent.
+// Run from the repository root: node docs/verify-readme.mjs
+import { readFileSync, existsSync, statSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const fails = [];
+const notes = [];
+const ok = (m) => notes.push(`ok   ${m}`);
+const bad = (m) => fails.push(`FAIL ${m}`);
+const read = (p) => readFileSync(join(root, p), "utf8");
+
+// --- GitHub heading slug -----------------------------------------------------
+function slug(text) {
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")      // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")   // links -> label
+    .replace(/`/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} _-]/gu, "")          // keep letters, digits, space, _ -
+    .trim()
+    .replace(/ /g, "-");
+}
+
+function headings(md) {
+  const out = [];
+  let fence = false;
+  for (const line of md.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    const m = /^(#{1,6})\s+(.*?)\s*$/.exec(line);
+    if (m) out.push({ level: m[1].length, text: m[2], slug: slug(m[2]) });
+  }
+  return out;
+}
+
+// --- relative link + anchor check -------------------------------------------
+function checkLinks(file) {
+  const md = read(file);
+  const hs = headings(md);
+  const slugs = new Set(hs.map((h) => h.slug));
+  const seen = new Set();
+  const re = /\]\(([^)\s]+)\)/g;
+  let m;
+  let checked = 0;
+  while ((m = re.exec(md))) {
+    const raw = m[1];
+    if (/^(https?:|mailto:|#)/.test(raw)) {
+      if (raw.startsWith("#")) {
+        const frag = decodeURIComponent(raw.slice(1));
+        checked++;
+        if (!slugs.has(frag)) bad(`${file}: 锚点不存在 -> ${raw}`);
+      }
+      continue;
+    }
+    const [pathPart, frag] = raw.split("#");
+    if (!pathPart) continue;
+    checked++;
+    if (seen.has(pathPart)) continue;
+    seen.add(pathPart);
+    const target = resolve(root, pathPart.replace(/^\.\//, ""));
+    if (!target.startsWith(root)) { bad(`${file}: 链接越出仓库 -> ${raw}`); continue; }
+    if (!existsSync(target)) { bad(`${file}: 目标不存在 -> ${raw}`); continue; }
+    if (frag && statSync(target).isFile() && target.endsWith(".md")) {
+      const sub = new Set(headings(readFileSync(target, "utf8")).map((h) => h.slug));
+      if (!sub.has(frag)) bad(`${file}: 跨文件锚点不存在 -> ${raw}`);
+    }
+  }
+  ok(`${file}: ${checked} 个本地链接全部命中`);
+  return { md, hs };
+}
+
+const en = checkLinks("README.md");
+const zh = checkLinks("README.zh-CN.md");
+checkLinks("llms.txt");
+
+// --- external links present -------------------------------------------------
+const external = [...en.md.matchAll(/\]\((https?:[^)\s]+)\)/g)].map((x) => x[1]);
+ok(`README.md: ${external.length} 个外部链接（可达性由 curl 单独检查）`);
+
+// --- index.json -------------------------------------------------------------
+const index = JSON.parse(read("index.json"));
+const entries = index.plugins ?? index.packages ?? [];
+if (!Array.isArray(entries) || entries.length !== 10)
+  bad(`index.json: 期望 10 个插件，实际 ${Array.isArray(entries) ? entries.length : "非数组"}`);
+else ok("index.json: 10 个插件");
+
+const pluginDirs = entries.map((e) => {
+  const p = e.source?.path?.replace(/^\.?\//, "") ??
+    (e.versions?.[0]?.source?.path ?? "").replace(/^\.?\//, "");
+  return p;
+});
+const names = [];
+for (const e of entries) {
+  const t = e.title;
+  const titleEn = typeof t === "string" ? t : t?.en;
+  if (!titleEn) bad(`index.json: ${e.name} 缺英文 title`);
+  if (t && typeof t === "object" && !t.zh) bad(`index.json: ${e.name} 缺中文 title`);
+  const d = e.description;
+  if (d && typeof d === "object" && (!d.en || !d.zh))
+    bad(`index.json: ${e.name} 的 description 不是双语`);
+  const ver = e.versions?.[e.versions.length - 1];
+  if (!ver?.version) bad(`index.json: ${e.name} 缺 version`);
+  if (ver?.engines?.dsh == null) bad(`index.json: ${e.name} 最新版本缺 engines.dsh`);
+  if (!/^[0-9a-f]{40}$/.test(ver?.source?.commit ?? ""))
+    bad(`index.json: ${e.name} 的 commit 不是 40 位 sha`);
+  const path = ver?.source?.path?.replace(/^\.?\//, "");
+  if (!path) bad(`index.json: ${e.name} 缺 source.path`);
+  else if (!existsSync(join(root, path, "package.json")))
+    bad(`index.json: ${e.name} 的目录 ${path} 没有 package.json`);
+  names.push(path.replace(/^plugins\//, ""));
+}
+
+// --- 十个插件在中英 README 与 llms.txt 里都出现 --------------------------------
+const surfaces = {
+  "README.md": en.md,
+  "README.zh-CN.md": zh.md,
+  "llms.txt": read("llms.txt"),
+};
+for (const [file, text] of Object.entries(surfaces)) {
+  for (const n of names) {
+    if (!text.includes(`plugins/${n}`)) bad(`${file}: 未提及 plugins/${n}`);
+  }
+}
+
+// --- 目录表行数 == 插件数（中英两版） ----------------------------------------
+for (const [file, md] of [["README.md", en.md], ["README.zh-CN.md", zh.md]]) {
+  const rows = md
+    .split("\n")
+    .filter((l) => /^\|\s*\[.*\]\(\.\/plugins\/[^)]+\)\s*\|/.test(l)).length;
+  if (rows < names.length)
+    bad(`${file}: 目录/意图表里只出现了 ${rows} 次插件链接，少于 ${names.length}`);
+  else ok(`${file}: 插件链接行 ${rows} 条`);
+}
+
+// --- 语言互链 ---------------------------------------------------------------
+if (!/\[简体中文\]\(README\.zh-CN\.md\)/.test(en.md))
+  bad("README.md: 缺少指向 README.zh-CN.md 的中文切换");
+if (!/\[English\]\(README\.md\)/.test(zh.md))
+  bad("README.zh-CN.md: 缺少指向 README.md 的英文切换");
+if (en.hs.length !== zh.hs.length)
+  notes.push(`info README.md 有 ${en.hs.length} 个标题，README.zh-CN.md 有 ${zh.hs.length} 个`);
+
+// --- report -----------------------------------------------------------------
+for (const n of notes) console.log(n);
+if (fails.length) {
+  console.error(`\n${fails.length} 项失败:`);
+  for (const f of fails) console.error(f);
+  process.exit(1);
+}
+console.log("\n全部通过");

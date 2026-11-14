@@ -1,0 +1,42 @@
+# dsh-plugins
+
+> dsh-plugins is a collection of ten open-source plugins for DeepSeek Harness (dsh), an open-source AI agent harness built on the Cordis "everything is a plugin" architecture. The repository also ships index.json, a self-hosted format-1 plugin market index that lists every plugin with bilingual (English / Chinese) titles and descriptions, categories, keywords, and an exact commit per published version. Plugins cover offline voice input and speech output, GitHub project management, session archiving with a PDCA self-improvement loop, skills and agent-instruction health checks, a mind-map canvas, a local context library, an external task ledger, version update checks, and a novel-writing pipeline. License: MIT.
+
+Add this URL in DeepSeek Harness to install any plugin:
+`https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json`
+
+## Plugins
+
+- [Realtime voice input](https://github.com/Feahter/dsh-plugins/blob/main/plugins/realtime-voice): Continuous offline dictation into the DSH composer. Local SenseVoiceSmall ONNX int8 recognition on CPU, offline sentence cleanup (fillers, repeated words, self-corrections, punctuation), paired-sentence correction, optional dictation translation, reusable `ctx.get('voiceInput')` service, registers at `conversation.input.activity` with `priority: -1`.
+- [Voice companion](https://github.com/Feahter/dsh-plugins/blob/main/plugins/voice-companion): One panel for the whole voice surface — call mode with energy VAD and sentence-by-sentence speech, composer dictation, a global `Ctrl+Shift+Space` hold-to-talk hotkey, spoken task progress, switchable inline-SVG mascots, custom avatar and three voice slots. Routes: under `/api/voice-companion`: `GET /health`, `/characters`, `/events`; `POST /turn`, `/speak`, `/dispatch`, `/transcribe`, `/plan`, `/send`. Absorbs `voice-control` and the `realtime-voice` dictation.
+- [GitHub project manager](https://github.com/Feahter/dsh-plugins/blob/main/plugins/github-manager): Sidebar GitHub panel plus `github_*` agent tools for repositories, branches, issues, pull requests and comments. Reuses `gh auth login` (including the macOS keyring) or `GH_TOKEN` / `GITHUB_TOKEN`; the token never reaches the browser.
+- [Session archive + PDCA alchemy](https://github.com/Feahter/dsh-plugins/blob/main/plugins/archive-rsi): `archive_*` tools curate DSH session history (sync, tag, note, read, trash, delete) without ever modifying the original session files, and `rsi_*` tools run a PDCA loop that computes tool-error rate, correction rate, the edit-without-verification gap, context pressure and tool-catalog cost, then proposes context patches and re-measures them against later sessions. Data: `~/.dsh/archive-rsi/`. Node >= 22.15.
+- [dsh-360](https://github.com/Feahter/dsh-plugins/blob/main/plugins/dsh-360): One panel, two health checks, one 18-bucket S~E grade scale. Skills surface scores the on-demand loading path; agents surface scores everything injected into context (`AGENTS.md` / `CLAUDE.md`, subagent definitions, agent presets). Four-axis classification (role / kind / scope / state). Data: `~/.dsh/dsh-360/`. Supersedes `skills-360` and `agents-360`. Node >= 22.15.
+- [Mind canvas](https://github.com/Feahter/dsh-plugins/blob/main/plugins/mind-canvas): Infinite-canvas mind map in the DSH sidebar. `Tab` branches, tidy d3-hierarchy tree layouts, five theme presets plus a 13-slot custom palette (WCAG 4.5:1), AI branch via the host's default model, export to Markdown / OPML / FreeMind / JSON / PNG. Tools: `mind_canvas_read`, `mind_canvas_add`. Data: `~/.dsh/mind-canvas/state.json`.
+- [Context library](https://github.com/Feahter/dsh-plugins/blob/main/plugins/context-lib): One searchable index of files already on the machine — Markdown, code, images, PDFs, Office documents, session logs — with incremental rescans, a panel (search, filters, notes, trash, four view modes), and local previews via `textutil` and `qlmanage`. Nine `context_lib_*` tools. Data: `~/.dsh/context-lib/`. macOS for previews.
+- [Task ledger](https://github.com/Feahter/dsh-plugins/blob/main/plugins/task-ledger): External ledger for goals, decisions, claims, evidence and next actions, so a task survives session end, model switch or agent switch. Five tools: `task_list`, `task_open`, `task_resume` (single-writer lease, returns `run_id`), `task_checkpoint` (optimistic `expected_version`), `task_close` (evidence gate). Data: `~/.dsh/task-ledger/`.
+- [Version update check](https://github.com/Feahter/dsh-plugins/blob/main/plugins/update-check): Sidebar panel showing the installed DSH version read from the app bundle (Info.plist / packaged manifest) and the newest version from the configured update feed (`app-update.yml`), with one button that hands the upgrade to the in-app updater. Degrades to a download link when no preload bridge exists.
+- [Ink Furnace — novel forge](https://github.com/Feahter/dsh-plugins/blob/main/plugins/novel-forge): Premise to finished novel — world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision, Markdown / EPUB export. Generic stage engine, resumable per item, salvages malformed JSON findings, writes summaries in the same call as the prose (78 → 54 calls and −27% input on a 12 × 3000-word book), tracks pronouns per character. Requires a configured model. Data: `~/.dsh/novel-forge/`.
+
+## Machine-readable entry points
+
+- [index.json](https://github.com/Feahter/dsh-plugins/blob/main/index.json): Format-1 DSH plugin market index — bilingual titles and descriptions, categories (voice / developer-tools / context-engineering / creative), keywords, `engines.dsh`, and pinned commit + path per version. This is the canonical machine-readable list of the plugins.
+- [README.md](https://github.com/Feahter/dsh-plugins/blob/main/README.md): Human-readable English documentation — install, catalog, per-plugin detail, privacy table, compatibility, FAQ, citation.
+- [README.zh-CN.md](https://github.com/Feahter/dsh-plugins/blob/main/README.zh-CN.md): The same documentation in Simplified Chinese (简体中文).
+- [llms.txt](https://github.com/Feahter/dsh-plugins/blob/main/llms.txt): This file.
+- [LICENSE](https://github.com/Feahter/dsh-plugins/blob/main/LICENSE): MIT.
+
+## Common questions
+
+- What is DSH? DeepSeek Harness (`dsh`) is an open-source agent harness from DeepSeek AI built on the Cordis plugin architecture, running as a local Web UI / desktop app.
+- Are these official DeepSeek plugins? No. dsh-plugins is an independent community project maintained by Feahter, targeting the public DSH plugin API.
+- How to install? Add the index URL above in DSH's Plugins → Discover, or use `dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path:/plugins/<name>"` with the commit recorded in index.json.
+- Requirements? DSH 0.2.1-rc.4 or newer; Node 22.15+ for `archive-rsi` and `dsh-360`; macOS for `context-lib` previews; the experimental Voice input bundle and a microphone for the voice plugins; a configured model for `novel-forge` and `mind-canvas`'s AI branch; `gh auth login` or a token for `github-manager`.
+- Does it send my data anywhere? No, except: final text to your TTS provider (`voice-companion` `/speak`), the sentence text to your translation provider in `realtime-voice` translate mode, GitHub API calls with your token, model calls for `novel-forge` / `mind-canvas` AI branch, and a version read from your configured update feed.
+
+## Optional
+
+- [Feahter on GitHub](https://github.com/Feahter)
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+- [Cordis](https://github.com/cordiverse/cordis)
+- [GitHub topic: dsh-plugin](https://github.com/topics/dsh-plugin)
