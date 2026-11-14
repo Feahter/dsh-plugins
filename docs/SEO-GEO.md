@@ -6,11 +6,27 @@
 - **GEO 目标**：模型在回答「DeepSeek Harness 有哪些插件 / 有没有中文语音输入插件」时，能引用本仓库的定义句、插件清单与问答，而不是编造。
 - **衡量方式**：GitHub 搜索 `topic:dsh-plugin` 的排名、仓库 referrer、`index.json` 拉取量（raw 访问无统计时用市场安装反馈替代）、以及每月一次「把品牌词丢给 4 个模型看它怎么描述我们」。
 
+## 0. 已落地状态（2026-11-14）
+
+| 项 | 状态 |
+| --- | --- |
+| README.md（英文主文档） | ✅ 已推送到 main |
+| README.zh-CN.md（简体中文镜像，双向互链） | ✅ 已推送 |
+| llms.txt | ✅ 已推送（https://github.com/Feahter/dsh-plugins/blob/main/llms.txt） |
+| docs/verify-readme.mjs（链接/锚点/插件清单一致性校验） | ✅ 已推送，10 个插件 × 3 个入口全通过 |
+| About description（下表第 1 条） | ✅ 已改 |
+| Topics 20 个（下表第 2 条） | ✅ 已改（GitHub 上限 20，已满） |
+| Website | ⚠️ 暂时填索引 raw URL（`https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json`）；文档站建成后替换 |
+| Social preview 图 | ❌ 未做，`gh` 无法上传，需在网页 Settings → Social preview 手动传 1280×640 |
+| GitHub Pages 单页（第 4 节） | ❌ 未做 |
+
+改任何一项后，跑一次 `node docs/verify-readme.mjs`，它会把 README / llms.txt / index.json 之间的漂移打出来。
+
 ## 1. 仓库元数据（一次性，改完不用再动）
 
 ### About 描述
 
-GitHub 右侧 About 里的 description 是搜索摘要，也是社交卡片标题。当前过于口语，替换为下面这条（约 155 字符，含主关键词与并列清单）：
+GitHub 右侧 About 里的 description 是搜索摘要，也是社交卡片标题。下面是已采用的那条（约 155 字符，含主关键词与并列清单）：
 
 ```
 Ten open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub manager, session archive + PDCA, skills/agents health checks, mind map, context library, task ledger. Bilingual EN/中文.
@@ -44,12 +60,21 @@ About 的 Website 空着等于浪费一个外链位。二选一：
 
 ### 执行命令（改元数据会动线上仓库，先征得同意再跑）
 
+已执行（2026-11-14）。homepage 当时先指向索引 raw URL，文档站建好后换成 `https://feahter.github.io/dsh-plugins/`：
+
 ```bash
 gh repo edit Feahter/dsh-plugins \
   --description "Ten open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub manager, session archive + PDCA, skills/agents health checks, mind map, context library, task ledger. Bilingual EN/中文." \
-  --homepage "https://feahter.github.io/dsh-plugins/" \
-  --add-topic dsh-plugin,deepseek-harness,dsh,ai-agents,agent-harness,cordis,plugin-marketplace,voice-input,speech-to-text,offline-speech-recognition,mindmap,context-engineering,prompt-optimization,task-management,github-tools,novel-writing,epub,typescript,mit-license
+  --homepage "https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json" \
+  --add-topic dsh-plugin --add-topic deepseek-harness --add-topic dsh --add-topic ai-agents \
+  --add-topic agent-harness --add-topic cordis --add-topic plugin-marketplace \
+  --add-topic voice-input --add-topic speech-to-text --add-topic offline-speech-recognition \
+  --add-topic mindmap --add-topic context-engineering --add-topic prompt-optimization \
+  --add-topic task-management --add-topic github-tools --add-topic obsidian-alternative \
+  --add-topic novel-writing --add-topic epub --add-topic typescript --add-topic mit-license
 ```
+
+检查：`gh api repos/Feahter/dsh-plugins --jq '{description,homepage,topics}'`。
 
 社交预览图无法用 CLI 上传，需在网页端 Settings → Social preview 操作。
 
