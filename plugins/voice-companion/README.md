@@ -10,6 +10,19 @@ DSH 的「一个插件装完所有语音面」：**面板通话**、**输入框�
 | `dsh-realtime-voice`（输入框听写） | `src/client/dictation.js` + `polish.js`，走面板上的「听写」模式 |
 | `dsh-voice-control`（热键单句） | `src/client/hotkey.js`，Ctrl+Shift+Space 按住说话 |
 
+## 安装
+
+```bash
+# 从插件市场（GUI 里 Discover）装，或手动：
+dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#dbee81185870973e1fe94f704f0654e9a328bcc2&path:/plugins/voice-companion"
+
+# 本地开发时用 link：
+dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/dsh-plugins/plugins/voice-companion
+```
+
+装完确认 profile 的 `package.json` 里 `dsh.profile.bundles` 含 `dsh-voice-companion`，然后重启 GUI（或 `dsh web`）。
+语音识别依赖官方 **Voice input** 实验包（本地 SenseVoice + `speech` Host Remote），`/speak` 需要一个可用的 TTS provider。
+
 ## 三张嘴，一张脸
 
 | 入口 | 怎么用 | 说什么 |
