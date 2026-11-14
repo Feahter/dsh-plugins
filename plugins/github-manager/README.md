@@ -38,6 +38,10 @@ gh auth login                 # 方式一：复用已有 GitHub 登录
 export GH_TOKEN=<your-token>  # 方式二：环境变量（需重启）
 ```
 
+Windows 上插件会依次探测 `gh.exe`（PATH、`%ProgramFiles%\GitHub CLI`、`%LOCALAPPDATA%\GitHub CLI`），
+并在 gh 不可用时直接读 `%APPDATA%\GitHub CLI\hosts.yml`，因此 PowerShell / winget 安装的
+gh 登录同样零配置可用。
+
 - 经典 token：勾选 `repo` 权限（私有仓库 / Issue 读写）。
 - Fine-grained token：给目标仓库 Contents、Issues、Pull requests 的读写权限。
 
@@ -50,8 +54,12 @@ export GH_TOKEN=<your-token>  # 方式二：环境变量（需重启）
 侧边栏的 GitHub 图标打开“GitHub 项目管理”：
 
 - 左侧：仓库列表，支持搜索、公开/私有筛选，显示语言、星标、更新时间。
-- 右侧：仓库概要（星标、Fork、未关闭条目数、默认分支）、Issue / Pull Request 切换、
+- 右侧：仓库概要（星标、Fork、未关闭条目数、默认分支）、Issue / Pull Request / 分支切换、
   打开/关闭状态筛选。
+- 分支页签：列出全部分支（名称、最近提交、作者、时间），标出默认分支与受保护分支，
+  并显示相对默认分支的领先 / 落后提交数；点分支后按该分支查看最近提交与文件树，
+  可以逐级进入目录、预览文本文件（二进制或超过 512 KB 的文件只给提示）。
+  这里只切换面板视图，不改动本地工作树；Issue 与 Pull Request 始终是全仓库口径。
 - 操作：新建 Issue、关闭/重新打开 Issue、在 GitHub 打开、复制克隆地址、刷新。
 
 ## 工具
@@ -66,6 +74,10 @@ export GH_TOKEN=<your-token>  # 方式二：环境变量（需重启）
 | `github_update_issue` | 关闭/重开或修改 Issue |
 | `github_comment_issue` | 给 Issue / PR 添加评论 |
 | `github_list_pulls` | 列出 Pull Request |
+| `github_list_branches` | 列出分支，并附默认分支、保护状态与领先/落后提交数 |
+| `github_list_commits` | 按分支（或任意 ref）列出最近提交 |
+| `github_list_tree` | 列出分支上某个目录的文件树 |
+| `github_get_file` | 读取分支上某个文件的文本内容 |
 
 ## 实现
 
@@ -81,8 +93,8 @@ export GH_TOKEN=<your-token>  # 方式二：环境变量（需重启）
 不需要真实 token，也不会污染 profile：
 
 ```bash
-node .verify-host.mjs    # 用 stub fetch 跑通 8 个工具 + 全部面板路由 + 鉴权拒绝
-node .verify-client.mjs  # 用 React hook shim 跑通 8 种面板渲染状态
+node .verify-host.mjs    # 用 stub fetch 跑通 12 个工具 + 全部面板路由 + 鉴权拒绝
+node .verify-client.mjs  # 用 React hook shim 跑通 10 种面板渲染状态
 ```
 
 卸载：在插件管理里移除本 bundle，或在 profile 的 `cordis.patch.yml` 中禁用该行。

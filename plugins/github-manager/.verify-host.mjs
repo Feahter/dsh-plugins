@@ -125,6 +125,66 @@ globalThis.fetch = async (input, init) => {
   }
   if (url.pathname === '/user/repos') return json(200, [repo]);
   if (url.pathname === '/repos/octocat/Hello-World') return json(200, repo);
+  const mainSha = 'a'.repeat(40);
+  const featSha = 'b'.repeat(40);
+  const fileSha = 'c'.repeat(40);
+  const dirSha = 'd'.repeat(40);
+  if (url.pathname === '/repos/octocat/Hello-World/branches') {
+    if (url.searchParams.get('per_page') === '1') {
+      // GitHub reports the last page through the Link header; the panel uses it
+      // to show a branch count without listing every branch.
+      return json(200, [{ name: 'main', commit: { sha: mainSha }, protected: true }], {
+        link: '<https://api.github.com/repos/octocat/Hello-World/branches?per_page=1&page=1>; rel="last"',
+      });
+    }
+    return json(200, [
+      { name: 'main', commit: { sha: mainSha }, protected: true },
+      { name: 'feat/x', commit: { sha: featSha }, protected: false },
+    ]);
+  }
+  if (url.pathname === '/repos/octocat/Hello-World/commits/' + featSha) {
+    return json(200, {
+      sha: featSha,
+      commit: { message: 'feat: add branches\n\nbody', author: { name: 'Octo', date: '2026-11-02T00:00:00Z' } },
+      html_url: 'https://github.com/octocat/Hello-World/commit/' + featSha,
+    });
+  }
+  if (url.pathname === '/repos/octocat/Hello-World/commits/' + mainSha) {
+    return json(200, {
+      sha: mainSha,
+      commit: { message: 'chore: init\n\nbody', author: { name: 'Octo', date: '2026-11-01T00:00:00Z' } },
+      html_url: 'https://github.com/octocat/Hello-World/commit/' + mainSha,
+    });
+  }
+  if (url.pathname === '/repos/octocat/Hello-World/compare/main...feat%2Fx') {
+    return json(200, { status: 'ahead', ahead_by: 2, behind_by: 1 });
+  }
+  if (url.pathname === '/repos/octocat/Hello-World/commits') {
+    return json(200, [{
+      sha: mainSha,
+      commit: { message: 'feat: add branches\n\nbody', author: { name: 'Octo', date: '2026-11-01T00:00:00Z' } },
+      html_url: 'https://github.com/octocat/Hello-World/commit/' + mainSha,
+    }]);
+  }
+  if (url.pathname === '/repos/octocat/Hello-World/contents/') {
+    return json(200, [
+      { name: 'README.md', path: 'README.md', type: 'file', size: 12, sha: fileSha },
+      { name: 'src', path: 'src', type: 'dir', size: 0, sha: dirSha },
+    ]);
+  }
+  if (url.pathname === '/repos/octocat/Hello-World/contents/README.md') {
+    return json(200, {
+      name: 'README.md',
+      path: 'README.md',
+      type: 'file',
+      size: 12,
+      sha: fileSha,
+      encoding: 'base64',
+      content: Buffer.from('hello world\n').toString('base64'),
+      html_url: 'https://github.com/octocat/Hello-World/blob/main/README.md',
+      download_url: 'https://raw.githubusercontent.com/octocat/Hello-World/main/README.md',
+    });
+  }
   if (url.pathname === '/repos/octocat/Hello-World/issues' && method === 'GET') {
     const page = Number(url.searchParams.get('page') || '1');
     issuePages.push(page);
@@ -162,10 +222,11 @@ const plugin = await import(new URL('./index.js', import.meta.url).href + '?veri
 plugin.apply(ctx);
 
 // Registration
-assert.equal(captured.tools.size, 8, 'all github_* tools registered');
+assert.equal(captured.tools.size, 12, 'all github_* tools registered');
 assert.deepEqual([...captured.tools.keys()].sort(), [
-  'github_comment_issue', 'github_create_issue', 'github_get_repo', 'github_list_issues',
-  'github_list_pulls', 'github_list_repos', 'github_status', 'github_update_issue',
+  'github_comment_issue', 'github_create_issue', 'github_get_file', 'github_get_repo',
+  'github_list_branches', 'github_list_commits', 'github_list_issues', 'github_list_pulls',
+  'github_list_repos', 'github_list_tree', 'github_status', 'github_update_issue',
 ]);
 assert.ok(captured.route, 'web route registered');
 assert.equal(captured.route.kind, 'prefix');
@@ -192,6 +253,7 @@ assert.match(repoCall.search, /per_page=5/);
 const one = await captured.tools.get('github_get_repo').execute({ repo: 'octocat/Hello-World' });
 assert.equal(one.defaultBranch, 'main');
 assert.equal(one.stars, 42);
+assert.equal(one.branchCount, 1, 'branch count comes from the per_page=1 Link header');
 
 const issues = await captured.tools.get('github_list_issues').execute({ repo: 'octocat/Hello-World', state: 'open', limit: 10 });
 assert.equal(issues.count, 2, 'pull requests are filtered out and a second page is fetched');
@@ -215,6 +277,46 @@ assert.equal(comment.id, 777);
 const pulls = await captured.tools.get('github_list_pulls').execute({ repo: 'octocat/Hello-World' });
 assert.equal(pulls.items[0].number, 34);
 assert.equal(pulls.items[0].base, 'main');
+
+const branches = await captured.tools.get('github_list_branches').execute({ repo: 'octocat/Hello-World', limit: 5 });
+assert.equal(branches.defaultBranch, 'main');
+assert.equal(branches.count, 2);
+assert.equal(branches.total, 2);
+assert.equal(branches.items.length, 2);
+assert.equal(branches.items[0].name, 'main');
+assert.equal(branches.items[0].isDefault, true);
+assert.equal(branches.items[0].protected, true);
+assert.equal(branches.items[1].name, 'feat/x');
+assert.equal(branches.items[1].aheadBy, 2);
+assert.equal(branches.items[1].behindBy, 1);
+assert.equal(branches.items[1].shortSha.length, 7);
+assert.equal(branches.items[1].message, 'feat: add branches');
+assert.ok(branches.enrichedCount >= 1, 'at least the default branch is enriched');
+assert.ok(calls.some((call) => call.path === '/repos/octocat/Hello-World/compare/main...feat%2Fx'), 'compare uses an encoded branch name');
+assert.equal(branches.items[1].htmlUrl, 'https://github.com/octocat/Hello-World/tree/feat%2Fx', 'branch htmlUrl points at the tree view');
+
+const commitsList = await captured.tools.get('github_list_commits').execute({ repo: 'octocat/Hello-World', ref: 'main' });
+assert.equal(commitsList.ref, 'main');
+assert.equal(commitsList.count, 1);
+assert.equal(commitsList.items[0].shortSha.length, 7);
+assert.equal(commitsList.items[0].message, 'feat: add branches');
+assert.equal(commitsList.items[0].author, 'Octo');
+assert.equal(commitsList.items[0].date, '2026-11-01T00:00:00Z');
+assert.ok(calls.some((call) => call.path === '/repos/octocat/Hello-World/commits' && call.search === '?sha=main&per_page=20'));
+
+const tree = await captured.tools.get('github_list_tree').execute({ repo: 'octocat/Hello-World', ref: 'main' });
+assert.equal(tree.isDirectory, true);
+assert.equal(tree.items.length, 2);
+assert.equal(tree.items[0].type, 'dir', 'directories sort first');
+assert.equal(tree.items[0].name, 'src');
+assert.equal(tree.items[1].name, 'README.md');
+assert.equal(tree.truncated, false);
+
+const file = await captured.tools.get('github_get_file').execute({ repo: 'octocat/Hello-World', path: 'README.md', ref: 'main' });
+assert.equal(file.encoding, 'utf8');
+assert.equal(file.text, 'hello world\n');
+assert.equal(file.size, 12);
+assert.equal(file.truncated, false);
 
 // Argument validation must surface as readable errors.
 await assert.rejects(
@@ -284,6 +386,23 @@ assert.equal(response.body.data.items.length, 2);
 response = await request('GET', '/api/github-manager/pulls?full_name=octocat/Hello-World');
 assert.equal(response.body.data.items[0].draft, false);
 
+response = await request('GET', '/api/github-manager/branches?full_name=octocat/Hello-World&limit=5');
+assert.equal(response.status, 200);
+assert.equal(response.body.data.items[0].name, 'main');
+
+response = await request('GET', '/api/github-manager/commits?full_name=octocat/Hello-World&ref=main');
+assert.equal(response.status, 200);
+assert.equal(response.body.data.items[0].shortSha.length, 7);
+
+response = await request('GET', '/api/github-manager/tree?full_name=octocat/Hello-World&ref=main');
+assert.equal(response.status, 200);
+assert.equal(response.body.data.items[0].type, 'dir');
+
+response = await request('GET', '/api/github-manager/file?full_name=octocat/Hello-World&path=README.md&ref=main');
+assert.equal(response.status, 200);
+assert.equal(response.body.data.encoding, 'utf8');
+assert.equal(response.body.data.text, 'hello world\n');
+
 // Writes: these are the requests the old resource-based route could not carry.
 response = await request('POST', '/api/github-manager/issue', { full_name: 'octocat/Hello-World', title: 'From the panel', body: 'Body', labels: ['bug'] });
 assert.equal(response.status, 200);
@@ -311,6 +430,13 @@ response = await request('GET', '/api/github-manager/issues?full_name=nope');
 assert.equal(response.status, 400);
 assert.equal(response.body.ok, false);
 assert.match(response.body.error.message, /owner\/name/);
+
+response = await request('GET', '/api/github-manager/tree?full_name=nope');
+assert.equal(response.status, 400);
+
+response = await request('GET', '/api/github-manager/file?full_name=octocat/Hello-World');
+assert.equal(response.status, 400);
+assert.match(response.body.error.message, /"path" is required/);
 
 response = await request('GET', '/api/github-manager/nope');
 assert.equal(response.status, 404);
@@ -379,5 +505,23 @@ await assert.rejects(
 );
 response = await request('POST', '/api/github-manager/issue', { full_name: 'octocat/Hello-World', title: 'x' });
 assert.equal(response.status, 502, 'unconfigured token maps to a bad-gateway response');
+
+// Pure credential helpers exposed through the __testing seam.
+const { __testing } = plugin;
+assert.equal(
+  __testing.pickHostsToken('other.com:\n    oauth_token: gho_other\ngithub.com:\n    oauth_token: gho_github\n'),
+  'gho_github',
+  'the github.com host block wins over an earlier host',
+);
+assert.equal(__testing.pickHostsToken('github.com:\n    user: octocat\n'), '');
+const hostsCandidates = __testing.ghHostsCandidates();
+assert.ok(!process.env.GITHUB_MANAGER_GH_HOSTS_FILE);
+assert.match(hostsCandidates[hostsCandidates.length - 1].replace(/\\/g, '/'), /\.config\/gh\/hosts\.yml$/);
+const previousHostsFile = process.env.GITHUB_MANAGER_GH_HOSTS_FILE;
+process.env.GITHUB_MANAGER_GH_HOSTS_FILE = '/tmp/ghm-custom-hosts.yml';
+assert.deepEqual(__testing.ghHostsCandidates(), ['/tmp/ghm-custom-hosts.yml']);
+if (previousHostsFile === undefined) delete process.env.GITHUB_MANAGER_GH_HOSTS_FILE;
+else process.env.GITHUB_MANAGER_GH_HOSTS_FILE = previousHostsFile;
+if (process.platform !== 'win32') assert.ok(__testing.ghBinaries().includes('gh'));
 
 console.log('host verification passed:', captured.tools.size, 'tools,', calls.length, 'stubbed GitHub calls,', issuePages.length, 'issue pages');

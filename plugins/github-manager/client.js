@@ -79,6 +79,28 @@ window.__ModuleLoader__.load({
       refreshDone: '已刷新',
       emptyDescription: '暂无描述',
       branches: '{head} → {base}',
+      branchesTab: '分支',
+      branchesFailed: '加载分支失败：{message}',
+      branchesEmpty: '这个仓库还没有分支',
+      branchesHint: '选择分支可以按该分支查看提交与文件；Issue 和 Pull Request 始终是全仓库口径。',
+      branchDefault: '默认',
+      branchProtected: '受保护',
+      branchAhead: '领先 {count}',
+      branchBehind: '落后 {count}',
+      branchNoCompare: '未解析与默认分支的差异',
+      branchPartial: '只有前 {count} 个分支解析了提交时间与差异。',
+      branchViewing: '正在查看',
+      branchBackToDefault: '回到默认分支',
+      branchReadOnly: '只读',
+      branchCommits: '最近提交',
+      branchNoCommits: '没有提交',
+      branchFiles: '文件',
+      branchEmptyDir: '空目录',
+      branchUp: '上一级',
+      branchBinary: '二进制文件，未在面板中预览',
+      branchTooLarge: '文件超过 512 KB，未在面板中预览',
+      branchContentFailed: '加载分支内容失败：{message}',
+      branchReload: '重新加载',
       moreRepos: '最多显示 100 个仓库。',
       toggleFailed: '操作失败：{message}',
     };
@@ -152,6 +174,28 @@ window.__ModuleLoader__.load({
       refreshDone: 'Refreshed',
       emptyDescription: 'No description',
       branches: '{head} → {base}',
+      branchesTab: 'Branches',
+      branchesFailed: 'Failed to load branches: {message}',
+      branchesEmpty: 'This repository has no branches yet',
+      branchesHint: 'Picking a branch scopes the commits and files view to that branch. Issues and pull requests always stay repository-wide.',
+      branchDefault: 'Default',
+      branchProtected: 'Protected',
+      branchAhead: '{count} ahead',
+      branchBehind: '{count} behind',
+      branchNoCompare: 'Not compared with the default branch',
+      branchPartial: 'Only the first {count} branches had commit time and diff resolved.',
+      branchViewing: 'Viewing',
+      branchBackToDefault: 'Back to default branch',
+      branchReadOnly: 'Read-only',
+      branchCommits: 'Recent commits',
+      branchNoCommits: 'No commits',
+      branchFiles: 'Files',
+      branchEmptyDir: 'Empty directory',
+      branchUp: 'Up one level',
+      branchBinary: 'Binary file — not previewed in the panel',
+      branchTooLarge: 'File is larger than 512 KB — not previewed in the panel',
+      branchContentFailed: 'Failed to load the branch: {message}',
+      branchReload: 'Reload',
       moreRepos: 'Showing at most 100 repositories.',
       toggleFailed: 'Action failed: {message}',
     };
@@ -358,6 +402,21 @@ window.__ModuleLoader__.load({
       h('path', { key: 'c', d: 'm15.5 15.5 2.5-2.5' }),
     ], props && props.size);
 
+    const FolderIcon = (props) => icon([
+      h('path', { key: 'a', d: 'M3.5 7.5A1.5 1.5 0 0 1 5 6h4.2l1.6 2H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z' }),
+    ], props && props.size);
+
+    const FileIcon = (props) => icon([
+      h('path', { key: 'a', d: 'M6 3.5h7.2L19 9.3V20a.5.5 0 0 1-.5.5h-12A.5.5 0 0 1 6 20V3.5Z' }),
+      h('path', { key: 'b', d: 'M13 3.7V9.5h5.6' }),
+    ], props && props.size);
+
+    const CommitIcon = (props) => icon([
+      h('circle', { key: 'a', cx: 12, cy: 12, r: 3.2 }),
+      h('path', { key: 'b', d: 'M3.5 12h5.3' }),
+      h('path', { key: 'c', d: 'M15.2 12h5.3' }),
+    ], props && props.size);
+
     function Spinner() {
       return h('span', { className: 'ghm-spinner', 'aria-hidden': true });
     }
@@ -519,6 +578,176 @@ window.__ModuleLoader__.load({
         props.hint ? h('div', { className: 'ghm-emptyHint' }, props.hint) : null);
     }
 
+    function formatBytes(size) {
+      const value = Number(size);
+      if (!Number.isFinite(value) || value < 0) return '';
+      if (value < 1024) return value + ' B';
+      if (value < 1024 * 1024) return (value / 1024).toFixed(value < 10240 ? 1 : 0) + ' KB';
+      return (value / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function parentPath(path) {
+      const parts = String(path || '').split('/').filter(Boolean);
+      return parts.slice(0, -1).join('/');
+    }
+
+    function BranchRow(props) {
+      const branch = props.branch;
+      const t = props.t;
+      const localeId = props.localeId;
+      return h('div', {
+        className: 'ghm-row ghm-branchRow',
+        'data-active': props.active === branch.name ? 'true' : 'false',
+        'data-default': branch.isDefault ? 'true' : 'false',
+      },
+        h('span', { className: 'ghm-rowIcon' }, h(BranchIcon, { size: 16 })),
+        h('div', { className: 'ghm-rowMain' },
+          h('div', { className: 'ghm-rowTitleLine' },
+            h('button', {
+              type: 'button',
+              className: 'ghm-branchName',
+              title: branch.name,
+              onClick: () => props.onOpen(branch.name),
+            }, branch.name),
+            branch.isDefault ? h('span', { className: 'ghm-chip' }, t('branchDefault')) : null,
+            branch.protected
+              ? h('span', { className: 'ghm-chip ghm-chipMuted', title: t('branchProtected') },
+                h(LockIcon, { size: 11 }), t('branchProtected'))
+              : null),
+          h('div', { className: 'ghm-rowMeta' },
+            h('span', { className: 'ghm-sha' }, branch.shortSha || ''),
+            branch.message ? h('span', { className: 'ghm-branchMsg', title: branch.message }, branch.message) : null,
+            branch.author ? h('span', null, branch.author) : null,
+            branch.updatedAt ? h('span', null, formatRelative(branch.updatedAt, localeId)) : null,
+            branch.enrichFailed ? h('span', { className: 'ghm-metaMuted' }, t('branchNoCompare')) : null)),
+        h('div', { className: 'ghm-rowActions' },
+          branch.aheadBy
+            ? h('span', { className: 'ghm-diff ghm-diffAhead', title: t('branchAhead', { count: branch.aheadBy }) }, '↑' + branch.aheadBy)
+            : null,
+          branch.behindBy
+            ? h('span', { className: 'ghm-diff ghm-diffBehind', title: t('branchBehind', { count: branch.behindBy }) }, '↓' + branch.behindBy)
+            : null,
+          branch.htmlUrl
+            ? h('button', {
+              type: 'button',
+              className: 'ghm-btn ghm-btnGhost',
+              title: t('openOnGithub'),
+              'aria-label': t('openOnGithub'),
+              onClick: () => openExternal(branch.htmlUrl),
+            }, h(ExternalIcon, { size: 14 }))
+            : null));
+    }
+
+    function CommitRow(props) {
+      const commit = props.commit;
+      const t = props.t;
+      const localeId = props.localeId;
+      const meta = [commit.author, commit.date ? formatRelative(commit.date, localeId) : ''].filter(Boolean).join(' · ');
+      return h('div', { className: 'ghm-commit' },
+        h('span', { className: 'ghm-sha' }, commit.shortSha || ''),
+        h('span', { className: 'ghm-commitMsg', title: commit.message || '' }, commit.message || ''),
+        meta ? h('span', { className: 'ghm-commitMeta' }, meta) : null,
+        commit.htmlUrl
+          ? h('button', {
+            type: 'button',
+            className: 'ghm-btn ghm-btnGhost',
+            title: t('openOnGithub'),
+            'aria-label': t('openOnGithub'),
+            onClick: () => openExternal(commit.htmlUrl),
+          }, h(ExternalIcon, { size: 12 }))
+          : null);
+    }
+
+    function TreeRow(props) {
+      const item = props.item;
+      const isDir = item.type === 'dir';
+      return h('button', {
+        type: 'button',
+        className: 'ghm-treeRow',
+        'data-type': isDir ? 'dir' : 'file',
+        title: item.path,
+        onClick: () => (isDir ? props.onOpenDir(item.path) : props.onOpenFile(item.path)),
+      },
+        h('span', { className: 'ghm-treeIcon' }, isDir ? h(FolderIcon, { size: 14 }) : h(FileIcon, { size: 14 })),
+        h('span', { className: 'ghm-treeName' }, item.name),
+        !isDir && typeof item.size === 'number' && item.size > 0
+          ? h('span', { className: 'ghm-treeSize ghm-metaMuted' }, formatBytes(item.size))
+          : null);
+    }
+
+    function FilePreview(props) {
+      const file = props.file;
+      const t = props.t;
+      if (!file) return null;
+      if (file.loading) {
+        return h('div', { className: 'ghm-center ghm-centerInline' }, h(Spinner), h('span', null, t('loading')));
+      }
+      if (file.error) {
+        return h('div', { className: 'ghm-fileCard' },
+          h('div', { className: 'ghm-errorText' }, t('branchContentFailed', { message: file.error })),
+          h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: props.onClose }, t('cancel')));
+      }
+      const head = h('div', { className: 'ghm-subHead' },
+        h('span', { className: 'ghm-subTitle' }, h(FileIcon, { size: 14 }), file.name || file.path),
+        h('span', { className: 'ghm-metaMuted' }, file.size != null ? formatBytes(file.size) : ''),
+        h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: props.onClose }, t('cancel')));
+      const preview = file.encoding === 'utf8'
+        ? h('pre', { className: 'ghm-fileText' }, file.truncated ? String(file.text || '') + '\n…' : String(file.text || ''))
+        : h('div', { className: 'ghm-mutedBox' },
+          h('span', null, file.encoding === 'binary' ? t('branchBinary') : t('branchTooLarge')));
+      return h('div', { className: 'ghm-fileCard' }, head, preview);
+    }
+
+    function BranchPanel(props) {
+      const view = props.view;
+      const t = props.t;
+      const localeId = props.localeId;
+      if (!view) return null;
+      const head = h('div', { className: 'ghm-branchPanelHead' },
+        h('span', { className: 'ghm-subTitle' }, h(BranchIcon, { size: 14 }), t('branchViewing') + ' ' + view.branch),
+        h('span', { className: 'ghm-chip ghm-chipMuted' }, t('branchReadOnly')),
+        h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: props.onBack }, t('branchBackToDefault')));
+      if (view.loading) {
+        return h('div', { className: 'ghm-branchPanel' }, head,
+          h('div', { className: 'ghm-center ghm-centerInline' }, h(Spinner), h('span', null, t('loading'))));
+      }
+      if (view.error) {
+        return h('div', { className: 'ghm-branchPanel' }, head,
+          h('div', { className: 'ghm-center ghm-centerInline' },
+            h('div', { className: 'ghm-errorText' }, t('branchContentFailed', { message: view.error })),
+            h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: props.onReload }, t('branchReload'))));
+      }
+      const commits = view.commits || [];
+      const tree = view.tree || [];
+      return h('div', { className: 'ghm-branchPanel' }, head,
+        h('div', { className: 'ghm-subHead' },
+          h('span', { className: 'ghm-subTitle' }, h(CommitIcon, { size: 14 }), t('branchCommits'))),
+        commits.length === 0
+          ? h('div', { className: 'ghm-inlineEmpty' }, t('branchNoCommits'))
+          : h('div', { className: 'ghm-commits' },
+            commits.map((commit) => h(CommitRow, { key: commit.sha, commit, t, localeId }))),
+        h('div', { className: 'ghm-subHead' },
+          h('span', { className: 'ghm-subTitle' }, h(FolderIcon, { size: 14 }), t('branchFiles')),
+          h('span', { className: 'ghm-crumb ghm-mono' }, '/' + String(view.path || '')),
+          view.path
+            ? h('button', {
+              type: 'button',
+              className: 'ghm-crumb',
+              onClick: () => props.onOpenDir(parentPath(view.path)),
+            }, '↑ ' + t('branchUp'))
+            : null),
+        tree.length === 0
+          ? h('div', { className: 'ghm-inlineEmpty' }, t('branchEmptyDir'))
+          : h('div', { className: 'ghm-tree' },
+            tree.map((item) => h(TreeRow, {
+              key: item.path,
+              item,
+              onOpenDir: (path) => props.onOpenDir(path),
+              onOpenFile: (path) => props.onOpenFile(path),
+            }))),
+        h(FilePreview, { file: view.file, t, onClose: props.onCloseFile }));
+    }
+
     function GithubPage() {
       const t = useTranslate();
       const localeId = useLocaleId();
@@ -537,6 +766,10 @@ window.__ModuleLoader__.load({
       const [itemsLoading, setItemsLoading] = React.useState(false);
       const [itemsError, setItemsError] = React.useState('');
       const [itemsVersion, setItemsVersion] = React.useState(0);
+      const [branches, setBranches] = React.useState(null);
+      const [branchesLoading, setBranchesLoading] = React.useState(false);
+      const [branchesError, setBranchesError] = React.useState('');
+      const [branchView, setBranchView] = React.useState(null);
       const [notice, setNotice] = React.useState(null);
       const [editor, setEditor] = React.useState(null);
       const [pendingIssue, setPendingIssue] = React.useState(null);
@@ -580,7 +813,7 @@ window.__ModuleLoader__.load({
       );
 
       React.useEffect(() => {
-        if (!selectedRepo) {
+        if (!selectedRepo || tab === 'branches') {
           setItems([]);
           setItemsError('');
           return undefined;
@@ -598,6 +831,24 @@ window.__ModuleLoader__.load({
         ).finally(() => { if (alive) setItemsLoading(false); });
         return () => { alive = false; };
       }, [selectedRepo, tab, stateFilter, refreshKey, itemsVersion]);
+
+      React.useEffect(() => {
+        setBranchView(null);
+        setBranches(null);
+        setBranchesError('');
+      }, [selectedRepo]);
+
+      React.useEffect(() => {
+        if (!selectedRepo || tab !== 'branches') return undefined;
+        let alive = true;
+        setBranchesLoading(true);
+        setBranchesError('');
+        api('/branches?full_name=' + encodeURIComponent(selectedRepo.fullName) + '&limit=100').then(
+          (data) => { if (alive) setBranches(data || null); },
+          (error) => { if (alive) setBranchesError((error && error.message) || String(error)); },
+        ).finally(() => { if (alive) setBranchesLoading(false); });
+        return () => { alive = false; };
+      }, [selectedRepo, tab, refreshKey]);
 
       React.useEffect(() => {
         if (!notice) return undefined;
@@ -624,6 +875,82 @@ window.__ModuleLoader__.load({
       function selectTab(nextTab) {
         setTab(nextTab);
         setEditor(null);
+      }
+
+      // Opening a branch never touches a working tree: it only points the panel
+      // at refs the read-only host tools expose. Anything that fails leaves the
+      // previous view intact and surfaces the message in the panel itself.
+      async function openBranch(name) {
+        if (!selectedRepo) return;
+        const fullName = selectedRepo.fullName;
+        const query = '?full_name=' + encodeURIComponent(fullName) + '&ref=' + encodeURIComponent(name);
+        setBranchView({ branch: name, loading: true, error: '', commits: null, tree: null, path: '', file: null });
+        try {
+          const [commitList, treeList] = await Promise.all([
+            api('/commits' + query + '&limit=20'),
+            api('/tree' + query),
+          ]);
+          setBranchView((previous) => (previous && previous.branch === name
+            ? {
+              ...previous,
+              loading: false,
+              commits: (commitList && commitList.items) || [],
+              tree: (treeList && treeList.items) || [],
+              path: (treeList && treeList.path) || '',
+            }
+            : previous));
+        } catch (error) {
+          const message = (error && error.message) || String(error);
+          setBranchView((previous) => (previous && previous.branch === name
+            ? { ...previous, loading: false, error: message }
+            : previous));
+        }
+      }
+
+      async function openBranchPath(name, path) {
+        if (!selectedRepo) return;
+        setBranchView((previous) => (previous ? { ...previous, loading: true, error: '', file: null } : previous));
+        try {
+          const data = await api('/tree?full_name=' + encodeURIComponent(selectedRepo.fullName)
+            + '&ref=' + encodeURIComponent(name) + '&path=' + encodeURIComponent(path));
+          setBranchView((previous) => (previous && previous.branch === name
+            ? { ...previous, loading: false, path: (data && data.path) || '', tree: (data && data.items) || [] }
+            : previous));
+        } catch (error) {
+          const message = (error && error.message) || String(error);
+          setBranchView((previous) => (previous && previous.branch === name
+            ? { ...previous, loading: false, error: message }
+            : previous));
+        }
+      }
+
+      async function openBranchFile(name, path) {
+        if (!selectedRepo) return;
+        setBranchView((previous) => (previous ? { ...previous, file: { loading: true } } : previous));
+        try {
+          const data = await api('/file?full_name=' + encodeURIComponent(selectedRepo.fullName)
+            + '&ref=' + encodeURIComponent(name) + '&path=' + encodeURIComponent(path));
+          setBranchView((previous) => (previous && previous.branch === name
+            ? { ...previous, file: data || { error: path } }
+            : previous));
+        } catch (error) {
+          const message = (error && error.message) || String(error);
+          setBranchView((previous) => (previous && previous.branch === name
+            ? { ...previous, file: { error: message } }
+            : previous));
+        }
+      }
+
+      function closeBranch() {
+        setBranchView(null);
+      }
+
+      function closeBranchFile() {
+        setBranchView((previous) => (previous ? { ...previous, file: null } : previous));
+      }
+
+      function reloadBranch() {
+        if (branchView) openBranch(branchView.branch);
       }
 
       async function toggleIssue(issue) {
@@ -801,18 +1128,72 @@ window.__ModuleLoader__.load({
               'aria-selected': tab === 'pulls' ? 'true' : 'false',
               onClick: () => selectTab('pulls'),
             }, t('pulls')),
-            h('div', { className: 'ghm-stateFilter', role: 'group' },
-              [['open', t('stateOpen')], ['closed', t('stateClosed')], ['all', t('stateAll')]].map(([value, label]) =>
-                h('button', {
-                  key: value,
-                  type: 'button',
-                  className: 'ghm-stateChip',
-                  'data-active': stateFilter === value ? 'true' : 'false',
-                  onClick: () => setStateFilter(value),
-                }, label))));
+            h('button', {
+              type: 'button',
+              role: 'tab',
+              className: 'ghm-tab',
+              'data-active': tab === 'branches' ? 'true' : 'false',
+              'aria-selected': tab === 'branches' ? 'true' : 'false',
+              onClick: () => selectTab('branches'),
+            },
+              h(BranchIcon, { size: 12 }),
+              t('branchesTab'),
+              branches && branches.count ? h('span', { className: 'ghm-tabCount' }, String(branches.count)) : null),
+            tab === 'branches'
+              ? null
+              : h('div', { className: 'ghm-stateFilter', role: 'group' },
+                [['open', t('stateOpen')], ['closed', t('stateClosed')], ['all', t('stateAll')]].map(([value, label]) =>
+                  h('button', {
+                    key: value,
+                    type: 'button',
+                    className: 'ghm-stateChip',
+                    'data-active': stateFilter === value ? 'true' : 'false',
+                    onClick: () => setStateFilter(value),
+                  }, label))));
 
           let listContent;
-          if (itemsLoading) {
+          const branchList = branches && branches.fullName === selectedRepo.fullName ? branches : null;
+          if (tab === 'branches') {
+            if (branchesLoading && !branchList) {
+              listContent = h('div', { className: 'ghm-center ghm-centerInline' }, h(Spinner), h('span', null, t('loading')));
+            } else if (branchesError) {
+              listContent = h('div', { className: 'ghm-center ghm-centerInline' },
+                h('div', { className: 'ghm-errorText' }, t('branchesFailed', { message: branchesError })),
+                h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: refresh }, t('retry')));
+            } else if (!branchList || !branchList.items || branchList.items.length === 0) {
+              listContent = h(EmptyState, {
+                icon: h(BranchIcon, { size: 24 }),
+                title: t('branchesEmpty'),
+                hint: t('branchesHint'),
+              });
+            } else {
+              const partial = typeof branchList.enrichedCount === 'number' && typeof branchList.count === 'number'
+                && branchList.enrichedCount < branchList.count;
+              listContent = h('div', { className: 'ghm-branchPane' },
+                h('div', { className: 'ghm-branchList' },
+                  branchList.items.map((branch) => h(BranchRow, {
+                    key: branch.name,
+                    branch,
+                    t,
+                    localeId,
+                    active: branchView ? branchView.branch : '',
+                    onOpen: openBranch,
+                  })),
+                  partial
+                    ? h('div', { className: 'ghm-inlineEmpty' }, t('branchPartial', { count: branchList.enrichedCount }))
+                    : null),
+                h(BranchPanel, {
+                  view: branchView,
+                  t,
+                  localeId,
+                  onBack: closeBranch,
+                  onReload: reloadBranch,
+                  onOpenDir: (path) => (branchView ? openBranchPath(branchView.branch, path) : null),
+                  onOpenFile: (path) => (branchView ? openBranchFile(branchView.branch, path) : null),
+                  onCloseFile: closeBranchFile,
+                }));
+            }
+          } else if (itemsLoading) {
             listContent = h('div', { className: 'ghm-center ghm-centerInline' }, h(Spinner), h('span', null, t('loading')));
           } else if (itemsError) {
             listContent = h('div', { className: 'ghm-center ghm-centerInline' },
@@ -858,6 +1239,12 @@ window.__ModuleLoader__.load({
                 selectedRepo.language ? h('span', { className: 'ghm-metaItem' }, selectedRepo.language) : null,
                 selectedRepo.defaultBranch
                   ? h('span', { className: 'ghm-metaItem ghm-metaMuted' }, t('defaultBranch') + ': ' + selectedRepo.defaultBranch)
+                  : null,
+                branchView && branchView.branch
+                  ? h('span', { className: 'ghm-metaItem ghm-branchMeta' },
+                    h(BranchIcon, { size: 12 }),
+                    t('branchViewing') + ' ' + branchView.branch,
+                    h('button', { type: 'button', className: 'ghm-crumb', onClick: closeBranch }, t('branchBackToDefault')))
                   : null,
                 h('span', { className: 'ghm-metaItem ghm-metaMuted' }, formatRelative(selectedRepo.updatedAt, localeId))),
               h('div', { className: 'ghm-detailActions' },
@@ -1047,6 +1434,42 @@ window.__ModuleLoader__.load({
       '.ghm-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-primary);animation:ghm-spin .8s linear infinite;display:inline-block;flex:none}',
       '@keyframes ghm-spin{to{transform:rotate(360deg)}}',
       '@media (max-width: 760px){.ghm-body{grid-template-columns:minmax(0,1fr)}.ghm-sidebar{max-height:260px}}',
+      '.ghm-tabCount{font-size:10px;padding:0 5px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);line-height:15px}',
+      '.ghm-branchMeta{gap:4px}',
+      '.ghm-branchPane{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}',
+      '.ghm-branchList{display:flex;flex-direction:column;gap:2px;padding:6px 10px 8px;overflow-y:auto;flex:none;max-height:48%}',
+      '.ghm-branchRow[data-default="true"] .ghm-branchName{font-weight:600}',
+      '.ghm-branchRow[data-active="true"]{background:var(--dsw-alias-bg-layer-2);box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}',
+      '.ghm-branchName{border:0;background:none;padding:0;font:inherit;font-size:12.5px;font-weight:500;color:var(--dsw-alias-label-primary);cursor:pointer;overflow-wrap:anywhere;text-align:left}',
+      '.ghm-branchName:hover{color:var(--dsw-alias-brand-primary);text-decoration:underline}',
+      '.ghm-branchMsg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}',
+      '.ghm-sha{font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);font-size:10px;color:var(--dsw-alias-label-secondary)}',
+      '.ghm-diff{font-size:10px;line-height:15px;padding:0 5px;border-radius:999px;border:0.5px solid var(--dsw-alias-border-l1)}',
+      '.ghm-diffAhead{color:var(--dsw-alias-state-success-primary)}',
+      '.ghm-diffBehind{color:var(--dsw-alias-label-secondary)}',
+      '.ghm-branchPanel{display:flex;flex-direction:column;gap:4px;min-height:0;flex:1;overflow-y:auto;border-top:0.5px solid var(--dsw-alias-border-l1);padding:10px 14px 14px}',
+      '.ghm-branchPanelHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 0 6px}',
+      '.ghm-subHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}',
+      '.ghm-subTitle{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-primary)}',
+      '.ghm-commits{display:flex;flex-direction:column;gap:1px}',
+      '.ghm-commit{display:flex;align-items:baseline;gap:8px;padding:5px 4px;border-radius:6px;font-size:11px;min-width:0}',
+      '.ghm-commit:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.ghm-commitMsg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}',
+      '.ghm-commitMeta{flex:none;font-size:10px;color:var(--dsw-alias-label-secondary)}',
+      '.ghm-tree{display:flex;flex-direction:column;gap:1px;margin-top:2px}',
+      '.ghm-treeRow{display:flex;align-items:center;gap:7px;border:0;background:none;font:inherit;font-size:11.5px;color:var(--dsw-alias-label-primary);padding:5px 6px;border-radius:6px;cursor:pointer;text-align:left;min-width:0}',
+      '.ghm-treeRow:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.ghm-treeIcon{display:inline-flex;flex:none;color:var(--dsw-alias-label-secondary)}',
+      '.ghm-treeRow[data-type="dir"] .ghm-treeIcon{color:var(--dsw-alias-brand-primary)}',
+      '.ghm-treeName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.ghm-treeSize{flex:none;font-size:10px}',
+      '.ghm-fileCard{display:flex;flex-direction:column;gap:6px;margin-top:8px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;background:var(--dsw-alias-bg-base)}',
+      '.ghm-fileText{margin:0;max-height:320px;overflow:auto;font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);font-size:11px;line-height:1.55;color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere}',
+      '.ghm-mutedBox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--dsw-alias-label-secondary);padding:6px 2px}',
+      '.ghm-crumb{border:0;background:none;font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);font-size:10.5px;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:0 2px}',
+      '.ghm-crumb:hover{color:var(--dsw-alias-brand-primary);text-decoration:underline}',
+      '.ghm-inlineEmpty{font-size:11px;color:var(--dsw-alias-label-secondary);padding:4px 6px}',
+      '.ghm-mono{font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace)}',
     ].join('\n');
 
     function insertStyles() {
