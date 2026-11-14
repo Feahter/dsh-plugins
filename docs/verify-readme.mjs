@@ -101,15 +101,25 @@ for (const e of entries) {
   const d = e.description;
   if (d && typeof d === "object" && (!d.en || !d.zh))
     bad(`index.json: ${e.name} 的 description 不是双语`);
-  const ver = e.versions?.[e.versions.length - 1];
-  if (!ver?.version) bad(`index.json: ${e.name} 缺 version`);
-  if (ver?.engines?.dsh == null) bad(`index.json: ${e.name} 最新版本缺 engines.dsh`);
-  if (!/^[0-9a-f]{40}$/.test(ver?.source?.commit ?? ""))
-    bad(`index.json: ${e.name} 的 commit 不是 40 位 sha`);
+  const versions = e.versions ?? [];
+  if (!versions.length) bad(`index.json: ${e.name} 没有任何 version`);
+  for (const v of versions) {
+    if (v?.engines?.dsh == null) bad(`index.json: ${e.name} ${v?.version} 缺 engines.dsh`);
+    if (!/^[0-9a-f]{40}$/.test(v?.source?.commit ?? ""))
+      bad(`index.json: ${e.name} ${v?.version} 的 commit 不是 40 位 sha（${v?.source?.commit}）`);
+    const p = v?.source?.path?.replace(/^\.?\//, "");
+    if (!p) bad(`index.json: ${e.name} ${v?.version} 缺 source.path`);
+    else if (!existsSync(join(root, p, "package.json")))
+      bad(`index.json: ${e.name} ${v?.version} 的目录 ${p} 没有 package.json`);
+  }
+  // 最新版本 = publishTimestamp 最大的那条，且必须与 package.json 的版本一致
+  const ver = versions.slice().sort((a, b) => (b.publishTimestamp ?? 0) - (a.publishTimestamp ?? 0))[0];
   const path = ver?.source?.path?.replace(/^\.?\//, "");
-  if (!path) bad(`index.json: ${e.name} 缺 source.path`);
-  else if (!existsSync(join(root, path, "package.json")))
-    bad(`index.json: ${e.name} 的目录 ${path} 没有 package.json`);
+  if (path) {
+    const pkg = JSON.parse(readFileSync(join(root, path, "package.json"), "utf8"));
+    if (pkg.version !== ver.version)
+      bad(`index.json: ${e.name} 最新版本 ${ver.version} ≠ package.json ${pkg.version}`);
+  }
   names.push(path.replace(/^plugins\//, ""));
 }
 

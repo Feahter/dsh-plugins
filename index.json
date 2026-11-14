@@ -125,8 +125,8 @@
         "zh": "语音看板娘"
       },
       "description": {
-        "en": "One panel for the whole voice surface: call mode (energy VAD + sentence splitting, every reply spoken sentence by sentence while task progress is read back), composer dictation with filler-word cleanup, and a global Ctrl+Shift+Space hotkey that turns a held-down phrase into a planned turn. The mascot is original inline SVG in two switchable looks (whale, anime stand-in); the panel drags anywhere and folds into a pill. TTS voice is picked per character and per sentence mood — an apology comes out soft, good news comes out bright.",
-        "zh": "一个面板吃掉整条语音链路：通话模式（能量 VAD + 断句，回复逐句朗读、任务进度读出来）、输入框听写（去口头语）、Ctrl+Shift+Space 按住说话松手即计划并发送。看板娘是原创内联 SVG，两种形象可切换（鲸鱼、二次元小妹）；面板能拖到任意位置，也能折成一枚胶囊。音色按形象和每句话的情绪自适应——道歉是温柔的，好消息是明亮的。"
+        "en": "One panel for the whole voice surface: call mode (energy VAD + sentence splitting, every reply spoken sentence by sentence while task progress is read back), composer dictation with filler-word cleanup, and a global Ctrl+Shift+Space hotkey that turns a held-down phrase into a planned turn. The mascot is original inline SVG in two switchable looks (whale, anime stand-in); the panel drags anywhere and folds into a pill. TTS voice is picked per character and per sentence mood — an apology comes out soft, good news comes out bright. Since 0.3 the mascot can be swapped for your own image (resized in a local canvas, the image never leaves your machine) and the voice comes from three selectable slots with adjustable speed.",
+        "zh": "一个面板吃掉整条语音链路：通话模式（能量 VAD + 断句，回复逐句朗读、任务进度读出来）、输入框听写（去口头语）、Ctrl+Shift+Space 按住说话松手即计划并发送。看板娘是原创内联 SVG，两种形象可切换（鲸鱼、二次元小妹）；面板能拖到任意位置，也能折成一枚胶囊。音色按形象和每句话的情绪自适应——道歉是温柔的，好消息是明亮的。0.3 起形象可以换成你自己的图（本地 canvas 缩放，图片不出机器），声音从三个槽里自选并可调语速。"
       },
       "icon": "plugins/voice-companion/icon.svg",
       "author": "Feahter",
@@ -152,10 +152,23 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794651845
+          "updated": 1794668800
         }
       },
       "versions": [
+        {
+          "version": "0.3.0",
+          "publishTimestamp": 1794668800,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "bbbadbbdba6d55736277d275094f005e5bc71c8f",
+            "path": "plugins/voice-companion"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
         {
           "version": "0.2.0",
           "publishTimestamp": 1794651845,
@@ -211,7 +224,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "e2499d3",
+            "commit": "e2499d3c7030f1d8eb15fdcf8a54ebb2621164a4",
             "path": "plugins/github-manager"
           },
           "engines": {
