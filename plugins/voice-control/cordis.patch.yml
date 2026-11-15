@@ -1,0 +1,8 @@
+# Bundle patch for dsh-voice-control.
+#
+# One row only: the Host half registers its HTTP routes lazily through
+# `ctx.inject(['webServer'], ...)`, so a profile without a web server simply
+# never mounts them instead of failing the plugin tree.
+- insert:
+    - id: dsh-voice-control
+      name: 'dsh-voice-control'

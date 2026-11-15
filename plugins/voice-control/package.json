@@ -1,0 +1,33 @@
+{
+  "name": "dsh-voice-control",
+  "description": "Global voice control for DSH: hold a key, speak, and the utterance is routed to the right Session",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "host/",
+    "cordis.patch.yml",
+    "README.md",
+    "test/"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "node --check index.js && node --check host/router.js && node --check host/http.js && node --check host/tts.js && node --check host/sessions.js"
+  }
+}
