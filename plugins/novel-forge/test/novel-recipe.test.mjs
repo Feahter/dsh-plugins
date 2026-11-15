@@ -37,6 +37,8 @@ import {
   stripChapterHeading,
 } from '../src/recipes/novel/export.js'
 import { validateRecipe } from '../src/forge/recipe.js'
+import { buildOutlineSkeleton } from '../src/recipes/novel/plan.js'
+import { ensureVolume } from '../src/recipes/novel/chapter.js'
 import { createPrompts } from '../src/recipes/novel/prompts/zh.js'
 import {
   createFakeCtx,
@@ -435,7 +437,8 @@ test('craft：AI 腔命中 ≥3 次报 warn', () => {
   const cliche = findings.find((finding) => finding.kind === 'ai-cliche')
   assert.ok(cliche)
   assert.equal(cliche.severity, 'warn')
-  assert.match(cliche.issue, /仿佛×2/)
+  assert.match(cliche.issue, /仿佛×1/)
+  assert.match(cliche.issue, /共 4 次/)
 })
 
 test('craft：连续三段同一四字短语报 note', () => {
@@ -1560,4 +1563,87 @@ test('prompts 契约：每个 stage 都调用对应 prompt 且拿到 ctx', async
   assert.equal('outline' in createPrompts(), false)
   assert.equal(typeof createPrompts().volumeChapters, 'function')
   assert.equal(typeof createPrompts().canonPatch, 'function')
+})
+
+// ---------------------------------------------------------------- X4 / P1-2 / 一致性
+
+test('X4：cast 带 need/wound/lie/exit 时保留，不带四件套也能通过', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+
+  const withQuartet = sampleCharacters()
+  withQuartet.cast[0] = {
+    ...withQuartet.cast[0],
+    need: '承认有人留下过',
+    wound: '十二岁那年父亲卖了她的琴',
+    lie: '只有先不要别人才不会被丢下',
+    exit: '查清名册后离开殡仪馆',
+  }
+  const withCtx = createFakeCtx({ outputs: [jsonOut(withQuartet)] })
+  const withOut = await stageOf(recipe, 'characters').run(withCtx)
+  const lead = withOut.artifacts.characters.content.cast[0]
+  assert.equal(lead.need, '承认有人留下过')
+  assert.equal(lead.wound, '十二岁那年父亲卖了她的琴')
+  assert.equal(lead.lie, '只有先不要别人才不会被丢下')
+  assert.equal(lead.exit, '查清名册后离开殡仪馆')
+
+  const plainCtx = createFakeCtx({ outputs: [jsonOut(sampleCharacters())] })
+  const plainOut = await stageOf(recipe, 'characters').run(plainCtx)
+  const plainLead = plainOut.artifacts.characters.content.cast[0]
+  assert.equal('need' in plainLead, false, '不写四件套不应被 schema 补默认键')
+  assert.equal('wound' in plainLead, false)
+  assert.equal('lie' in plainLead, false)
+  assert.equal('exit' in plainLead, false)
+})
+
+test('P1-2：buildOutlineSkeleton 收到 midpointChapter 时带回该键，缺省时不带', () => {
+  const withMidpoint = buildOutlineSkeleton({ chapters: 60, chaptersPerVolume: 30, midpointChapter: 30, language: 'zh' })
+  assert.equal(withMidpoint.midpointChapter, 30)
+  const withoutMidpoint = buildOutlineSkeleton({ chapters: 60, chaptersPerVolume: 30, language: 'zh' })
+  assert.equal('midpointChapter' in withoutMidpoint, false)
+})
+
+test('P1-2：outline stage 把 spine.midpointChapter 透传给骨架，缺失时取全书正中', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+
+  const withSpine = { ...sampleSpine(1), midpointChapter: 4 }
+  const ctx = createFakeCtx({
+    artifacts: {
+      brief: { kind: 'json', content: sampleBrief() },
+      characters: { kind: 'json', content: sampleCharacters() },
+      spine: { kind: 'json', content: withSpine },
+    },
+    outputs: [jsonOut(sampleVolumeChapters(6)), jsonOut(sampleOpener())],
+  })
+  const withOut = await stageOf(recipe, 'outline').run(ctx)
+  assert.equal(withOut.artifacts.outline.content.midpointChapter, 4)
+
+  const plainCtx = createFakeCtx({
+    artifacts: {
+      brief: { kind: 'json', content: sampleBrief() },
+      characters: { kind: 'json', content: sampleCharacters() },
+      spine: { kind: 'json', content: sampleSpine(1) },
+    },
+    outputs: [jsonOut(sampleVolumeChapters(6)), jsonOut(sampleOpener())],
+  })
+  const plainOut = await stageOf(recipe, 'outline').run(plainCtx)
+  const plainMid = plainOut.artifacts.outline.content.midpointChapter
+  assert.ok(Number.isFinite(plainMid) && plainMid > 0, 'spine 没带中点章时取全书正中，不能缺键')
+})
+
+test('3b：卷纲里的 hookType 由 plan 白名单兜底，非法值回落为空串且不抛错', async () => {
+  const outline = buildOutlineSkeleton({ chapters: 6, chaptersPerVolume: 6, language: 'zh' })
+  const rows = Array.from({ length: 6 }, (_, i) => ({
+    title: `章${i + 1}`,
+    goal: `目标${i + 1}`,
+    hookType: i === 0 ? '情绪悬置' : '危机',
+  }))
+  const llm = { async generate() { return { text: JSON.stringify({ chapters: rows }) } } }
+  const result = await ensureVolume(
+    { outline, params: { language: 'zh' }, read: () => null, llm, language: 'zh' },
+    { prompts: { volumeChapters: () => ({ system: 's', user: 'u' }) } },
+  )
+  assert.equal(result.outline.chapters[0].hookType, '', '不在 HOOK_TYPES 里的值必须被兜成空串')
+  assert.equal(result.outline.chapters[1].hookType, '危机')
 })

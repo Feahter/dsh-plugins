@@ -140,8 +140,11 @@ test('指标：stats 新字段都是有限数；空正文不除零', () => {
     'sensoryPer1k',
     'abstractEmotionPer1k',
     'adverbPer1k',
+    'universalAdverbPer1k',
     'aiMarkerCount',
+    'aiMarkerPer1k',
     'nameDensity',
+    'scenePer1k',
   ]
   for (const field of fields) {
     assert.equal(typeof stats[field], 'number', `${field} 应为数字`)
@@ -156,4 +159,82 @@ test('指标：stats 新字段都是有限数；空正文不除零', () => {
     assert.equal(empty.stats[field], 0, `空正文的 ${field} 应为 0`)
   }
   assert.ok(Array.isArray(empty.findings))
+})
+
+// ---- P0-2 场景软切：没有 ***/※※，只靠空行与段首时间/地点信号 ----
+test('指标：无分隔符、三处段首「第二天」→ sceneCount 4', () => {
+  const text = [
+    '他推开门，屋里没有人。',
+    '第二天他回到办公室，桌上多了一封信。',
+    '第二天傍晚，雨停了，他在楼下等她。',
+    '第二天清晨，她来了，带着一只旧箱子。',
+  ].join('\n\n')
+  const result = checkDraft({ text, params: PARAMS })
+  assert.equal(result.stats.sceneCount, 4)
+  assert.ok(hasKind(result, 'scene', 'note'), `缺少场景密度 note：${kinds(result).map((f) => f.kind)}`)
+
+  const withBeats = checkDraft({ text, params: PARAMS, beats: { scenes: [{ cast: [] }, { cast: [] }] } })
+  assert.equal(withBeats.stats.sceneCount, 2, 'beats.scenes 优先于正文软切')
+})
+
+// ---- P0-3 AI 标记：区间合并，长框架里的词只算一次 ----
+test('指标：长框架内重叠的 AI 词只计一次', () => {
+  const result = checkDraft({ text: '空气仿佛凝固了。', params: PARAMS })
+  assert.equal(result.stats.aiMarkerCount, 1)
+  assert.ok(hasKind(result, 'ai-density', 'warn'))
+})
+
+// ---- P0-4 抽象情绪：>3/千字只 note，>6 warn、>12 block 不动 ----
+test('指标：抽象情绪约 4/千字 → 只有 note，不升 warn/block', () => {
+  const filler = '雨落在青石板上声音很轻'
+  let text = ''
+  while (countCjk(text) < 1900) text += filler
+  text += '焦虑疲惫迷茫孤独焦虑疲惫迷茫孤独'
+  const result = checkDraft({ text, params: PARAMS })
+  assert.ok(
+    result.stats.abstractEmotionPer1k > 3 && result.stats.abstractEmotionPer1k <= 6,
+    `密度应落在 3–6：${result.stats.abstractEmotionPer1k}`,
+  )
+  const emotion = result.findings.filter((finding) => finding.kind === 'emotion')
+  assert.deepEqual(emotion.map((finding) => finding.severity), ['note'])
+})
+
+// ---- P0-5 对话上限：>45% 只 note ----
+test('指标：对话 50% → 只有 note，不加 block', () => {
+  const quote = '“我们今天去河边看柳树，顺便把船修好。”'
+  const narration = '他把工具箱放在门槛上，抬头看了看天。'
+  const text = (quote + narration).repeat(12)
+  assert.ok(dialogueRatio(text) > 0.45, `对话比应 >0.45：${dialogueRatio(text)}`)
+  const result = checkDraft({ text, params: PARAMS })
+  const dialogue = result.findings.filter((finding) => finding.kind === 'dialogue')
+  assert.ok(dialogue.some((finding) => finding.severity === 'note'))
+  assert.ok(!dialogue.some((finding) => finding.severity === 'block'))
+})
+
+// ---- P0-6 引号格式：按行栈配对 ----
+test('指标：全角引号混用与未闭合各报一条 note', () => {
+  const result = checkDraft({ text: '“你来了。\n\n她点头。\n\n「走吧。」', params: PARAMS })
+  const mix = result.findings.filter((finding) => finding.kind === 'quote-mix')
+  const unclosed = result.findings.filter((finding) => finding.kind === 'quote-unclosed')
+  assert.equal(mix.length, 1)
+  assert.equal(unclosed.length, 1)
+  assert.equal(mix[0].severity, 'note')
+  assert.equal(unclosed[0].severity, 'note')
+})
+
+test('指标：对话引号内缺句末标点 → note', () => {
+  const result = checkDraft({ text: '“你来了”她说。', params: PARAMS })
+  const finding = result.findings.find((item) => item.kind === 'quote-punct')
+  assert.ok(finding)
+  assert.equal(finding.severity, 'note')
+})
+
+// ---- P1 非回归：感官只判下限，刷满不报 ----
+test('指标：视觉词刷满不产生感官 warn', () => {
+  const filler = '白光落在红墙上，影子黑而长，窗框亮得刺眼。'
+  let text = ''
+  while (countCjk(text) < 900) text += filler
+  const result = checkDraft({ text, params: PARAMS })
+  assert.ok(result.stats.sensoryPer1k > 2)
+  assert.ok(!hasKind(result, 'sensory'))
 })

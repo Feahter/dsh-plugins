@@ -164,3 +164,31 @@ test('revise：修改顺序为 结构 → 场景 → 句子 → 字词', () => {
     )
   }
 })
+
+test('新条款：段长与章末落点、beats 单场信息与 function、人物 need/wound/lie/exit 都在', () => {
+  const prompts = createPrompts()
+  const ctx = createFakeCtx()
+
+  const draft = prompts.draft(ctx)
+  for (const keyword of ['段落中位 20–80 字', '不许连续三段同长', '章末停在动作或画面']) {
+    assert.ok(draft.system.includes(keyword), `draft system 缺「${keyword}」`)
+  }
+
+  const beats = prompts.beats(ctx)
+  for (const keyword of ['每场只新增一个信息或一个人物', '同场有台词的具名角色 ≤4', 'scenes[].function']) {
+    assert.ok(beats.user.includes(keyword), `beats user 契约缺「${keyword}」`)
+  }
+  assert.ok(beats.user.includes('"function":'), 'beats 示例缺 function 字段')
+
+  const characters = prompts.characters(ctx)
+  for (const field of ['need', 'wound', 'lie', 'exit']) {
+    assert.ok(
+      characters.user.includes(`cast[].${field}`),
+      `characters user 契约缺 cast[].${field}`
+    )
+    assert.ok(
+      characters.user.includes(`"${field}":`),
+      `characters 示例缺 ${field} 字段`
+    )
+  }
+})

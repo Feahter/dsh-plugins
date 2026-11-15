@@ -126,10 +126,10 @@ export function volumeId(index) {
 /**
  * 纯脚本建骨架：0 次模型调用。
  * 章数按卷均分（前 n-1 卷 floor，最后一卷拿余数），章表为空、planned:false。
- * @param {{chapters:number, chaptersPerVolume?:number, spine?:object, language?:string}} input
+ * @param {{chapters:number, chaptersPerVolume?:number, spine?:object, language?:string, midpointChapter?:number}} input
  * @returns {object} outline v2
  */
-export function buildOutlineSkeleton({ chapters, chaptersPerVolume = 30, spine, language = 'zh' } = {}) {
+export function buildOutlineSkeleton({ chapters, chaptersPerVolume = 30, spine, language = 'zh', midpointChapter } = {}) {
   const total = Math.max(0, Math.floor(Number(chapters) || 0))
   const count = volumeCount(total, chaptersPerVolume)
   const spineVolumes = Array.isArray(spine?.volumes) ? spine.volumes : []
@@ -157,12 +157,16 @@ export function buildOutlineSkeleton({ chapters, chaptersPerVolume = 30, spine, 
     })
   }
 
+  // midpointChapter 是全书字段（章节号），不写进章表/卷表；缺省或非法时完全不出现。
+  const midpoint = Number(midpointChapter)
+
   return {
     version: 2,
     totalChapters: total,
     language: text(language) || 'zh',
     volumes,
     chapters: [],
+    ...(Number.isFinite(midpoint) && midpoint > 0 ? { midpointChapter: midpoint } : {}),
   }
 }
 

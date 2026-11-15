@@ -66,8 +66,65 @@ novel_audit  → 全书确定性体检（死亡人物说话、时间倒流、线
 - **部 → 卷 → 章，卷纲惰性展开。** 脚本先建骨架（300 章 0 次调用、<1ms），只有真要写这一卷时才花一次调用产出该卷章表；`chaptersPerVolume` 会在卷数超 40 时自动抬高，保证卷表永远写得完。
 - **单章材料包是硬预算。** `packet.js` 按固定分片与优先级拼装（本章细纲 2500 / 上一章 800 / 近几章摘要 1200 / 正典 3200 / 人物速查 1500 / 下一章目标 300 / 文风 1200 / 上帝视角摘要 1000 / 故事核 900），总长硬性 ≤ `contextBudget`（默认 12000），超了按优先级裁并给出每片的 `chars/cap/allocated/dropped`。包的大小不随章号增长：细纲 / 正典 / 人物速查这几片逐片固定上限，第 5 章和第 500 章一样大；第 1 章天然没有上一章与文风样本，会短一些。差别只在检索到了什么。
 - **正典只增不减。** `canon.json` 存结构化事实三元组（`s/p/o/chapter/status`）+ 线索（含 payoff）+ 人物档案（含 `knows`/`relations`/`lastSeen`）+ 时间线 + 不变量；没有总数上限，同一 `s|p` 出现不同 `o` 标 conflict 而不是悄悄覆盖。检索用倒排索引，只把与本章 `cast`/地点/关键词相关、且**章节不晚于本章**的事实塞进包——第 5 章看不到第 200 章才写的结局，既不剧透，也不会让角色提前知道后事。v1 的 `ledger.json` 幂等迁移，原章 id 保留。
-- **一致性靠代码查，不靠模型自觉。** 八条确定性规则各配正反用例：死亡人物出场（block）、时间倒流（warn）、人物未登记（warn）、线索 40 章未回收（audit）、人名漂移（note）、不变量被违反（warn）、正典冲突（audit）、与历史事实矛盾（note）。宁漏勿误报。
+- **一致性靠代码查，不靠模型自觉。** 单章体检 27 类、全书体检 14 类，每条都配正反用例（详见下一节）。除 `block` 外都只是提示：`warn` 进审校合并，`note` 只记录，不改稿也不拦流程。宁漏勿误报。
 - **一份产物一套检查。** 审校阶段 = 模型意见 + 确定性检查合并；`block>0 或 warn≥3` 才进入修订，修订有长度保护（0.8–1.25 倍），不会越改越短或膨胀。
+
+## 体检与结构校验清单
+
+`novel_commit` 落盘后跑 `craft.js` 的单章体检，`novel_audit` 跑 `consistency.js` 的全书体检。两张表里的 kind 都是 `findings[].kind` 的原值，级别是该 kind 实际可能出现的全部级别。
+
+### 单章体检（`craft.js`，27 类）
+
+| kind | 级别 | 触发条件 | 来源 |
+|---|---|---|---|
+| `empty` | block | 正文为空 | 02 |
+| `length` | warn | 有效字数低于目标 75% 或高于 135% | 07 |
+| `paragraph` | warn / note | 全文少于 15 段；单段超过 220 字 | 02 |
+| `scene` | note | 场景密度低于 0.4 或高于 1.2 /千字 | 02 |
+| `dialogue` | warn / note | 对话占比低于 8%；高于 45%；在 8%–15% 之间 | 05 |
+| `dialogue-tag` | warn | 一行对话贴超过 1.5 个标签，或出现「…地说」这类的副词标签 | 05 |
+| `ai-cliche` | warn | 合并重叠后 AI 标记不少于 3 处 | 06 |
+| `ai-density` | warn | AI 标记密度达到 3 /千字 | 06 |
+| `ai-pattern` | warn | 出现「不是…而是…」句式 | 06 |
+| `repeat` | note | 连续三段出现同一个四字短语 | 06 |
+| `pov` | note | 第三人称限知下出现全知视角信号 | 05 |
+| `cast` | warn | 细纲指定人物在正文里没出场 | 03 |
+| `hook` | note | 开头没有回应上一章钩子 | 04 |
+| `性别` | warn | 人物代词与档案声明的性别相反 | 03 |
+| `quote-mix` | note | 同章混用 “” 与 「」 | 05 |
+| `quote-unclosed` | note | 有开引号没有对应的闭引号 | 05 |
+| `quote-punct` | note | 对话引号内缺句末标点 | 05 |
+| `opening` | note | 前 3 句只铺环境，没有冲突、动作或对话 | 02 |
+| `sensory` | warn | 正文≥800 字且感官词低于 2 /千字 | 02 |
+| `sensory-vision` | note | 感官词总量够，但视觉桶占六成以上 | 02 |
+| `sentence-length` | warn | 平均句长超过 28 字 | 06 |
+| `emotion` | block / warn / note | 抽象情绪词高于 12 / 6 / 3 每千字 | 06 |
+| `adverb` | note | 程度副词高于 12 /千字 | 06 |
+| `adverb-universal` | note | 万能副词（缓缓、微微、轻轻等九个）达到 3 /千字 | 06 |
+| `name-density` | note | 正文≥800 字且活跃具名人物超过 5 人 /1500 字，或有 cast 台账时千字具名密度高于 1.5 | 03 |
+| `ending-summary` | note | 末 80 字出现总结词 | 04 |
+| `ending-mode` | note | 末 120 字以议论或内省收尾 | 06 |
+
+### 全书体检（`consistency.js`，14 类）
+
+| kind | 级别 | 触发条件 | 来源 |
+|---|---|---|---|
+| `dead-character` | block | 正典已死亡人物出现在本章 cast，或在正文出现两次以上 | 03 |
+| `timeline-regress` | warn | 本章 `when` 早于上一章 | 09 |
+| `cast-missing` | warn | 本章 cast 指定的中文人名一次都没出现 | 03 |
+| `name-drift` | note | 正文里未登记专名出现三次以上；或兑现章出现未登记专名 | 03 |
+| `invariant-hit` | warn | 正文命中 `canon.invariants` 里的硬约束 | 09 |
+| `fact-contradict` | note | 正文同时出现主体和已撤回的旧值 | 09 |
+| `thread-stale` | warn / note | 有 `dueIn` 且当前章已超过；无 `dueIn` 且四十章未回收 | 04 |
+| `canon-conflict` | warn | 同一主体与谓词在正典里登记了两个值 | 09 |
+| `turn-flat` | note | 章卡 `turn` 读不出「从 X 到 Y」 | 01 |
+| `midpoint-drift` | note | 中点落在全书 42%–58% 之外 | 01 |
+| `hook-streak` | warn | 连续三章及以上 `hookStrength` 不高于 2 | 04 |
+| `hook-share` | note | 全书 5 分钩占比超过 20% | 04 |
+| `bookend-flat` | note | 首末章同一地点，`turn` 价值方向也相同 | 01 |
+| `bline-unmerged` | note | 卷纲标了 B 线，58% 章号之后没有任何一章写到它 | 01 |
+
+`midpoint-drift`、`hook-streak`、`hook-share`、`bookend-flat`、`bline-unmerged` 只认卷纲 v2 的可选字段；老项目没有这些字段时整条跳过。`turn-flat` 对老项目只 note，不影响已有稿的通过率。
 
 ## 数据
 
@@ -95,7 +152,7 @@ Markdown 就是纯文本，JSON 就是普通 JSON，随时可以直接看、直�
 - **通用引擎**：stage 只有 `id/title/each/produces/review/run`，引擎只管顺序、事件、存储、取消、暂停。配方负责一切创作语义；`src/forge/budget.js` 是通用预算分配器（零小说知识）。
 - **站在成熟库上**：Markdown 渲染用 `marked`，EPUB 打包用 `epub-gen-memory`，模型 JSON 用 `zod` 校验；没有自造解析器或压缩器。
 
-架构细节：`docs/architecture-v2.md`（v0.2 增量，权威）、`docs/architecture.md`（v0.1 基线）、`docs/prompts.md`（12 个提示词构建器契约）。
+架构细节：`docs/architecture-v2.md`（v0.2 增量，权威）、`docs/architecture.md`（v0.1 基线）、`docs/prompts.md`（14 个提示词构建器契约）。
 
 ## 开发
 

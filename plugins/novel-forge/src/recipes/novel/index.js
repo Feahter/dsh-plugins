@@ -213,6 +213,12 @@ const castSchema = z.object({
   secret: soft,
   voice: soft,
   arc: soft,
+  // X4 四件套（wound → lie → want/need，exit 是退场条件）。全部可选：
+  // 老项目/弱模型没写也照常过，写了才进档案供后文引用。各上限 30 字，超长即不合契约。
+  need: z.string().max(30).optional(),
+  wound: z.string().max(30).optional(),
+  lie: z.string().max(30).optional(),
+  exit: z.string().max(30).optional(),
   // v0.3：金手指的压力面。模型愿意写就留着，让 draft 提示词能引用；
   // 缺省不报错（老项目/弱模型没有这一层，正文靠卷纲里的代价兜）。
   power: soft,
@@ -1294,6 +1300,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         const language = params.language ?? 'zh'
         const total = chaptersTotal(params)
         const spine = jsonOr(ctx, 'spine', null)
+        const pitch = jsonOr(ctx, 'pitch', null)
         let outline = jsonOr(ctx, 'outline', null)
         let changed = false
         if (outline && !plan.isV2(outline)) {
@@ -1306,6 +1313,9 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
             chaptersPerVolume: perVolumeOf(params),
             spine,
             language,
+            // P1-2：中点章是全书字段，spine/pitch 里带就用；两者都没带时取全书正中，
+            // 否则这个校验永远拿不到值（spineSchema / pitchSchema 目前没有该字段）。
+            midpointChapter: spine?.midpointChapter ?? pitch?.midpointChapter ?? Math.round(total / 2),
           })
           changed = true
         }

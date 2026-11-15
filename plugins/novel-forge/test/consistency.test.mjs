@@ -410,3 +410,281 @@ test('性能：audit 在 300 章 + 5000 facts 上 < 100ms', () => {
   assert.ok(findings.length >= 200)
   assert.ok(elapsed >= 0)
 })
+
+// 9. 结构层（P0-1 dueIn / P1-1 turn / P1-2 midpoint / P1-9 hook）-------------
+
+test('thread-stale：dueIn=3 而 distance=5 → warn，写清计划章与当前章', () => {
+  const canon = baseCanon({
+    threads: [{ id: 't01', text: '守夜人袖口的香灰', opened: 'ch0001', dueIn: 3, status: 'open' }],
+  })
+  const findings = audit({ chapters: chaptersTo(6), canon })
+  const hits = ofKind(findings, 'thread-stale')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'warn')
+  assert.match(hits[0].issue, /计划第 3 章回收/)
+  assert.match(hits[0].issue, /已到第 6 章/)
+
+  // 边界：排期章 == 当前章 不算过期（dueIn 是绝对章号）
+  const onTime = baseCanon({
+    threads: [{ id: 't01', text: '守夜人袖口的香灰', opened: 'ch0001', dueIn: 6, status: 'open' }],
+  })
+  assert.deepEqual(ofKind(audit({ chapters: chaptersTo(6), canon: onTime }), 'thread-stale'), [])
+
+  // 有 dueIn 时不再落到 40 章 note：50 章只报一条 warn
+  const far = baseCanon({
+    threads: [{ id: 't01', text: '守夜人袖口的香灰', opened: 'ch0001', dueIn: 3, status: 'open' }],
+  })
+  const farHits = ofKind(audit({ chapters: chaptersTo(50), canon: far }), 'thread-stale')
+  assert.equal(farHits.length, 1)
+  assert.equal(farHits[0].severity, 'warn')
+})
+
+test('thread-stale：dueIn 缺省时 5 章不报（40 章兜底不变）', () => {
+  const canon = baseCanon({
+    threads: [{ id: 't01', text: '守夜人袖口的香灰', opened: 'ch0001', status: 'open' }],
+  })
+  assert.deepEqual(ofKind(audit({ chapters: chaptersTo(6), canon }), 'thread-stale'), [])
+  assert.deepEqual(ofKind(audit({ chapters: chaptersTo(40), canon }), 'thread-stale'), [])
+})
+
+test('thread-stale：dueIn 是绝对章号，晚开篇也按排期报（不能只看开了几章）', () => {
+  // 第 40 章才开的线索、排期第 45 章回收，走到第 50 章时 distance 只有 10，但排期已过
+  const canon = baseCanon({
+    threads: [{ id: 't01', text: '守夜人袖口的香灰', opened: 'ch0040', dueIn: 45, status: 'open' }],
+  })
+  const hits = ofKind(audit({ chapters: chaptersTo(50), canon }), 'thread-stale')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'warn')
+  assert.match(hits[0].issue, /计划第 45 章回收/)
+  assert.match(hits[0].issue, /已到第 50 章/)
+})
+
+test('turn-flat：turn 读不出「从 X 到 Y」→ note，不 block', () => {
+  const findings = audit({ chapters: [{ id: 'ch0003', turn: '他沉默地走了' }] })
+  const hits = ofKind(findings, 'turn-flat')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'note')
+  assert.equal(hits[0].where, 'ch0003')
+  assert.match(hits[0].issue, /从 X 到 Y/)
+  assert.ok(hits[0].fix.length > 0)
+
+  // 有变化词但太短，同样读不出完整弧线
+  assert.equal(ofKind(audit({ chapters: [{ id: 'ch0004', turn: '他变了' }] }), 'turn-flat').length, 1)
+})
+
+test('turn-flat：能复述成「从 X 到 Y」的 turn → 不报', () => {
+  const findings = audit({
+    chapters: [
+      { id: 'ch0003', turn: '他从抗拒变成接受' },
+      { id: 'ch0004', turn: '他再也回不去故乡了' },
+      { id: 'ch0005', turn: '他失去最后一位亲人' },
+    ],
+  })
+  assert.deepEqual(ofKind(findings, 'turn-flat'), [])
+})
+
+test('midpoint-drift：midpointChapter=0.3（全书 30%）→ note', () => {
+  const outline = {
+    version: 2,
+    totalChapters: 10,
+    midpointChapter: 0.3,
+    chapters: chaptersTo(10),
+    volumes: [],
+  }
+  const hits = ofKind(audit({ outline }), 'midpoint-drift')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'note')
+  assert.match(hits[0].issue, /第 3 章/)
+  assert.match(hits[0].issue, /30%/)
+})
+
+test('midpoint-drift：midpointChapter=0.5 → 静默；缺字段 → 静默', () => {
+  const outline = {
+    version: 2,
+    totalChapters: 10,
+    midpointChapter: 0.5,
+    chapters: chaptersTo(10),
+    volumes: [],
+  }
+  assert.deepEqual(ofKind(audit({ outline }), 'midpoint-drift'), [])
+
+  const missing = { version: 2, totalChapters: 10, chapters: chaptersTo(10), volumes: [] }
+  assert.deepEqual(ofKind(audit({ outline: missing }), 'midpoint-drift'), [])
+})
+
+test('midpoint-drift：章号写法 5/10 静默，3/10 报 note', () => {
+  const ok = { version: 2, totalChapters: 10, midpointChapter: 5, chapters: chaptersTo(10) }
+  assert.deepEqual(ofKind(audit({ outline: ok }), 'midpoint-drift'), [])
+
+  const early = { version: 2, totalChapters: 10, midpointChapter: 3, chapters: chaptersTo(10) }
+  const hits = ofKind(audit({ outline: early }), 'midpoint-drift')
+  assert.equal(hits.length, 1)
+  assert.match(hits[0].issue, /第 3 章/)
+})
+
+test('hook-streak：连续三章 hookStrength=2 → warn', () => {
+  const chapters = [
+    { id: 'ch0001', hookStrength: 3 },
+    { id: 'ch0002', hookStrength: 2 },
+    { id: 'ch0003', hookStrength: 2 },
+    { id: 'ch0004', hookStrength: 2 },
+    { id: 'ch0005', hookStrength: 4 },
+  ]
+  const hits = ofKind(audit({ chapters }), 'hook-streak')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'warn')
+  assert.match(hits[0].issue, /连续 3 章/)
+  assert.match(hits[0].issue, /ch0002/)
+  assert.match(hits[0].issue, /ch0004/)
+})
+
+test('hook-streak：只有两章 ≤2 → 不报', () => {
+  const chapters = [
+    { id: 'ch0001', hookStrength: 3 },
+    { id: 'ch0002', hookStrength: 2 },
+    { id: 'ch0003', hookStrength: 2 },
+    { id: 'ch0004', hookStrength: 4 },
+  ]
+  assert.deepEqual(ofKind(audit({ chapters }), 'hook-streak'), [])
+})
+
+test('hook-share：5 分章占比 >20% → note；恰好 20% 不报', () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    id: `ch${String(i + 1).padStart(4, '0')}`,
+    hookStrength: i < 3 ? 5 : 3,
+  }))
+  const hits = ofKind(audit({ chapters: many }), 'hook-share')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'note')
+  assert.match(hits[0].issue, /30\.0%/)
+
+  const atTwenty = Array.from({ length: 10 }, (_, i) => ({
+    id: `ch${String(i + 1).padStart(4, '0')}`,
+    hookStrength: i < 2 ? 5 : 3,
+  }))
+  assert.deepEqual(ofKind(audit({ chapters: atTwenty }), 'hook-share'), [])
+})
+
+test('hook：hookStrength 全缺 → audit 不报错也不多报', () => {
+  assert.deepEqual(audit({ chapters: chaptersTo(5) }), [])
+  assert.deepEqual(
+    ofKind(audit({ chapters: chaptersTo(5), canon: baseCanon() }), 'hook-streak'),
+    [],
+  )
+  assert.deepEqual(
+    ofKind(audit({ chapters: chaptersTo(5), canon: baseCanon() }), 'hook-share'),
+    [],
+  )
+})
+
+// ---- P1-3 首末呼应 ---------------------------------------------------------
+
+test('bookend-flat：首末同地且 turn 同向（都得到）→ note', () => {
+  const chapters = [
+    { id: 'ch0001', where: '码头', turn: '他从老周手里得到了钥匙' },
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `ch${String(i + 2).padStart(4, '0')}` })),
+    { id: 'ch0010', where: '码头', turn: '他终于得到了自由' },
+  ]
+  const hits = ofKind(audit({ chapters }), 'bookend-flat')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'note')
+  assert.match(hits[0].issue, /码头/)
+  assert.match(hits[0].issue, /得到/)
+})
+
+test('bookend：首末同地但 turn 反向（得到→失去）→ 不报', () => {
+  const chapters = [
+    { id: 'ch0001', where: '码头', turn: '他得到了钥匙' },
+    { id: 'ch0002', where: '街市', turn: '他失去了同伴' },
+    { id: 'ch0003', where: '码头', turn: '他失去了自由' },
+  ]
+  assert.deepEqual(ofKind(audit({ chapters }), 'bookend-flat'), [])
+})
+
+test('bookend：任一章 where 缺失 → 不报', () => {
+  const chapters = [
+    { id: 'ch0001', turn: '他得到了钥匙' },
+    { id: 'ch0002', where: '码头', turn: '他得到了自由' },
+  ]
+  assert.deepEqual(ofKind(audit({ chapters }), 'bookend-flat'), [])
+})
+
+// ---- P1-8 兑现章专名漂移 ---------------------------------------------------
+
+test('name-drift：兑现章新专名出现 2 次且不在 facts → note', () => {
+  const canon = baseCanon({
+    threads: [{ id: 't1', text: '血书之谜', opened: 'ch0001', status: 'closed', closedIn: 'ch0005' }],
+    facts: [{ s: '林砚', p: '身份', o: '捕快', chapter: 'ch0001', status: 'canon' }],
+  })
+  const chapters = [
+    { id: 'ch0001', text: '林砚出门。' },
+    { id: 'ch0005', text: '沈砚推门。沈砚坐下。' },
+  ]
+  const hits = ofKind(audit({ chapters, canon }), 'name-drift')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'note')
+  assert.equal(hits[0].where, 'ch0005')
+  assert.match(hits[0].issue, /沈砚/)
+  assert.match(hits[0].issue, /2 次/)
+})
+
+test('name-drift：兑现章专名只出现 1 次 → 不报', () => {
+  const canon = baseCanon({
+    threads: [{ id: 't1', text: '血书之谜', opened: 'ch0001', status: 'closed', closedIn: 'ch0005' }],
+    facts: [{ s: '林砚', p: '身份', o: '捕快', chapter: 'ch0001', status: 'canon' }],
+  })
+  const chapters = [{ id: 'ch0005', text: '沈砚推门。' }]
+  assert.deepEqual(ofKind(audit({ chapters, canon }), 'name-drift'), [])
+})
+
+test('name-drift：无 canon / facts 为空 / 无兑现章 → 全部静默', () => {
+  const chapters = [{ id: 'ch0005', text: '沈砚推门。沈砚坐下。' }]
+  assert.deepEqual(ofKind(audit({ chapters }), 'name-drift'), [])
+  assert.deepEqual(ofKind(audit({ chapters, canon: baseCanon() }), 'name-drift'), [])
+  const canon = baseCanon({
+    threads: [{ id: 't1', text: '血书之谜', opened: 'ch0001', status: 'open', closedIn: null }],
+    facts: [{ s: '林砚', p: '身份', o: '捕快', chapter: 'ch0001', status: 'canon' }],
+  })
+  assert.deepEqual(ofKind(audit({ chapters, canon }), 'name-drift'), [])
+})
+
+// ---- X1 B 线合流 -----------------------------------------------------------
+
+test('bline-unmerged：有 B 线标记但 58% 后无合流 → note', () => {
+  const chapters = Array.from({ length: 10 }, (_, i) => ({
+    id: `ch${String(i + 1).padStart(4, '0')}`,
+    turn: '推进一个阶段',
+    hook: '新的麻烦出现',
+  }))
+  const outline = {
+    version: 2,
+    totalChapters: 10,
+    volumes: [{ title: '卷一', purpose: '开场', chapters: [], opens: ['B线：沈砚与父亲和解'] }],
+    chapters,
+  }
+  const hits = ofKind(audit({ outline }), 'bline-unmerged')
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].severity, 'note')
+  assert.equal(hits[0].where, '全书')
+  assert.match(hits[0].issue, /第 6 章/)
+})
+
+test('bline：无 B 线标记 → 完全静默；中点后已合流 → 不报', () => {
+  const chapters = Array.from({ length: 10 }, (_, i) => ({
+    id: `ch${String(i + 1).padStart(4, '0')}`,
+    turn: '推进一个阶段',
+    hook: '新的麻烦出现',
+  }))
+  const noMarker = {
+    version: 2,
+    totalChapters: 10,
+    volumes: [{ title: '卷一', purpose: '开场', chapters: [], opens: ['A线：查清血书'] }],
+    chapters,
+  }
+  assert.deepEqual(ofKind(audit({ outline: noMarker }), 'bline-unmerged'), [])
+
+  const merged = structuredClone(noMarker)
+  merged.volumes[0].opens = ['B线：沈砚与父亲和解']
+  merged.chapters[7].turn = 'B线与主线合流，沈砚交出账本'
+  assert.deepEqual(ofKind(audit({ outline: merged }), 'bline-unmerged'), [])
+})

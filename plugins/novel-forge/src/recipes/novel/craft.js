@@ -31,6 +31,16 @@ export const SENSORY_WORDS = [
   '香', '臭', '腥', '霉', '呛', '涩', '腻', '甜', '苦', '咸', '辣', '酸',
 ]
 
+// 08-C3 的五桶是上面 SENSORY_WORDS 的无重叠切分：只用于配比判断。
+// 所有词都取自原表，不新增也不删除，所以 sensoryPer1k 与 parity 一个数都不会变。
+export const SENSORY_BUCKETS = {
+  visual: ['亮', '暗', '闪', '晃', '模糊', '反光', '影子', '阴影', '颜色', '红', '灰', '黑', '白'],
+  audio: ['响', '哑', '嗡', '砰', '嘶', '吱', '咯吱', '铃', '喘', '脚步', '呼吸', '安静'],
+  touch: ['冷', '热', '烫', '凉', '冰', '湿', '干', '硬', '软', '粗糙', '滑', '黏'],
+  smellTaste: ['香', '臭', '腥', '霉', '呛', '涩', '腻', '甜', '苦', '咸', '辣', '酸'],
+  body: ['疼', '痛', '麻', '抖', '颤', '汗', '痒', '沉', '轻', '重', '紧', '松'],
+}
+
 export const ABSTRACT_EMOTION_WORDS = [
   '紧张', '害怕', '恐惧', '开心', '高兴', '快乐', '难过', '悲伤', '伤心',
   '愤怒', '生气', '焦虑', '尴尬', '兴奋', '痛苦', '幸福', '感动', '震撼',
@@ -41,10 +51,13 @@ export const ABSTRACT_EMOTION_WORDS = [
 
 export const ADVERBS = ['很', '非常', '十分', '特别', '极其', '格外', '异常', '无比', '相当', '颇为']
 
+// 06-R3 的 9 个万能副词。与上面 10 个程度副词是两套尺子，不要合并、不要互改。
+export const UNIVERSAL_ADVERBS = ['缓缓', '微微', '轻轻', '淡淡', '静静', '默默', '悄悄', '悠悠', '徐徐']
+
 /**
  * AI 腔模式表，与 story_check.py 的 AI_PATTERNS 一一对应。
  * 正则必须带全局标记；统计时每次重新克隆（或重置 lastIndex），不要复用带状态的实例。
- * 注意「仿佛 / 似乎」同时也在 AI_CLICHES 里，aiMarkerCount 统计时会按起始位置去重。
+ * 注意「仿佛 / 似乎」同时也在 AI_CLICHES 里，aiMarkerCount 统计时按命中区间合并去重。
  */
 export const AI_PATTERNS = [
   { re: /不是[^，。！？\n]{2,24}[，,]?\s*而是/g, label: '「不是…而是」排比' },
@@ -157,8 +170,9 @@ export function densityPer1k(text, words) {
 }
 
 /**
- * 名单中在正文出现 ≥2 次的不同人名数，再折算到 1500 字。
- * 空正文 per1500 为 0。
+ * 名单中在正文出现 ≥2 次的不同人名数，再折算到 1500 字 / 1000 字。
+ * 空正文 per1500 / per1k 都为 0。
+ * per1k 是 03-R5 的口径（≤1.5/千字）；per1500 保留给旧的 >5 note，不要互相替代。
  */
 export function distinctNameDensity(text, names) {
   const body = String(text ?? '')
@@ -171,7 +185,11 @@ export function distinctNameDensity(text, names) {
     seen.add(name)
     if (countOf(body, name) >= 2) distinct += 1
   }
-  return { names: distinct, per1500: cjk ? round1((1500 * distinct) / cjk) : 0 }
+  return {
+    names: distinct,
+    per1500: cjk ? round1((1500 * distinct) / cjk) : 0,
+    per1k: cjk ? round1((1000 * distinct) / cjk) : 0,
+  }
 }
 
 function castNames(cast) {
@@ -202,10 +220,15 @@ function clip(text, maxChars) {
   return `${value.slice(0, Math.max(0, maxChars - TRUNCATED.length))}${TRUNCATED}`
 }
 
+// 08-C1：普通中文小说用空行分段、不写 ***/※※，所以 fallback 还要认段首的时间/地点转移。
+const SCENE_CUES = /^(?:第二天|次日|半小时后|与此同时|夜里|清晨|傍晚|回到|来到|走进)/
+
 function countScenes(text, beats) {
   if (Array.isArray(beats?.scenes) && beats.scenes.length) return beats.scenes.length
-  const separators = String(text ?? '').match(/(?:^|\n)\s*(?:\*\s*\*\s*\*|※{2,}|◇{2,}|—\s*—\s*—)\s*(?:\n|$)/g)
-  return (separators?.length ?? 0) + 1
+  const body = String(text ?? '')
+  const separators = body.match(/(?:^|\n)\s*(?:\*\s*\*\s*\*|※{2,}|◇{2,}|—\s*—\s*—)\s*(?:\n|$)/g)
+  const soft = splitParagraphs(body).filter((paragraph) => SCENE_CUES.test(paragraph)).length
+  return Math.max((separators?.length ?? 0) + 1, soft + 1)
 }
 
 function collectCast(beats) {
@@ -350,6 +373,260 @@ function genderFindings(body, paragraphs, cast) {
   return findings
 }
 
+// 08-V4：引号格式。按行扫描、栈配对，不用跨段贪婪正则——否则一段里两个对话会互相吃掉。
+const QUOTE_OPEN = { '“': '”', '「': '」' }
+
+function quoteFormatFindings(body) {
+  const lines = String(body ?? '').replace(/\r\n?/g, '\n').split('\n')
+  const styles = new Set()
+  const unclosed = []
+  const missing = []
+  lines.forEach((line, index) => {
+    const stack = []
+    for (let at = 0; at < line.length; at += 1) {
+      const char = line[at]
+      if (QUOTE_OPEN[char]) {
+        styles.add(char)
+        stack.push({ char, at })
+        continue
+      }
+      if (char !== '”' && char !== '」') continue
+      const open = stack.pop()
+      if (!open) continue
+      const inner = line.slice(open.at + 1, at).trim()
+      const before = line.slice(0, open.at).trimEnd()
+      const dialogue = before === '' || /[：:，,。！？!?…—]$/.test(before)
+      if (dialogue && /[\u4e00-\u9fff]$/.test(inner)) missing.push(index + 1)
+    }
+    if (stack.length) unclosed.push(index + 1)
+  })
+
+  const findings = []
+  const where = (list) => `第${[...new Set(list)].slice(0, 3).join('、')}行`
+  if (styles.size > 1) {
+    findings.push({
+      severity: 'note',
+      kind: 'quote-mix',
+      where: '全章',
+      issue: `全角引号混用：${[...styles].join('、')}`,
+      fix: '选定一套（横排用“”，竖排或港台用「」），全文统一；嵌套用外双内单',
+    })
+  }
+  if (unclosed.length) {
+    findings.push({
+      severity: 'note',
+      kind: 'quote-unclosed',
+      where: where(unclosed),
+      issue: `${where(unclosed)}有开引号没有对应的闭引号`,
+      fix: '补上闭引号；若引语跨段，按段拆成各自成对的引号',
+    })
+  }
+  if (missing.length) {
+    findings.push({
+      severity: 'note',
+      kind: 'quote-punct',
+      where: where(missing),
+      issue: `${where(missing)}的对话引号内缺句末标点`,
+      fix: '在引号内补上。！？…，或把引语降为句子成分、把标点移到引号外',
+    })
+  }
+  return findings
+}
+
+// 08-C2：开篇三句。有环境、却没有冲突/动作/对话时才 note，不拦稿。
+const OPENING_ENV = /阳光|月光|天空|云|风|雨|雪|空气|街道|房间|窗外|夜色/
+const ACTION_WORDS = /走|跑|推|抓|冲|喊|摔|夺|拽|撞/
+const CRISIS_WORDS = /刀|血|死|火|追|逃|警/
+const DIALOGUE_OPEN = /[“"「『]/
+
+function openingFindings(body) {
+  const opening = statSentences(body).slice(0, 3).join('')
+  if (!opening || DIALOGUE_OPEN.test(opening)) return []
+  if (ACTION_WORDS.test(opening) || CRISIS_WORDS.test(opening)) return []
+  if (!OPENING_ENV.test(opening)) return []
+  return [{
+    severity: 'note',
+    kind: 'opening',
+    where: '开头',
+    issue: '前 3 句在铺环境，没有冲突或动作',
+    fix: '把天气和街景压成一句，第一句就让人物开口、动手或撞上麻烦',
+  }]
+}
+
+/** 五桶命中数 + 视觉占比（0–1，三位小数）；total 与 sensoryPer1k 的分子同口径。 */
+function sensoryBucketCounts(body) {
+  const counts = { total: 0 }
+  for (const [name, words] of Object.entries(SENSORY_BUCKETS)) {
+    counts[name] = words.reduce((sum, word) => sum + countOf(body, word), 0)
+    counts.total += counts[name]
+  }
+  counts.visualRatio = counts.total ? Math.round((counts.visual / counts.total) * 1000) / 1000 : 0
+  return counts
+}
+
+function sensoryBucketFindings(cjk, buckets) {
+  const per1k = cjk ? (1000 * buckets.total) / cjk : 0
+  if (per1k < 6 || buckets.visualRatio <= 0.6) return []
+  return [{
+    severity: 'note',
+    kind: 'sensory-vision',
+    where: '全章',
+    issue: `感官词 ${round1(per1k)}/千字，视觉桶占 ${Math.round(buckets.visualRatio * 100)}%（${buckets.visual}/${buckets.total}），其余四个通道几乎空着`,
+    fix: '把一半视觉描写换成温度、材质、气味或身体反应，让读者在场',
+  }]
+}
+
+// 08-C4 / 06-R6：落点只能是动作或画面；内省收尾让下一章没有拉力。
+const ENDING_SUMMARY = /终于|原来|明白|这一切|从此|就这样|说到底|归根结底|算是/
+const ENDING_REFLECT = /明白|终于|原来|意识到|知道|懂得|才懂/
+const ENDING_SOFT = /(?:了|吧|呢)。[」”]?$/
+
+function endingFindings(body) {
+  const summary = body.slice(-80)
+  if (ENDING_SUMMARY.test(summary)) {
+    return [{
+      severity: 'note',
+      kind: 'ending-summary',
+      where: '结尾',
+      issue: `末 80 字出现总结词（${summary.match(ENDING_SUMMARY)[0]}），章末在替读者下结论`,
+      fix: '删掉总结，换成人物最后一个动作或停住的画面，让读者自己收',
+    }]
+  }
+  const last = statSentences(body.slice(-120)).pop() ?? ''
+  if (!last) return []
+  const reflective = ENDING_REFLECT.test(last) || (ENDING_SOFT.test(last) && !ACTION_WORDS.test(last))
+  if (!reflective) return []
+  return [{
+    severity: 'note',
+    kind: 'ending-mode',
+    where: '结尾',
+    issue: `末句以议论收尾：「${clip(last, 30)}」，不是动作或画面`,
+    fix: '把「明白/知道/原来」改成人物做完的动作，或停在一个状态变了的物件上',
+  }]
+}
+
+// 05-R7 / 08-V3：对话标签。只数引语外、同一行、贴着引号的「说/道/问/答/喊」；
+// 引语内的字不算，动作节拍不算。「道/问/答」先排除 知道、街道、问题、答案 这类词。
+const TAG_VERBS = /[说道问答喊]/g
+const TAG_TAIL = /[道着了]/
+const TAG_PREV_BLOCK = {
+  说: /[听虽就再小假解]/,
+  道: /[知街味难管报轨通频公地霸赤王称一]/,
+  问: /[学疑]/,
+  答: /[解]/,
+}
+const TAG_NEXT_BLOCK = {
+  说: /[明服法不]/,
+  道: /[歉路理德具士教观谢白]/,
+  问: /[题号候世责卷]/,
+  答: /[案卷题]/,
+}
+const TAG_CLAUSE_BREAK = /[，。！？；：、…—\n]/
+
+function isSpeechTag(text, index, verb) {
+  const prev = text[index - 1] ?? ''
+  const next = text[index + 1] ?? ''
+  if (TAG_PREV_BLOCK[verb]?.test(prev)) return false
+  if (TAG_NEXT_BLOCK[verb]?.test(next)) return false
+  return true
+}
+
+/**
+ * 对话标签读数（05-R7）：
+ * - 分子只数引语外、同一行、贴着引号的「说/道/问/答/喊」；「说道」「问着」只算一个。
+ * - dialogueCjk 与 dialogueRatio 的分子同口径（引号内汉字）。
+ * - 密度阈值用正文的「每 100 字对话 ≤2」；per100Sentences 只做展示，不参与判定
+ *   （合同里的「标签数/100 句」与 05-R7 的每百字口径不同，按正文阈值执行）。
+ * - 副词标签：说/道 前 8 字、同一小句内命中 ADVERBS，记一次；一次出现即超限（08-V3）。
+ */
+function dialogueTagStats(body) {
+  const text = String(body ?? '')
+  const sentences = statSentences(text)
+  const spanPattern = /[“"「『]([^”"」』]{1,600})[”"」』]/g
+  const tags = []
+  const seen = new Set()
+  let dialogueCjk = 0
+  let matched
+  while ((matched = spanPattern.exec(text)) !== null) {
+    const start = matched.index
+    const end = spanPattern.lastIndex
+    dialogueCjk += countCjk(matched[1])
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1
+    const lineBreak = text.indexOf('\n', end)
+    const lineEnd = lineBreak === -1 ? text.length : lineBreak
+    const windows = [
+      [Math.max(lineStart, start - 12), start],
+      [end, Math.min(lineEnd, end + 16)],
+    ]
+    for (const [from, to] of windows) {
+      const window = text.slice(from, to)
+      const verbPattern = new RegExp(TAG_VERBS.source, 'g')
+      let hit
+      while ((hit = verbPattern.exec(window)) !== null) {
+        const index = from + hit.index
+        const verb = hit[0]
+        if (seen.has(index)) continue
+        if (!isSpeechTag(text, index, verb)) continue
+        seen.add(index)
+        const next = text[index + 1] ?? ''
+        const clause = text
+          .slice(Math.max(0, index - 8), index)
+          .split(TAG_CLAUSE_BREAK)
+          .pop() ?? ''
+        const adverb = (verb === '说' || verb === '道') ? ADVERBS.find((word) => clause.includes(word)) : ''
+        tags.push({ verb, adverb })
+        // 「说道」「说着」「问了」：尾巴属于同一个标签，别把「道/着/了」再算一个。
+        if (TAG_TAIL.test(next)) verbPattern.lastIndex = hit.index + 2
+      }
+    }
+  }
+  const adverbTags = tags.filter((tag) => tag.adverb)
+  return {
+    count: tags.length,
+    dialogueCjk,
+    dialogueSentences: sentences.filter((sentence) => DIALOGUE_OPEN.test(sentence)).length,
+    per100Chars: dialogueCjk ? round1((100 * tags.length) / dialogueCjk) : 0,
+    per100Sentences: sentences.length ? round1((100 * tags.length) / sentences.length) : 0,
+    adverbCount: adverbTags.length,
+    adverbRatio: tags.length ? Math.round((adverbTags.length / tags.length) * 1000) / 1000 : 0,
+    adverbWords: [...new Set(adverbTags.map((tag) => tag.adverb))],
+    verbs: [...new Set(tags.map((tag) => tag.verb))],
+  }
+}
+
+/**
+ * 05-R7 / 08-V3：标签过密的对话 → warn。
+ * 05-R7 的「>2 个/100 字对话」按平均行宽标定，中文短句对话一行只有 7–9 字，
+ * 一话一标就会轻易过线（仓库 baseline fixture 是 13.8/100 字，属正常写法），
+ * 所以判据按对话行算：一行一个标签是常态，**超过 1.5 个/行**才算「每句都贴标签」。
+ * 副词标签仍是「一次即 0」的绝对规则。
+ */
+function tagFindings(body, metrics = dialogueTagStats(body)) {
+  const lines = metrics.dialogueSentences
+  const perLine = lines ? metrics.count / lines : 0
+  const densityExceeded = metrics.count >= 3 && perLine > 1.5
+  const adverbExceeded = metrics.adverbCount > 0
+  if (!densityExceeded && !adverbExceeded) return []
+  const parts = [
+    `对话标签 ${metrics.count} 个 / ${lines} 行对话（${Math.round(perLine * 100) / 100} 个/行，${metrics.per100Chars}/100 字）`,
+  ]
+  if (densityExceeded) {
+    const examples = metrics.verbs.slice(0, 3).map((verb) => `「${verb}」`).join('、')
+    parts.push(`一行里贴了不止一个标签${examples ? `，标签用词：${examples}` : ''}`)
+  }
+  if (adverbExceeded) {
+    const words = metrics.adverbWords.slice(0, 3).map((word) => `「${word}」`).join('、')
+    parts.push(`副词标签 ${metrics.adverbCount} 个（占 ${Math.round(metrics.adverbRatio * 100)}%，如 ${words}）`)
+  }
+  return [{
+    severity: 'warn',
+    kind: 'dialogue-tag',
+    where: '全章',
+    issue: parts.join('；'),
+    fix: '把一半「说/道」换成动作节拍（放下杯子、抬头、停住），删掉说/道前的程度副词，让台词自己带情绪',
+  }]
+}
+
 /**
  * 确定性检查。返回 findings（形状同 §4.4）与 stats。
  * @param {{text?: string, params?: object, beats?: object|null, previousHook?: string, cast?: Array<{name?: string, role?: string, gender?: string}>}} input
@@ -365,20 +642,34 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   const sentences = sentenceStats(body)
   const castNameList = castNames(cast)
   const nameDensity = distinctNameDensity(body, castNameList)
+  const sceneCount = countScenes(body, beats)
+  const sensoryBuckets = sensoryBucketCounts(body)
+  const tagMetrics = dialogueTagStats(body)
   const stats = {
     cjk,
     dialogueRatio: ratio,
     paragraphs: paragraphs.length,
-    sceneCount: countScenes(body, beats),
+    sceneCount,
+    scenePer1k: cjk ? round1((1000 * sceneCount) / cjk) : 0,
     sentences: sentences.count,
     avgSentenceLen: sentences.avgLen,
     maxSentenceLen: sentences.maxLen,
     shortSentenceRatio: sentences.shortRatio,
     sensoryPer1k: densityPer1k(body, SENSORY_WORDS),
+    sensoryBuckets,
     abstractEmotionPer1k: densityPer1k(body, ABSTRACT_EMOTION_WORDS),
     adverbPer1k: densityPer1k(body, ADVERBS),
+    universalAdverbPer1k: densityPer1k(body, UNIVERSAL_ADVERBS),
     aiMarkerCount: 0,
+    aiMarkerPer1k: 0,
     nameDensity: nameDensity.per1500,
+    namePer1k: nameDensity.per1k,
+    dialogueTags: tagMetrics.count,
+    dialogueTagPer100Chars: tagMetrics.per100Chars,
+    dialogueTagPer100Sentences: tagMetrics.per100Sentences,
+    dialogueSentences: tagMetrics.dialogueSentences,
+    adverbTagCount: tagMetrics.adverbCount,
+    adverbTagRatio: tagMetrics.adverbRatio,
   }
 
   const findings = []
@@ -415,6 +706,13 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     }
   })
 
+  // 2b. 场景密度（08-C1）：低于 0.4 像一场戏到底，高于 1.2 切得太碎。
+  if (stats.scenePer1k < 0.4) {
+    add('note', 'scene', '全章', `场景密度 ${stats.scenePer1k}/千字，低于 0.4/千字，全章像一场戏`, '用空行切开时间/地点转移，或在段首写「第二天」「半小时后」这类转场信号')
+  } else if (stats.scenePer1k > 1.2) {
+    add('note', 'scene', '全章', `场景密度 ${stats.scenePer1k}/千字，超过 1.2/千字，场景切得太碎`, '把同一时间地点的连续动作并成一场，删掉重复的转场')
+  }
+
   // 3. 对话比例
   if (ratio < 0.08) {
     add(
@@ -425,47 +723,48 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
       '把关键信息改由人物对话/争执带出，减少转述',
     )
   }
+  if (ratio > 0.45) {
+    add('note', 'dialogue', '全章', `对话占比 ${(ratio * 100).toFixed(1)}%，超过 45%，动作与场景被对话挤掉`, '把一部分问答改成动作、停顿或环境反应，让对话之间有身体')
+  }
 
-  // 4. AI 腔黑名单 + AI 模式。计数 = 词表命中 + 模式命中，按起始位置去重，
-  // 同一处（例如 AI_CLICHES 的「仿佛」与 AI_PATTERNS 的「仿佛」）只算一次。
-  const hits = []
-  const covered = new Set()
-  let clicheHits = 0
+  // 4. AI 腔黑名单 + AI 模式。所有命中按区间合并去重：长框架里的词只算一次
+  //（例如「空气仿佛凝固」里的「仿佛」），不再按起始位置各算各的。
+  const markers = []
   for (const phrase of AI_CLICHES) {
-    let count = 0
     let position = body.indexOf(phrase)
     while (position !== -1) {
-      covered.add(position)
-      count += 1
+      markers.push({ label: phrase, start: position, end: position + phrase.length })
       position = body.indexOf(phrase, position + phrase.length)
     }
-    if (count) {
-      hits.push({ phrase, count })
-      clicheHits += count
-    }
   }
-  const patternCounts = []
   for (const pattern of AI_PATTERNS) {
-    let count = 0
     for (const match of scanPattern(body, pattern)) {
-      if (covered.has(match.index)) continue
-      count += 1
+      markers.push({ label: pattern.label, start: match.index, end: match.index + match.text.length })
     }
-    if (count) patternCounts.push({ label: pattern.label, count })
   }
-  const aiMarkerCount = clicheHits + patternCounts.reduce((sum, item) => sum + item.count, 0)
+  markers.sort((a, b) => a.start - b.start || b.end - a.end)
+  const merged = []
+  const markerCounts = new Map()
+  for (const marker of markers) {
+    if (merged.length && marker.start < merged[merged.length - 1].end) continue
+    merged.push(marker)
+    markerCounts.set(marker.label, (markerCounts.get(marker.label) ?? 0) + 1)
+  }
+  const aiMarkerCount = merged.length
   stats.aiMarkerCount = aiMarkerCount
+  stats.aiMarkerPer1k = cjk ? round1((1000 * aiMarkerCount) / cjk) : 0
 
   if (aiMarkerCount >= 3) {
-    hits.sort((a, b) => b.count - a.count)
-    patternCounts.sort((a, b) => b.count - a.count)
-    const detail = [
-      ...hits.map((hit) => `${hit.phrase}×${hit.count}`),
-      ...patternCounts.map((item) => `${item.label}×${item.count}`),
-    ]
+    const detail = [...markerCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
+      .map(([label, count]) => `${label}×${count}`)
       .join('、')
     add('warn', 'ai-cliche', '全文', `AI 腔高频词共 ${aiMarkerCount} 次：${detail}`, '逐个换成具体动作或感官细节，删掉程度副词')
+  }
+
+  if (stats.aiMarkerPer1k >= 3) {
+    add('warn', 'ai-density', '全章', `AI 腔标记密度 ${stats.aiMarkerPer1k}/千字，达到 3/千字，跨章比较偏高`, '先删模板句式和套话，再逐句换成具体动作或感官细节')
   }
 
   // 4b. 「不是…而是…」排比单独提示：这是最容易看出来的模板句式。
@@ -528,6 +827,16 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
   }
 
+  // 9b. 引号格式（08-V4）
+  for (const finding of quoteFormatFindings(body)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
+  }
+
+  // 9c. 开篇三句（08-C2）：只在铺环境、没有冲突/动作时 note。
+  for (const finding of openingFindings(body)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
+  }
+
   // 10. 与 story-craft 对齐的量化指标（阈值来自 story_check.py 的 GATE）。
   // 说明：感官 / 人名密度只在 ≥800 字的正文上判，短片段的比例没有统计意义。
   if (stats.avgSentenceLen > 28) {
@@ -550,6 +859,11 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     )
   }
 
+  // 08-C3：总量够、但八成来自视觉桶 → 缺非视觉通道，只 note。
+  for (const finding of sensoryBucketFindings(cjk, sensoryBuckets)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
+  }
+
   if (stats.abstractEmotionPer1k > 12) {
     add(
       'block',
@@ -566,6 +880,8 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
       `抽象情绪词密度 ${stats.abstractEmotionPer1k}/千字，超过 6/千字，情绪偏多`,
       '把一半情绪词换成动作、对白或生理反应',
     )
+  } else if (stats.abstractEmotionPer1k > 3) {
+    add('note', 'emotion', '全章', `抽象情绪词密度 ${stats.abstractEmotionPer1k}/千字，超过 3/千字，情绪可以先落到动作上`, '挑一半情绪词，改成人物此刻的动作、对白或身体反应')
   }
 
   if (stats.adverbPer1k > 12) {
@@ -578,6 +894,10 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     )
   }
 
+  if (stats.universalAdverbPer1k >= 3) {
+    add('note', 'adverb-universal', '全章', `万能副词密度 ${stats.universalAdverbPer1k}/千字，达到 3/千字（缓缓/微微/轻轻…），动作在靠副词撑`, '删掉副词，让动词本身带上速度和力度；慢是信息时才保留')
+  }
+
   if (castNameList.length && cjk >= 800 && nameDensity.per1500 > 5) {
     add(
       'note',
@@ -585,6 +905,18 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
       '全章',
       `活跃人名 ${nameDensity.names} 个，折算 ${nameDensity.per1500} 人/1500 字，超过 5 人，读者要一直记名字`,
       '合并功能重复的配角，或让次要人物只用身份称呼（如「值班员」）',
+    )
+  }
+
+  // 03-R5：千字具名密度 >1.5 即 note。旧的 >5/1500 note 覆盖更高区间；
+  // 旧条一旦命中就不再重复报，保证同一 kind 每章最多一条（旧条阈值/文案不动）。
+  if (castNameList.length && cjk >= 800 && stats.namePer1k > 1.5 && !(nameDensity.per1500 > 5)) {
+    add(
+      'note',
+      'name-density',
+      '全章',
+      `活跃具名 ${nameDensity.names} 人 / ${cjk} 字，千字具名密度 ${stats.namePer1k}，超过 1.5/千字，读者要同时记的名字偏多`,
+      '合并功能重复的配角，或让次要人物只用身份称呼（如「值班员」「护士」）；同场只保留一个新具名',
     )
   }
 
@@ -596,6 +928,16 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
       `对话占比 ${(ratio * 100).toFixed(1)}%，在 8%–15% 之间，低于 15%–45% 的参考区间`,
       '把一段转述改成两人对话，或让对话承担更多冲突与信息',
     )
+  }
+
+  // 10b. 章末落点（08-C4 / 06-R6）：总结词优先，命中即不再报议论落点。
+  for (const finding of endingFindings(body)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
+  }
+
+  // 10c. 对话标签（05-R7 / 08-V3）：密度 >2/100 字对话，或出现副词标签 → warn。
+  for (const finding of tagFindings(body, tagMetrics)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
   }
 
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))

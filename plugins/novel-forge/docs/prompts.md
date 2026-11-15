@@ -12,7 +12,7 @@
 **目标**
 
 - 让长篇小说读起来像人写的：具体感官、潜台词、因果、信息差、节奏呼吸。
-- 十二个 builder 各守各的工艺重点，共享同一套「工艺宪法」，避免越写越像大纲或说明文。
+- 十四个 builder 各守各的工艺重点，共享同一套「工艺宪法」，避免越写越像大纲或说明文。
 - 让模型只做它擅长的事：**填内容**。卷数、卷序、每卷章数、章号、章节 id 全部由脚本给，模型不许决定结构。
 - `draft` 的材料全部来自脚本产出的 packet：提示词层不再拼材料、不再做预算裁剪，写作与上下文组装彻底分家。
 - 输出格式硬约束：JSON 可被引擎直接解析，markdown 可直接落盘。
@@ -20,7 +20,7 @@
 
 **非目标**
 
-- 不在这里做事实校验、字数统计、AI 腔计数——那些是 `src/recipes/novel/consistency.js`、`canon.js` 与 `src/forge/**` 的确定性门槛。
+- 不在这里做事实校验、字数统计、AI 腔计数——那些是 `src/recipes/novel/craft.js`、`consistency.js`、`canon.js` 与 `src/forge/**` 的确定性门槛。
 - 不在这里调模型、读文件、写文件、改 `ctx`。
 - 不为了「文学性」牺牲可解析性；格式优先于自由发挥。
 
@@ -31,7 +31,7 @@
 ```js
 export function createPrompts() {
   return {
-    premise, bible, characters, spine, volumeChapters, beats,
+    pitch, premise, bible, characters, spine, opener, volumeChapters, beats,
     draft, summary, canonPatch, review, revise, blurb,
   }
 }
@@ -67,7 +67,7 @@ export default createPrompts
 | `CANON_MARKER = '<<<CANON>>>'` | `splitInline()` 按它拆内联正典补丁 |
 | `sexOf(gender)` | 把 `'male'/'男'/'m'` 等写法归一成 `'男'` 或 `'女'`，识别不了返回 `''`；供 `review` 的代词对照与引擎共用 |
 
-**删除的导出**：`outline`（builder）。v2 的卷/章骨架由 `outline.js` 用脚本建，`outline` 不再是一次模型调用；`index.js` 若还按名字取 `prompts.outline`，会拿到 `undefined`。**新增**：`volumeChapters`、`canonPatch`、`CANON_MARKER`。
+**删除的导出**：`outline`（builder）。v2 的卷/章骨架由 `outline.js` 用脚本建，`outline` 不再是一次模型调用；`index.js` 若还按名字取 `prompts.outline`，会拿到 `undefined`。**新增**：`pitch`、`opener`、`volumeChapters`、`canonPatch`、`CANON_MARKER`。
 
 ### 2.2 每个 builder 的 ctx 依赖（契约表）
 
@@ -94,7 +94,7 @@ export default createPrompts
 
 `system` 由两块拼成：
 
-1. `CRAFT`：共享工艺宪法。12 条硬约束 + 5 条操作纪律，实测 1221 字符。所有阶段都带。
+1. `CRAFT`：共享工艺宪法。12 条硬约束 + 5 条操作纪律，实测 1220 字符。所有阶段都带。
 2. `ADDENDA[stage]`：该阶段的工艺重点、纪律、输出时的自我约束（**不放输出格式**，格式在 user 里）。
 
 两个例外：
@@ -117,7 +117,7 @@ export default createPrompts
 - 多段素材用 `fitSections`：按各段**实际长度**（不超过 cap）等比例缩，收缩后总和严格 ≤ room，返回数组与输入等长同序（缺失段返回 `''`）。这样 `jsonContract` 这类固定块永远完整，不会被 `hardCap` 从尾部砍掉。
 - 所有阶段最后都过一遍 `hardCap`，保证 `user` 不超过该阶段上限。
 
-system 实测长度：最短 1464（summary），最长 2458（draft），均在 2500 以内；其余 1512–1777。
+system 实测长度：最短 1464（summary），最长 2401（draft，3000 字章），其余 1516–2005。pitch 1704、opener 1658。全部在 2500 以内。
 
 ---
 
@@ -125,10 +125,12 @@ system 实测长度：最短 1464（summary），最长 2458（draft），均在
 
 | 函数 | 产物 | 格式 | 主要输入 | maxTokens | temperature | user 上限 |
 |---|---|---|---|---|---|---|
+| `pitch` | `pitch` | JSON | params.premise、genre、audience、sellingPoint、comps、goldenFinger | 1600 | 0.85 | 4000 |
 | `premise` | `brief` | JSON | premise、genre、audience、tone、styleGuide、seed | 1400 | 0.9 | 6000 |
 | `bible` | `bible` | markdown | brief、premise、styleGuide | 3000 | 0.7 | 9000 |
 | `characters` | `characters` | JSON | brief、bible、protagonistGender | 3200 | 0.85 | 10000 |
 | `spine` | `spine` | JSON | params、brief、bible、characters、**volumePlan** | 6000 | 0.7 | 10000 |
+| `opener` | `opener`（回填 outline 第 1–3 章） | JSON | pitch、brief、spine、前三章章卡 | 2000 | 0.8 | 5000 |
 | `volumeChapters` | `outline.chapters`（一卷） | JSON | volume(含 targetChapters)、spine、bible、characters、previousDigest、existingTitles | 6000 | 0.6 | 9000 |
 | `beats` | `beats/*` | JSON | chapter、volume、previousSummary、canonText、castBrief | 2200 | 0.75 | 10000 |
 | `draft` | `draft/*`（内联摘要 + 正典） | markdown | **仅 `packet.text`** | `min(16000, round(words×2.2))` | 0.9 | 归 packet |
@@ -145,6 +147,7 @@ system 实测长度：最短 1464（summary），最长 2458（draft），均在
 - `spine` 从 markdown 改 JSON、从 3200 提到 6000：40 卷 × 6 字段一次写完，3200 会在中途截断。
 - `review` 的 4000：推理模型会把预算烧在 reasoning 上，2600 时经常返回空正文（`LLM_EMPTY`），见 architecture-v2 §6.4 #13。
 - `beats` 从 2800 降到 2200：v2 里 beats 通常由 `volumeChapters` 一次性排好（章卡），单独 calls 只在需要更细的场景拆分时用。
+- `pitch` 和 `opener` 是 v0.3 新增的两个前置阶段：pitch 在 premise 之前定商业定位，opener 在 volumeChapters 之后把前三章单独排一遍；两者不做时流水线仍能跑，做时各自只调用一次。
 
 ---
 
@@ -166,6 +169,8 @@ system 实测长度：最短 1464（summary），最长 2458（draft），均在
 
 | 阶段 | 各段预算（字符） | user 上限 |
 |---|---|---:|
+| pitch | premise 1200 / style 400 | 4000 |
+| opener | pitch 1200 / brief 1200 / spine 1200 / chapters 1200 / style 400 | 5000 |
 | premise | seed 2000 / style 600 | 6000 |
 | bible | brief 1800 / seed 600 / style 600 | 9000 |
 | characters | brief 1800 / bible 3500 | 10000 |
@@ -181,21 +186,21 @@ system 实测长度：最短 1464（summary），最长 2458（draft），均在
 假 ctx：3000 章 / 40 卷 × 75 章、canon 2 万字、packet 6 万字、上一章摘要 2000 字、findings 12 条。
 
 ```text
-premise         system 1550  user  1545  tok 1400
-bible           system 1512  user  2823  tok 3000
-characters      system 1579  user  6704  tok 3200
-spine           system 1679  user  6612  tok 6000
-volumeChapters  system 1653  user  6113  tok 6000
-beats           system 1625  user  6831  tok 2200
-draft           system 2458  user 60000  tok 16000   ← 等于 packet.text，长度由 packet 管
+premise         system 1946  user  1545  tok 1400
+bible           system 1658  user  2823  tok 3000
+characters      system 1686  user  6704  tok 3200
+spine           system 1942  user  6612  tok 6000
+volumeChapters  system 1945  user  6113  tok 6000
+beats           system 1782  user  6831  tok 2200
+draft           system 2401  user 60000  tok 16000   ← 等于 packet.text，长度由 packet 管
 summary         system 1464  user  8756  tok  900
 canonPatch      system 1668  user  1573  tok 1200
-review          system 1777  user 13728  tok 4000
-revise          system 1524  user 14822  tok 16000
+review          system 2005  user 13728  tok 4000
+revise          system 1578  user 14822  tok 16000
 blurb           system 1516  user  4872  tok 1400
 ```
 
-spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全 75 章」「必须恰好 75 条」，均在预算内且输出格式块完整。
+spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全 75 章」「必须恰好 75 条」，均在预算内且输出格式块完整。pitch 与 opener 是前置小调用，system 分别为 1704、1658，user 取决于商业定位与前三章卡的长度，未放进这个固定压力场景。
 
 ---
 
@@ -224,7 +229,28 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 
 ## 7. 分阶段设计
 
-### 7.1 premise：一句话 → 可生产冲突的承诺
+### 7.1 pitch：先把故事卖出去，再谈怎么写
+
+- 位置在 premise 之前。它不生成故事核，只把用户已给的题材、受众、卖点、对标、金手指定成一份可复用的商业定位。
+- 输出单对象：`version`、`channel`、`platform`、`tags`、`sellingPoint`、`hookLine`、`targetReader`、`promise`、`comps`、`goldenFinger`、`opening`、`degraded`。
+- `targetReader` ≤80 字，必须写成具体的人（「二十五到三十五岁、夜里读悬疑的上班族」），不许写「年轻读者」「泛大众」。
+- `sellingPoint` ≤60 字，句式是「谁在什么处境里，被什么逼着做什么」；禁止「热血」「逆袭」「爽文」这类标签词。
+- `comps` 0–2 项，`why` 只写可借的机制（「借职业规矩即超自然规则」），不借人物、不借情节。
+- `goldenFinger` 五个字段：名称、规则、代价、成长轴、首次出现章（1–3）。没有金手指就写现实向能力，不许空对象；代价和成长轴缺一，这个金手指就不能用。
+- `opening.firstLine` 是正文第一句，不是梗概；`chapterOneQuestion` 是第一章结束时读者还追着想知道的那个问题。
+- `degraded` 记录被迫降级的定位点，最多 3 条；没有就写 `[]`。写不出 pitch 时流水线退回按类型承诺推，不阻塞。
+
+### 7.2 opener：黄金三章单独排一遍
+
+- 位置在 volumeChapters 之后，只处理第 1–3 章。已有章卡沿用，不重排；没有就由它来排。
+- 输出 `strategy`（三章各承担什么承诺，一句一章）、`chapters`（恰好 3 条）、`rules`、`degraded`。
+- 第一章要在 300 字内出现异常、危机或明确欲望；背景解释合计不超过 150 字，不许开篇讲世界史。
+- 每章只投一条必记信息，写清「读者知道了什么／人物失去了什么」。`payoff.level` 从 `small` 到 `medium`，第三章前不给 `large`。
+- `payoff.chapterDue` 只能是 1–3，承诺必须在这三章内结掉一次；`hook.type` 用六类钩子之一，`strength` 1–5，三章钩型不许重复。
+- `rules` 固定为 `{payoffEveryChapters:[3,5], bigPayoffPerVolume:[2,3]}`，这是后续章节排期的默认值，不要在 prompt 里另定一套。
+- 第一章的 `endHook` 与 `hook.type` 必须一致；`infoDrop` 两栏都不能空，空说明这一章没有信息变化。
+
+### 7.3 premise：一句话 → 可生产冲突的承诺
 
 - 输出 `brief` 八字段：`title`、`logline`、`theme`、`promise`、`ending`、`genreTags`，以及 story-craft 带来的 `readers`、`alternates`。
 - `readers`（≤120 字）：读者诊断——谁 · 此刻关心什么 · 已知什么 · 想得到什么 · 读完做什么；用户没给受众时按最可能的默认值填并标「（假设）」。
@@ -236,7 +262,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - **书名取舍**：契约只有 `title` 一个字段，不能加 `titleCandidates`。因此要求模型在草稿里按「意象／冲突／人称／时间／反讽」各拟一个，共 5 个，比选后只把胜者写进 `title`。
 - 项目头里带上规模（`chapters` × `wordsPerChapter` → 万字），让模型知道这不是一个短篇，主线要能撑住 N 次推进。
 
-### 7.2 bible：只写会咬人的设定
+### 7.4 bible：只写会咬人的设定
 
 - 不是百科：每条设定都要回答「让谁得利、让谁受害、逼人物做什么选择」。
 - 只写会反复用到的：3 条硬规则、3–6 个地点、时代日常、禁忌与代价、反复出现的意象与物件。
@@ -244,9 +270,11 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - 每条规则后写一句「它会逼出什么冲突」。
 - 禁止「这是一个充满魔法的大陆」式空话、历史年表、正文里能自己看到的东西。
 
-### 7.3 characters：压力下的预测模型
+### 7.5 characters：压力下的预测模型
 
-- 每人八字段：`name`、`role`、`gender`、`want`、`fear`、`secret`、`voice`、`arc`、`relations`。
+- 每个角色九字段：`name`、`role`、`gender`、`want`、`fear`、`secret`、`voice`、`arc`、`relations`。
+- 主角与对手另填四个 optional 字段，每个 ≤30 字：`need` 与 `want` 相反，是他真正需要而不是嘴上要的；`wound` 是旧伤，要能解释 `lie` 从哪来；`lie` 是他相信的错误认知；`exit` 是退场方式。配角不填这四项，缺字段时按没有处理。
+- 这四个字段不是人物小传。`need` 要能拍成一个选择，`wound` 要是一个具体事件，`lie` 要能被剧情证伪，`exit` 要写「怎么离开这个故事」，不写「死亡」两个字了事。
 - `gender` 只能是「男」或「女」，必填：它决定后文用「他」还是「她」。名字不暗示性别时（沈砚、周岩）更要写清。
 - 新建时可以用 `protagonistGender`（`auto`/`男`/`女`）把主角性别定死，prompt 里会变成硬约束。
 - `want` 与 `fear` 必须互相拉扯；`secret` 要能在中段爆炸；`arc` 由事件逼出来，不是顿悟。
@@ -254,7 +282,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - 关系不对称：A 以为是朋友，B 只在利用 A。
 - 人数 5–7；示例只列 1 人，正文明确提醒「示例是形状示范」。
 
-### 7.4 spine：卷数固定，只填内容（JSON）
+### 7.6 spine：卷数固定，只填内容（JSON）
 
 输入：`params`、`brief`、`bible`、`characters`、`volumePlan`。user 里给一张**脚本已定**的卷表，逐行写「第 N 卷｜目标章数 X｜工作标题」，并明写：
 
@@ -272,7 +300,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - 明写「40 卷量级时整份 JSON 必须一次写完」——这是 `maxTokens: 6000` 与字段长度上限的共同目的：长 JSON 被截断是这一阶段最主要的失败模式。
 - 不输出 `index`/`targetChapters`/`chapters`：序号与章数由脚本加。
 
-### 7.5 volumeChapters：一次只展开一卷（JSON）
+### 7.7 volumeChapters：一次只展开一卷（JSON）
 
 输入：`params`、`volume`、`spine`、`bible`、`characters`、`previousDigest`、`existingTitles`。
 
@@ -283,20 +311,23 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - 不输出 `id`/`index`/`volume`：章号由脚本发，模型给的 id 一律丢弃。
 - `existingTitles` 用来防重名：「不要重名，也不要只换一个字」。
 
-### 7.6 beats：5–9 个可拍的场景
+### 7.8 beats：5–9 个可拍的场景
 
-- 输出：`{"scenes":[{"goal","obstacle","turn","detail","cast":[]}],"hook":"…","beats":["…"]}`。
-- 每场五项：goal／obstacle／turn／detail／cast；`detail` 是写正文时必须落地的一个具体动作、道具或感官锚点（不是「气氛描写」）。
+- 输出：`{"scenes":[{"goal","obstacle","turn","detail","cast":[],"function"}],"hook":"…","beats":["…"]}`。
+- 每场六项：goal／obstacle／turn／detail／cast／function；`detail` 是写正文时必须落地的一个具体动作、道具或感官锚点（不是「气氛描写」）。
+- `function` ≤20 字，一句话说明这场在全书里干什么（「让沈砚第一次相信规矩会杀人」），不许写成「推进剧情」。
+- 每场只新增一个信息或一个人物；新名字一次给全，不要在同一场里叠两个新名字。
+- `cast` 是 1–4 个已有人物名；同场有台词的具名角色不超过 4 个，超过就拆场或把其中一人改成无名配角。
 - `beats` 是给后文检索用的一句话节拍：5–8 条，按发生顺序，每条以动词开头。
 - `hook` 是本章最后落在的那个悬念，必须能被下一章直接接手。
 - 场景之间因果相连：上一场的出口是下一场的入口。
 - 场数按信息量与情绪重量分配，不重平均切；示例只列 1 场，正文明确「必须 5–9 项」。
 
-### 7.7 draft：作者，不是助手（packet 即全部材料）
+### 7.9 draft：作者，不是助手（packet 即全部材料）
 
 - **`user` 严格等于 `ctx.packet.text`**，提示词层不再拼任何材料。`packet.text` 缺失（异常路径）时退化成 `fallbackPacket()`：只给章号、标题、目标、视角、字数、输出格式的最小写作要求，宁可裸写也不炸。
 - system 放三样东西：
-  1. 正文规格：字数 = `params.wordsPerChapter`（可接受 0.9–1.15 倍）、视角 = `params.pov`、第一行 `## 第N章 标题`、段落空行、不要前言/总结/列表/作者按、结尾停在钩子指向的具体动作。
+  1. 正文规格：字数 = `params.wordsPerChapter`（可接受 0.9–1.15 倍）、视角 = `params.pov`、第一行 `## 第N章 标题`、段落空行、不要前言/总结/列表/作者按。段落中位 20–80 字，长短交错，不许连续三段同长。章末停在动作或画面，不写总结或感悟；最后 3 行必须落在钩子上。
   2. 连续性纪律：只用【材料包】里给出的人物、设定、前情与正典；包里没有的设定不许自造；新细节只能是场景级的小物件、小动作，不许新增有名有姓的人物、规则，或改动已发生的事实。
   3. 内联输出协议（见下），加 17 条反 AI 腔清单（见 §8）。
 - `maxTokens: min(16000, round(words×2.2))`，temperature 0.9。
@@ -312,7 +343,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 
 摘要按「发生／知情／钩子／时空」四行写，保留专有名词，不用「他／她」代替；正典块只记本章新出现或改变、下一章会用到的事实，≤8 条，没有变化写 `[]`；两块之外不写任何东西。两块都可整块省略——引擎会自己补（退回独立的 `summary` / `canonPatch` 调用）。
 
-### 7.8 summary：给下一章自己的交接单
+### 7.10 summary：给下一章自己的交接单
 
 - 输入改成 `chapter`、`draft`、`beats`（不再读上一章摘要：v2 的前情在 packet/canon 里）。
 - ≤300–400 字，四行四标签：`发生：`、`知情：`、`钩子：`、`时空：`。
@@ -322,7 +353,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - 保留专有名词；不评价、不推测、不剧透、不补正文没有的设定。
 - 正文用 `fitEnds` 读入（8500 上限），保住结尾的钩子。
 
-### 7.9 canonPatch：登记员，不是作者（小调用兜底）
+### 7.11 canonPatch：登记员，不是作者（小调用兜底）
 
 - 只在 `draft` 的内联正典块缺失／不合法时调用；也可以被 agent 单独调用来补账。
 - 输入：`chapter`、`summary`、`beats`、`canonText`。
@@ -340,7 +371,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - `p` 只能是 `状态｜位置｜持有｜关系｜身份`；`tags` 至少一个，写 `character:某人` / `place:某地`；以正文实际写到的为准，不推测、不补设定。
 - `maxTokens: 1200`、temperature 0.2、user ≤1600：这是全表最紧的预算，所以它的输出格式示例是压缩版单行 JSON，不走 `jsonContract` 的长模板。
 
-### 7.10 review：责任编辑，不是夸奖者
+### 7.12 review：责任编辑，不是夸奖者
 
 - 输出严格 JSON：`{"findings":[{"severity","kind","where","issue","fix"}],"verdict"}`。
 - user 里增加【正典】（`ctx.canonText`，2200 上限），并把「正典是既成事实，正文与它冲突就是硬错」写进附录：v2 的连续性以 canon 为准，不再有单独的 ledger。
@@ -353,7 +384,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - `verdict`：有 `block` 或 `warn ≥ 3` → `revise`，否则 `pass`。
 - 明确「不要输出 ledgerPatch」：正典由本章自己的 canon patch 维护，review 只读不写。
 
-### 7.11 revise：外科医生，不是重写者
+### 7.13 revise：外科医生，不是重写者
 
 - user 三段，按剩余预算分配：`ctx.packet.text`（材料包，用于核对事实与正典，5200 上限）→【需修正】findings 摘要（2400 上限）→【原文】（`fitEnds`，9000 上限）。超预算时先让原文额度，再让材料包；正文缺失时输出「正文缺失，无法修订」而不是编。
 - 只动 findings 指出的地方；没被点名的段落尽量原样保留。
@@ -363,7 +394,7 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 - 字数与原文相差不超过 10%；仍以 `## 第N章 标题` 开头，段落空行；输出完整正文。
 - 修订后只补内联摘要（`<<<SUMMARY>>>` + 四行），不再重写正典块——那由 `canonPatch` 负责。
 
-### 7.12 blurb：封面文案
+### 7.14 blurb：封面文案
 
 - 书名定稿：从 premise 的 `title` 继承；需要时可以给一个更准的，但只输出一个。
 - 一句话卖点：谁 + 想要什么 + 被什么挡住 + 最大的代价，不剧透结局。
@@ -489,52 +520,55 @@ node -e "import('./src/recipes/novel/prompts/zh.js').then(m=>{const p=m.createPr
 输出：
 
 ```text
-beats,bible,blurb,canonPatch,characters,draft,premise,review,revise,spine,summary,volumeChapters
+beats,bible,blurb,canonPatch,characters,draft,opener,pitch,premise,review,revise,spine,summary,volumeChapters
 ```
 
 ### 12.2 假 ctx 断言（`/tmp/zh_prompt_assert.mjs`，不进仓库）
 
 覆盖：
 
-- 12 个 builder 全部返回 `{system,user,maxTokens,temperature}` 四键；`system`/`user` 都是非空字符串；`system` ≤2500；`user` ≤ 预算；`maxTokens` 正整数；`temperature` 在 0–2。
+- 14 个 builder 全部返回 `{system,user,maxTokens,temperature}` 四键；`system`/`user` 都是非空字符串；`system` ≤2500；`user` ≤ 预算；`maxTokens` 正整数；`temperature` 在 0–2。
 - user 里所有 ```json 示例块都能 `JSON.parse`。
+- `pitch`：输出契约含 `sellingPoint`/`targetReader`/`goldenFinger`/`opening`；`opener`：输出契约含恰好 3 章、`payoff.chapterDue`、`hook.strength`。
 - `spine`：user 含「必须恰好 3 条」「第 i 项只对应【卷表】第 i 卷」「40 卷量级」，卷表行数 = 3。
 - `volumeChapters`：user 含「本卷共 40 章，请一次给全 40 章」「必须恰好 40 条」，并含「不要写正文」「钩子必须留悬念」。
 - `draft`：`user === ctx.packet.text`；system 含两个 marker、字数、视角、禁语（突然/仿佛/宛如/不由得）、连续性纪律、200–400 字说明。
 - `canonPatch`：user ≤1600，含「≤8 条」「{}」「状态｜位置｜持有｜关系｜身份」。
 - `review`：含正典与「不要输出 ledgerPatch」，输出契约含 `findings`/`verdict`。
 - `revise`：含材料包前缀、【需修正】、原文、`<<<SUMMARY>>>`。
-- 空 ctx（`has=false`、`text=''`、`json` 抛错、`list=[]`、`fit` 截断）12 个 builder 全部不抛错。
+- 空 ctx（`has=false`、`text=''`、`json` 抛错、`list=[]`、`fit` 截断）14 个 builder 全部不抛错。
 - 压力 ctx（3000 章 / 40 卷 × 75 章、canon 2 万字、draft 6 万字、200 个已有章名）user 仍 ≤ 预算。
 - 直接字段 ctx（无 reader，只给 `ctx.brief/bible/characters`）：spine 能读到故事核心、世界设定、人物档案，不再落「缺失」；characters 也能读到人物。
 
-结果：
+结果（加 pitch/opener 断言之前的记录；本轮没有重跑这个临时脚本，长度以 §12.3 的实测为准）：
 
 ```text
 汇总：240 项通过，0 项失败
 全部断言通过
 ```
 
-### 12.3 实测长度（正常 ctx）
+### 12.3 实测长度（最小 ctx）
 
-列：system / user / maxTokens / temperature。
+列：system / user / maxTokens / temperature。最小 ctx 不给材料，user 只是下限；pressure 场景见 §5.3。
 
 ```text
-premise        1840   1290  1400  0.9
-bible          1512    500  3000  0.7
-characters     1600   1474  3200  0.85
-spine          1679   1726  6000  0.7
-volumeChapters 1653   1294  6000  0.6
-beats          1629   1032  2200  0.75
-draft          2372    136  2640  0.9     ← user = packet.text（假 ctx 里很短）
-summary        1464    222   900  0.2
-canonPatch     1668    590  1200  0.2
-review         2005   1129  4000  0.1
-revise         1578    410  2640  0.5
-blurb          1516    466  1400  0.85
+pitch           1704   1763  1600  0.85
+premise         1946   1327  1400  0.9
+bible           1658    525  3000  0.7
+characters      1686   2061  3200  0.85
+spine           1942   2877  6000  0.7
+opener          1658   2547  2000  0.8
+volumeChapters  1945   2232  6000  0.6
+beats           1782   1426  2200  0.75
+draft           2401    136  6600  0.9     ← user = packet.text（最小 ctx 里很短）
+summary         1464    236   900  0.2
+canonPatch      1668    590  1200  0.2
+review          2005   1138  4000  0.1
+revise          1578    410  6600  0.5
+blurb           1516    474  1400  0.85
 ```
 
-system 全部 ≤2500；draft 最紧（2372），review 次之（2005）。再加内容前先砍 CRAFT 或反 AI 腔清单以外的句子。
+system 全部 ≤2500；draft 最紧（2401），review 次之（2005）。再加内容前先砍 CRAFT 或反 AI 腔清单以外的句子。
 
 ### 12.4 JSON 契约校验
 
@@ -542,10 +576,10 @@ system 全部 ≤2500；draft 最紧（2372），review 次之（2005）。再�
 
 ```text
 premise        keys= title,logline,theme,promise,ending,genreTags,readers,alternates
-characters     keys= cast（name,role,gender,want,fear,secret,voice,arc,relations）
+characters     keys= cast（name,role,gender,want,fear,secret,voice,arc,relations,need?,wound?,lie?,exit?）
 spine          keys= mainline,ending,volumes（title,goal,arc,cast,opens,closes）
 volumeChapters keys= chapters（title,goal,conflict,turn,hook,pov,when,where,cast）
-beats          keys= scenes（goal,obstacle,turn,detail,cast）,hook,beats
+beats          keys= scenes（goal,obstacle,turn,detail,cast,function）,hook,beats
 review         keys= findings（severity,kind,where,issue,fix）,verdict
 ```
 
@@ -556,7 +590,7 @@ review         keys= findings（severity,kind,where,issue,fix）,verdict
 ## 13. 维护约定
 
 1. **先改契约，再改提示词**：architecture-v2 §12 的字段名/格式是硬契约。要加字段，先改文档与引擎校验器，再改 `jsonContract` 和本文档。
-2. **12 个函数名不能变**：`chapter.js` 的 `resolvePrompts()` 与 `index.js` 的 `createNovelRecipe()` 按名字取 builder；改名会让 stage 找不到 builder（`chapter.js` 报 `prompts.beats 不可用`，`index.js` 在 `callJson` 处失败）。`outline` 已删除，替代者是 `volumeChapters`（逐卷排章）。
+2. **14 个函数名不能变**：`chapter.js` 的 `resolvePrompts()` 与 `index.js` 的 `createNovelRecipe()` 按名字取 builder；改名会让 stage 找不到 builder（`chapter.js` 报 `prompts.beats 不可用`，`index.js` 在 `callJson` 处失败）。`outline` 已删除，替代者是 `volumeChapters`（逐卷排章）。
 3. **system ≤2500，且只放工艺**：任何一本书的具体材料（书名、人物、正典原文）进 `system` 都算回归。改 `CRAFT` 后必须重跑 §12.2，确认最短 system 仍 ≥1400、最长（draft）≤2500。
 4. **draft 的 user 只能是 packet.text**：不要在 `draftPrompt` 里加 `section()`。需要新素材，去 `packet.js` 的 `SLICE_SPEC` 加切片，让预算与 report 一起更新。
 5. **两个 marker 三处同步**：`zh.js` 的导出、`draft`/`revise` 的 system、`chapter.js` 的 `splitInline()`。少一处，内联摘要/正典就会静默丢失。

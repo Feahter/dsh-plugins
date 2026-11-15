@@ -536,8 +536,25 @@ function threadStaleFindings(threads, list) {
       const at = list.findIndex((item) => item.id === opened)
       if (at >= 0) distance = list.length - 1 - at
     }
-    if (distance == null || distance < 40) continue
     const text = String(thread.text ?? thread.title ?? thread.id ?? '').trim() || thread.id || opened
+    // dueIn 是「预计第几章回收」的绝对章号（plan.js:37 / canon.js:227），直接和当前章号比；
+    // 只有章节 id 不是 chNNNN 形状时才退化成相对章数。
+    const due = Math.floor(Number(thread.dueIn))
+    const hasDue = Number.isFinite(due) && due >= 1
+    if (hasDue) {
+      const overdue = currentNum != null ? currentNum > due : distance != null && distance > due
+      if (!overdue) continue
+      const reached = currentNum != null ? `第 ${currentNum} 章` : `自 ${opened} 起 ${distance ?? '?'} 章后`
+      findings.push({
+        severity: 'warn',
+        kind: 'thread-stale',
+        where: opened,
+        issue: `线索「${text}」计划第 ${due} 章回收，已到${reached}（自 ${opened} 起已 ${distance} 章）`,
+        fix: '在本章或近期安排回收；如果计划已变，更新 thread.dueIn，或标 closed 并写 closedIn / payoff',
+      })
+      continue
+    }
+    if (distance == null || distance < 40) continue
     findings.push({
       severity: 'note',
       kind: 'thread-stale',
@@ -585,12 +602,331 @@ function canonConflictFindings(facts) {
   return findings
 }
 
+const TURN_CHANGE_MARKS = ['从', '到', '变', '再也', '改', '失去', '得到']
+const MIDPOINT_MIN = 0.42
+const MIDPOINT_MAX = 0.58
+
+/** turn 必须能复述成「从 X 到 Y」；老项目 turn 是自由文本，只 note 不 block。 */
+function turnFindings(list) {
+  const findings = []
+  for (const item of list) {
+    const turn = String(item?.turn ?? '').trim()
+    if (!turn) continue
+    const restatable =
+      turn.length >= 8 && TURN_CHANGE_MARKS.some((mark) => turn.includes(mark))
+    if (restatable) continue
+    const where = whereOf(item)
+    findings.push({
+      severity: 'note',
+      kind: 'turn-flat',
+      where,
+      issue: `「${where}」的 turn 读不出「从 X 到 Y」：「${turn}」`,
+      fix: '把 turn 写成可复述的状态变更（从…到…、再也…、失去…）；只是提示，不阻塞',
+    })
+  }
+  return findings
+}
+
+/** 全书中点：0<v<1 视为占全书比例，>=1 视为章号；缺省/非法完全静默。 */
+function midpointOf(outline, total) {
+  const raw = Number(outline?.midpointChapter)
+  if (!Number.isFinite(raw) || raw <= 0 || !(total > 0)) return null
+  if (raw < 1) return { ratio: raw, chapter: Math.max(1, Math.round(raw * total)) }
+  const chapter = Math.floor(raw)
+  return { ratio: chapter / total, chapter }
+}
+
+function midpointFindings(outline, list) {
+  const rawTotal = Number(outline?.totalChapters)
+  const total = Number.isFinite(rawTotal) && rawTotal > 0 ? Math.floor(rawTotal) : list.length
+  const midpoint = midpointOf(outline, total)
+  if (!midpoint) return []
+  if (midpoint.ratio >= MIDPOINT_MIN && midpoint.ratio <= MIDPOINT_MAX) return []
+  const percent = Math.round(midpoint.ratio * 1000) / 10
+  return [
+    {
+      severity: 'note',
+      kind: 'midpoint-drift',
+      where: '全书',
+      issue: `全书 ${total} 章，中点落在第 ${midpoint.chapter} 章（${percent}%），不在 42%–58% 区间`,
+      fix: `把中点章挪到第 ${Math.ceil(total * MIDPOINT_MIN)}–${Math.floor(total * MIDPOINT_MAX)} 章之间；若是双中点结构，在脊柱里显式声明`,
+    },
+  ]
+}
+
+function hookStrengthValue(value) {
+  const n = Math.round(Number(value))
+  return Number.isFinite(n) && n >= 1 && n <= 5 ? n : 0
+}
+
+/** 钩子强度只认卷纲 v2 章表里的 hookStrength（plan.chapterFields 产物）；全缺就跳过。 */
+function hookFindings(list) {
+  const strengths = list.map((item) => hookStrengthValue(item?.hookStrength))
+  if (!strengths.some((n) => n > 0)) return []
+  const findings = []
+
+  let runStart = -1
+  let runLength = 0
+  const flush = (endIndex) => {
+    if (runLength < 3) return
+    const from = whereOf(list[runStart])
+    const to = whereOf(list[endIndex])
+    const values = strengths.slice(runStart, endIndex + 1).join('/')
+    findings.push({
+      severity: 'warn',
+      kind: 'hook-streak',
+      where: from,
+      issue: `「${from}」到「${to}」连续 ${runLength} 章钩子强度 ≤2（${values}）`,
+      fix: '把其中至少一章的章末钩换成本章冲突的直接后果或新危机，强度提到 3 分以上',
+    })
+  }
+  for (let i = 0; i < strengths.length; i += 1) {
+    const n = strengths[i]
+    if (n > 0 && n <= 2) {
+      if (runLength === 0) runStart = i
+      runLength += 1
+    } else {
+      flush(i - 1)
+      runLength = 0
+      runStart = -1
+    }
+  }
+  flush(strengths.length - 1)
+
+  const five = strengths.filter((n) => n === 5).length
+  const share = strengths.length > 0 ? five / strengths.length : 0
+  if (share > 0.2) {
+    findings.push({
+      severity: 'note',
+      kind: 'hook-share',
+      where: '全书',
+      issue: `全书 ${strengths.length} 章里 ${five} 章钩子强度为 5（${(share * 100).toFixed(1)}%），超过 20%`,
+      fix: '把部分 5 分钩降到 3–4 分，把 5 分留给卷末/大转折；不要章章高潮',
+    })
+  }
+  return findings
+}
+
+// ---- 全书结构：首末呼应 / 兑现章专名 / B 线合流（全部 note） -------------
+
+const BOOKEND_GAIN_MARKS = [
+  '得到', '获得', '赢得', '赢下', '夺回', '拿回', '收回', '找回', '救下', '救回',
+  '成功', '达成', '守住', '护住', '保住', '掌握', '拿下', '占有', '重逢', '团聚',
+  '复得', '胜出', '赢了',
+]
+const BOOKEND_LOSS_MARKS = [
+  '失去', '失掉', '丢掉', '丢失', '弄丢', '错过', '放弃', '失败', '落败', '输掉',
+  '输了', '被夺', '被抢', '被毁', '毁掉', '毁灭', '破碎', '崩塌', '死去', '死亡',
+  '丧命', '离开', '告别', '背叛', '被抓', '被捕', '入狱', '破产', '落空', '成空',
+  '牺牲', '没了', '消失',
+]
+
+/** turn 的价值方向只认单一信号；同时出现「得到/失去」或都判不出 → 返回空串（跳过）。 */
+function bookendDirection(turn) {
+  const text = String(turn ?? '')
+  if (!text.trim()) return ''
+  const gain = BOOKEND_GAIN_MARKS.some((mark) => text.includes(mark))
+  const loss = BOOKEND_LOSS_MARKS.some((mark) => text.includes(mark))
+  if (gain === loss) return ''
+  return gain ? '得到' : '失去'
+}
+
+function normalizedWhere(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ')
+}
+
+/** 首末同地、turn 价值同向 → 回环没有翻转。where 缺失或方向判不出就整条跳过。 */
+function bookendFindings(list) {
+  if (!Array.isArray(list) || list.length < 2) return []
+  const first = list[0]
+  const last = list[list.length - 1]
+  const firstWhere = normalizedWhere(first?.where)
+  const lastWhere = normalizedWhere(last?.where)
+  if (!firstWhere || !lastWhere || firstWhere !== lastWhere) return []
+  const firstDirection = bookendDirection(first?.turn)
+  const lastDirection = bookendDirection(last?.turn)
+  if (!firstDirection || firstDirection !== lastDirection) return []
+  const where = whereOf(last)
+  return [
+    {
+      severity: 'note',
+      kind: 'bookend-flat',
+      where,
+      issue: `首章与末章都发生在「${firstWhere}」，turn 的价值方向同为「${firstDirection}」；首尾同地同向，回环没有完成翻转`,
+      fix: '让末章 turn 反向（得到→失去或相反），或把末章换到与首章不同的 where；开放结局可显式豁免',
+    },
+  ]
+}
+
+// P1-8 只认「常见姓氏 + 1–2 字」，且整章至少出现 2 次；宁可漏报不可误报。
+const PAYOFF_SURNAMES = new Set(
+  '王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯沈'.split(''),
+)
+
+function isChapterLikeId(value) {
+  return /^(?:ch|chapter|第)?\s*\d+\s*(?:章)?$/i.test(String(value ?? '').trim())
+}
+
+/** closedIn 可能是 ch0041 / 41 / 第41章；卷 id（v01）不算章号，避免误配。 */
+function sameChapterId(left, right) {
+  const a = String(left ?? '').trim().toLowerCase()
+  const b = String(right ?? '').trim().toLowerCase()
+  if (!a || !b) return false
+  if (a === b) return true
+  if (!isChapterLikeId(a) || !isChapterLikeId(b)) return false
+  const an = chapterNumber(a)
+  const bn = chapterNumber(b)
+  return an != null && an === bn
+}
+
+function payoffThreadsOf(index, chapterId) {
+  const hits = []
+  for (const thread of index.threads) {
+    if (!thread || typeof thread !== 'object') continue
+    if (sameChapterId(thread.closedIn, chapterId)) hits.push(thread)
+  }
+  return hits
+}
+
+/** 只抽「姓氏字开头 + 1–2 字」的 2–3 字 gram；白名单词先整体遮盖。 */
+function payoffNameCounts(body) {
+  const counts = new Map()
+  const runs = body.replace(COMMON_MASK, '\n').match(/[\u3400-\u4dbf\u4e00-\u9fff]+/g) ?? []
+  for (const run of runs) {
+    for (let start = 0; start < run.length; start += 1) {
+      if (!PAYOFF_SURNAMES.has(run[start])) continue
+      const maxSize = Math.min(3, run.length - start)
+      for (let size = 2; size <= maxSize; size += 1) {
+        const gram = run.slice(start, start + size)
+        if (NAME_EDGE_STOP.has(gram[gram.length - 1])) continue
+        counts.set(gram, (counts.get(gram) ?? 0) + 1)
+      }
+    }
+  }
+  return counts
+}
+
+function isKnownName(gram, index, castNames) {
+  if (index.known.has(gram) || index.knownWords.has(gram) || index.blockedFragments.has(gram)) {
+    return true
+  }
+  if (COMMON_WORDS.has(gram)) return true
+  // 3 字候选的前 2 字已是登记名时，按「已知名 + 后缀」处理，宁可漏报。
+  if (gram.length >= 3 && index.known.has(gram.slice(0, 2))) return true
+  for (const name of index.entityNames) {
+    if (name.length >= 2 && (name.includes(gram) || gram.includes(name))) return true
+  }
+  for (const name of castNames) {
+    if (name.length >= 2 && (name.includes(gram) || gram.includes(name))) return true
+  }
+  return false
+}
+
+/** 兑现章（thread.closedIn === 本章）正文里的未登记专名。无 facts / 无线索闭合 → 静默。 */
+function payoffNameDriftFindings(index, list) {
+  if (!index.facts.length || !list.length) return []
+  const findings = []
+  for (const item of list) {
+    const body = chapterText(item)
+    if (!body.trim()) continue
+    const threads = payoffThreadsOf(index, item?.id)
+    if (!threads.length) continue
+    const where = whereOf(item)
+    const castNames = chapterCastNames({ chapter: item })
+    const counts = payoffNameCounts(body)
+    // 若某个 3 字 gram 比它的 2 字前缀出现得不少于，就只报更长的那个。
+    const longerMax = new Map()
+    for (const [gram, count] of counts) {
+      if (gram.length !== 3) continue
+      const prefix = gram.slice(0, 2)
+      longerMax.set(prefix, Math.max(longerMax.get(prefix) ?? 0, count))
+    }
+    const candidates = []
+    for (const [gram, count] of counts) {
+      if (count < 2) continue
+      if (gram.length === 2 && (longerMax.get(gram) ?? 0) >= count) continue
+      if (isKnownName(gram, index, castNames)) continue
+      candidates.push([gram, count])
+    }
+    candidates.sort((a, b) => b[1] - a[1] || compareText(a[0], b[0]))
+    const payoff = threads
+      .map((thread) => String(thread.text ?? thread.id ?? '').trim())
+      .filter(Boolean)
+      .join('、')
+    for (const [gram, count] of candidates.slice(0, 5)) {
+      findings.push({
+        severity: 'note',
+        kind: 'name-drift',
+        where,
+        issue: `「${where}」是线索「${payoff || '未命名线索'}」的兑现章，正文出现「${gram}」${count} 次，但 canon.facts 没有登记这个名字`,
+        fix: `若「${gram}」是新人物，先在 canon.entities / facts 登记并补 aliases；若是笔误，统一成已有名字`,
+      })
+    }
+  }
+  return findings
+}
+
+const B_LINE_MARKERS = [
+  { label: 'B 线', re: /B\s*线/i },
+  { label: '副线', re: /副线/ },
+  { label: '第二条线', re: /第二条线/ },
+  { label: '暗线', re: /暗线/ },
+]
+
+/** 卷纲 opens 标了 B 线，但 58% 章号之后没有一章的 turn/hook 写到这条线。 */
+function bLineFindings(outline, list) {
+  const texts = []
+  for (const volume of asList(outline?.volumes)) {
+    for (const open of asList(volume?.opens)) {
+      const text = typeof open === 'string' ? open : open?.text
+      if (typeof text === 'string' && text.trim()) texts.push(text.trim())
+    }
+  }
+  const labels = B_LINE_MARKERS.filter((marker) =>
+    texts.some((text) => marker.re.test(text)),
+  )
+  if (!labels.length || !list.length) return []
+  const rawTotal = Number(outline?.totalChapters)
+  const total = Number.isFinite(rawTotal) && rawTotal > 0 ? Math.floor(rawTotal) : list.length
+  if (!(total > 0)) return []
+  const threshold = total * 0.58
+  const after = list.filter((item, position) => {
+    const num = chapterNumber(item?.id) ?? position + 1
+    return num > threshold
+  })
+  const merged = after.some((item) => {
+    const body = `${item?.turn ?? ''} ${item?.hook ?? ''}`
+    return labels.some((marker) => marker.re.test(body))
+  })
+  if (merged) return []
+  const from = Math.floor(threshold) + 1
+  const reach = list.reduce(
+    (max, item, position) => Math.max(max, chapterNumber(item?.id) ?? position + 1),
+    0,
+  )
+  return [
+    {
+      severity: 'note',
+      kind: 'bline-unmerged',
+      where: '全书',
+      issue: `卷纲 opens 里标了「${labels.map((marker) => marker.label).join('、')}」，但第 ${from} 章（58%）之后没有任何一章在 turn/hook 里写到这条线${reach < from ? `（目前只规划到第 ${reach} 章）` : ''}`,
+      fix: '在中点后安排 A/B 线人物同场，并让合流事件落在 turn 或章末 hook 里；单线故事请删掉 B 线标记',
+    },
+  ]
+}
+
 export function audit({ chapters = null, canon = null, outline = null, params = {} } = {}) {
   const index = createCanonIndex(canon)
   const list = normalizeChapters(chapters, outline)
   const findings = [
     ...threadStaleFindings(index.threads, list),
     ...canonConflictFindings(index.facts),
+    ...turnFindings(list),
+    ...midpointFindings(outline, list),
+    ...hookFindings(list),
+    ...bookendFindings(list),
+    ...payoffNameDriftFindings(index, list),
+    ...bLineFindings(outline, list),
   ]
   // 有正文的章节继续跑单章规则；只有细纲元数据时只报全书级规则。
   for (let i = 0; i < list.length; i += 1) {

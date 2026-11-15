@@ -17,7 +17,7 @@ import {
   migrateOutline,
   nextActions,
 } from '../src/recipes/novel/plan.js'
-import { normalizeOutline } from '../src/recipes/novel/outline.js'
+import { normalizeOutline, checkOpeningContract } from '../src/recipes/novel/outline.js'
 
 function chapterList(count, prefix = '章') {
   return Array.from({ length: count }, (_, i) => ({
@@ -349,4 +349,124 @@ test('normalizeOutline 的 v1 短篇行为不变（裁到 params.chapters）', (
 test('normalizeOutline 对 v2 骨架原样返回（不破坏卷状态）', () => {
   const skeleton = buildOutlineSkeleton({ chapters: 300, chaptersPerVolume: 30 })
   assert.equal(normalizeOutline(skeleton), skeleton)
+})
+
+test('buildOutlineSkeleton：midpointChapter 可选写入顶层；缺省/非法不出现', () => {
+  const withMid = buildOutlineSkeleton({ chapters: 100, chaptersPerVolume: 30, midpointChapter: 50 })
+  assert.equal(withMid.midpointChapter, 50)
+  assert.equal(withMid.totalChapters, 100)
+
+  const without = buildOutlineSkeleton({ chapters: 100, chaptersPerVolume: 30 })
+  assert.equal('midpointChapter' in without, false)
+
+  const zero = buildOutlineSkeleton({ chapters: 100, chaptersPerVolume: 30, midpointChapter: 0 })
+  assert.equal('midpointChapter' in zero, false)
+})
+
+test('normalizeOutline：v1 顶层 midpointChapter 透传；v2 原样返回', () => {
+  const raw = {
+    volumes: [{ title: '上', purpose: '', chapters: [v1Chapter(0), v1Chapter(1)] }],
+    midpointChapter: 2,
+  }
+  assert.equal(normalizeOutline(raw).midpointChapter, 2)
+
+  const missing = { volumes: [{ title: '上', purpose: '', chapters: [v1Chapter(0)] }] }
+  assert.equal('midpointChapter' in normalizeOutline(missing), false)
+
+  const v2 = buildOutlineSkeleton({ chapters: 10, midpointChapter: 5 })
+  assert.equal(normalizeOutline(v2), v2)
+})
+
+// ---- X12 黄金三章契约（纯函数，不接流水线） -------------------------------
+
+function openingOpener() {
+  return {
+    version: 1,
+    chapters: [
+      {
+        index: 1,
+        id: 'ch0001',
+        hook: { type: '悬念', text: '门缝里塞进一封没有落款的信' },
+        payoff: { level: 'none', text: '', chapterDue: 0 },
+        infoDrop: { readerLearns: '林砚是县衙捕快，正在暗查一桩旧案', characterLoses: '他丢了随身的佩刀' },
+        promiseBeat: '林砚要查清密信是谁送来的',
+        endHook: { type: '悬念', text: '信纸上只有半枚血指纹' },
+      },
+      {
+        index: 2,
+        hook: { type: '危机', text: '有人趁夜翻进他家' },
+        payoff: { level: 'small', text: '他找到密信被撕走的一角', chapterDue: 2 },
+        infoDrop: { readerLearns: '县衙里有人在替凶手遮掩', characterLoses: '' },
+        promiseBeat: '林砚决定从县衙内部查起',
+        endHook: { type: '危机', text: '翻墙的人留下了一枚衙门腰牌' },
+      },
+      {
+        index: 3,
+        hook: { type: '反转', text: '约定的线人没有出现' },
+        payoff: { level: 'medium', text: '', chapterDue: 5 },
+        infoDrop: { readerLearns: '线人一直在两头卖消息', characterLoses: '' },
+        promiseBeat: '林砚要逼线人摊牌',
+        endHook: { type: '反转', text: '线人竟是他的顶头上司' },
+      },
+    ],
+  }
+}
+
+const OPENING_OUTLINE = { version: 2, chapters: [] }
+
+test('checkOpeningContract：黄金三章全合格 → ok 且无 issue', () => {
+  const result = checkOpeningContract({ outline: OPENING_OUTLINE, opener: openingOpener() })
+  assert.equal(result.ok, true)
+  assert.deepEqual(result.issues, [])
+})
+
+test('checkOpeningContract：第 1 章缺 infoDrop 与 promiseBeat → 报第 1 章', () => {
+  const opener = openingOpener()
+  opener.chapters[0].infoDrop = {}
+  opener.chapters[0].promiseBeat = ''
+  const result = checkOpeningContract({ outline: OPENING_OUTLINE, opener })
+  assert.equal(result.ok, false)
+  const hit = result.issues.find((issue) => issue.where === 'ch0001')
+  assert.ok(hit)
+  assert.equal(hit.severity, 'note')
+  assert.equal(hit.kind, 'opening-contract')
+  assert.match(hit.issue, /infoDrop 为空/)
+  assert.match(hit.issue, /promiseBeat 为空/)
+  assert.equal(typeof hit.fix, 'string')
+})
+
+test('checkOpeningContract：第 2 章 payoff 为 none 且无文本 → 报第 2 章', () => {
+  const opener = openingOpener()
+  opener.chapters[1].payoff = { level: 'none', text: '', chapterDue: 0 }
+  const result = checkOpeningContract({ outline: OPENING_OUTLINE, opener })
+  const hit = result.issues.find((issue) => issue.where === 'ch0002')
+  assert.equal(result.ok, false)
+  assert.ok(hit)
+  assert.match(hit.issue, /没有可感知的兑现/)
+})
+
+test('checkOpeningContract：第 3 章 endHook 与第 1 章同型 → 报未换型', () => {
+  const opener = openingOpener()
+  opener.chapters[2].endHook.type = '悬念'
+  const result = checkOpeningContract({ outline: OPENING_OUTLINE, opener })
+  assert.equal(result.ok, false)
+  const hit = result.issues.find((issue) => /没有换型/.test(issue.issue))
+  assert.ok(hit)
+  assert.equal(hit.where, 'ch0003')
+})
+
+test('checkOpeningContract：前三章 hook 出现「不久」→ 报空转词', () => {
+  const opener = openingOpener()
+  opener.chapters[1].hook.text = '不久之后，他才发现那封信被人动过'
+  const result = checkOpeningContract({ outline: OPENING_OUTLINE, opener })
+  assert.equal(result.ok, false)
+  const hit = result.issues.find((issue) => /空转词/.test(issue.issue))
+  assert.ok(hit)
+  assert.match(hit.issue, /不久/)
+})
+
+test('checkOpeningContract：缺 opener → 静默 ok', () => {
+  assert.deepEqual(checkOpeningContract({}), { ok: true, issues: [] })
+  assert.deepEqual(checkOpeningContract(), { ok: true, issues: [] })
+  assert.deepEqual(checkOpeningContract({ outline: OPENING_OUTLINE }), { ok: true, issues: [] })
 })
