@@ -818,17 +818,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794732661
+          "updated": 1794732757
         }
       },
       "versions": [
         {
           "version": "0.1.0",
-          "publishTimestamp": 1794732661,
+          "publishTimestamp": 1794732757,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "bfb3e198a471505a34220923d3adceb5fb2e0242",
+            "commit": "996d10f5f835dc027f016d5b2a3f9bdebf286a42",
             "path": "plugins/voice-control"
           },
           "engines": {
