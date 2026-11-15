@@ -80,7 +80,7 @@ function analyzeFixture(overrides = {}) {
   const {
     kind = 'instruction', name = 'AGENTS.md', path = '/home/u/.agents/AGENTS.md',
     dir = '/home/u/.agents', scope = 'global', description = '', body = GOOD_INSTRUCTION,
-    usage, injection, evolution, conflicts = [], siblings = [], files = [], config = null,
+    usage, injection, evolution, conflicts = null, siblings = [], files = [], config = null,
     mtime = NOW - 90 * 86400000, digest, options = {},
   } = overrides;
   const subject = { kind, name, path, dir, scope, description, mtime, config, owner: null, source: 'filesystem' };
@@ -469,7 +469,7 @@ test('diffText: produces a unified-style diff with context', () => {
   assert.match(diff, /-c/);
 });
 
-test('portfolio: buildPortfolio sorts worst-first and computes residentTokens', () => {
+test('portfolio: buildPortfolio sorts worst-first and splits proven vs declared resident cost', () => {
   const good = analyzeFixture({
     name: 'AGENTS.md',
     usage: { sessions: 9, windowDays: 30, exposureDays: 30, sufficient: true, presetSessions: 0, subagentRuns: 0 },
@@ -484,6 +484,120 @@ test('portfolio: buildPortfolio sorts worst-first and computes residentTokens', 
   const portfolio = buildPortfolio([good, bad], { now: NOW, windowDays: 30, sessionsScanned: 10, usageAvailable: true });
   assert.equal(portfolio.subjects[0].score.total <= portfolio.subjects[1].score.total, true);
   assert.equal(portfolio.totals.instructions, 2);
-  assert.equal(portfolio.totals.residentTokens, good.injection.tokensPerInjection + bad.injection.tokensPerInjection);
+  // 零注入证据的文件不算常驻成本，单独进 declaredTokens
+  assert.equal(portfolio.totals.residentTokens, good.injection.tokensPerInjection);
+  assert.equal(portfolio.totals.declaredTokens, bad.injection.tokensPerInjection);
+  // 完全没有使用证据时退回声明口径，不能把常驻成本算成 0
+  const noEvidence = buildPortfolio([good, bad], { now: NOW, windowDays: 30, sessionsScanned: 0, usageAvailable: false });
+  assert.equal(noEvidence.totals.residentTokens, good.injection.tokensPerInjection + bad.injection.tokensPerInjection);
+  assert.equal(noEvidence.totals.declaredTokens, 0);
   assert.equal(portfolio.rubricVersion, '1.0');
+});
+
+test('score: resident cost is only charged when the file is actually injected', () => {
+  const settings = {
+    usage: { sessions: 9, windowDays: 30, exposureDays: 30, sufficient: true, presetSessions: 0, subagentRuns: 0 },
+    options: { usageAvailable: true },
+  };
+  // tokensPerInjection is recomputed from the body, so make the body genuinely large.
+  const bigBody = `# Big instructions\n\n${'- keep this rule short and testable\n'.repeat(400)}`;
+  const injected = analyzeFixture({
+    ...settings,
+    body: bigBody,
+    injection: { mode: 'always', sessionsSeen: 42, sessionsInjected: 9, lastInjectedAt: NOW - 86400000, tokensPerInjection: 0, duplicatedWith: [] },
+  });
+  const phantom = analyzeFixture({
+    ...settings,
+    name: 'instructions.md', path: '/home/u/.deepseek/instructions.md', dir: '/home/u/.deepseek',
+    body: bigBody,
+    injection: { mode: 'always', sessionsSeen: 42, sessionsInjected: 0, lastInjectedAt: null, tokensPerInjection: 9000, duplicatedWith: [] },
+  });
+  const costItem = (report) => report.score.dimensions
+    .find((dim) => dim.id === 'inject').items.find((entry) => entry.id === 'inject.cost');
+
+  assert.equal(costItem(injected).applicable, true);
+  assert.equal(costItem(injected).score, 0);
+  // 从未注入的文件没有每次会话成本，不能按体积扣分，也不该进分母
+  assert.equal(costItem(phantom).applicable, false);
+  // 不评分的项要从分母里拿掉，维度分按剩余可评项折算
+  const scaled = (report) => {
+    const dim = report.score.dimensions.find((entry) => entry.id === 'inject');
+    const applicable = dim.items.filter((entry) => entry.applicable);
+    const earned = applicable.reduce((sum, entry) => sum + entry.score, 0);
+    const possible = applicable.reduce((sum, entry) => sum + entry.max, 0);
+    return { score: dim.score, expected: (earned / possible) * dim.max };
+  };
+  assert.ok(Math.abs(scaled(phantom).score - scaled(phantom).expected) < 0.05);
+  assert.equal(scaled(phantom).expected > 0, true);
+  assert.equal((phantom.findings || []).some((finding) => finding.id === 'inject.cost'), false);
+  // 无使用证据时退回声明口径，不能把所有文件都判成「不评分」
+  const blind = analyzeFixture({
+    ...settings, options: {},
+    injection: { mode: 'always', sessionsSeen: 42, sessionsInjected: 0, lastInjectedAt: null, tokensPerInjection: 0, duplicatedWith: [] },
+  });
+  assert.equal(costItem(blind).applicable, true);
+});
+
+test('score: conflict governance is N/A without a portfolio pass, charged when provided', () => {
+  const govItem = (report) => report.score.dimensions
+    .find((dim) => dim.id === 'governance').items.find((entry) => entry.id === 'gov.conflicts');
+  const settings = {
+    usage: { sessions: 9, windowDays: 30, exposureDays: 30, sufficient: true, presetSessions: 0, subagentRuns: 0 },
+    options: { usageAvailable: true },
+  };
+
+  // 单文件扫描拿不到组合级冲突；缺数据不等于「无冲突」，不能白送 5 分
+  const alone = analyzeFixture(settings);
+  assert.equal(govItem(alone).applicable, false);
+  assert.match(govItem(alone).detail, /未做组合级冲突比对/);
+
+  const contradicting = analyzeFixture({
+    ...settings,
+    conflicts: [{ kind: 'contradiction', a: 'AGENTS.md', b: 'other.md', ratio: 0.7 }],
+  });
+  assert.equal(govItem(contradicting).applicable, true);
+  assert.equal(govItem(contradicting).score, 0);
+
+  const clean = analyzeFixture({ ...settings, conflicts: [] });
+  assert.equal(govItem(clean).applicable, true);
+  assert.equal(govItem(clean).score, 5);
+});
+
+test('verdict: a never-injected file is not blamed for injection weight', () => {
+  const bigBody = `# Big instructions\n\n${'- keep this rule short and testable\n'.repeat(400)}`;
+  const phantom = analyzeFixture({
+    body: bigBody,
+    usage: { sessions: 9, windowDays: 30, exposureDays: 30, sufficient: true, presetSessions: 0, subagentRuns: 0 },
+    injection: { mode: 'always', sessionsSeen: 42, sessionsInjected: 0, lastInjectedAt: null, tokensPerInjection: 9000, duplicatedWith: [] },
+    options: { usageAvailable: true },
+  });
+  assert.doesNotMatch(phantom.verdict.reason, /每次注入 \d+ tokens 偏重/);
+
+  const injected = analyzeFixture({
+    body: bigBody,
+    usage: { sessions: 9, windowDays: 30, exposureDays: 30, sufficient: true, presetSessions: 0, subagentRuns: 0 },
+    injection: { mode: 'always', sessionsSeen: 42, sessionsInjected: 9, lastInjectedAt: NOW - 86400000, tokensPerInjection: 9000, duplicatedWith: [] },
+    options: { usageAvailable: true },
+  });
+  assert.match(injected.verdict.reason, /每次注入 \d+ tokens 偏重/);
+});
+
+test('portfolio: conflicts found by the portfolio pass are charged to the subjects', () => {
+  const settings = {
+    usage: { sessions: 9, windowDays: 30, exposureDays: 30, sufficient: true, presetSessions: 0, subagentRuns: 0 },
+    options: { usageAvailable: true },
+  };
+  const twinA = analyzeFixture({ ...settings, name: 'a.md', path: '/home/u/.agents/a.md' });
+  const twinB = analyzeFixture({ ...settings, name: 'b.md', path: '/home/u/.agents/b.md' });
+  const portfolio = buildPortfolio([twinA, twinB], {
+    generatedAt: NOW, windowDays: 30, usageAvailable: true, roots: ['/home/u/.agents'],
+    options: { now: NOW, windowDays: 30, usageAvailable: true, defaultRoots: ['/home/u/.agents'] },
+  });
+  const conflictItem = (report) => report.score.dimensions
+    .find((dim) => dim.id === 'governance').items.find((entry) => entry.id === 'gov.conflicts');
+  // 两份内容相同的说明书必然产生重复规则：组合级检测有数据时就该扣，而不是白送 5 分
+  for (const report of portfolio.subjects) {
+    assert.equal(conflictItem(report).applicable, true);
+    assert.ok(conflictItem(report).score < 5, `${report.name} 应因重复规则被扣分`);
+  }
 });

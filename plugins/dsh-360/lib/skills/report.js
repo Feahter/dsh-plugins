@@ -130,12 +130,14 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
   lines.push(table(
     ['指标', '数值', '说明'],
     [
-      ['技能总数', totals.skills, '当前 catalog 中模型可见的 skill'],
+      ['技能总数', totals.skills, '扫描到的 SKILL.md 数量；不一定都进入模型可见的 catalog'],
       ['平均分', totals.avgScore, '六维加权后 100 分制'],
       ['等级分布', `S ${totals.grades.S} · A ${totals.grades.A} · B ${totals.grades.B} · C ${totals.grades.C} · D ${totals.grades.D} · E ${totals.grades.E}`, '字母粗粒度；18 档见 RUBRIC §1'],
-      ['catalog 固定成本', `≈ ${totals.catalogTokens} tokens`, '每次会话固定注入的 name + description'],
-      ['全量加载成本', `≈ ${totals.fullLoadTokens} tokens`, '若把所有 SKILL.md 全加载一次'],
-      ['零按需加载（窗口内）', totals.zeroUse, '有足够样本但 skill 工具 0 次按需加载（不含 /name 直呼）'],
+      ['实测目录成本', `≈ ${totals.catalogTokens} tokens`, totals.declaredCatalogTokens
+        ? `窗口内实测出现在技能目录里的 name + description；另有 ${totals.declaredCatalogTokens} tokens 来自从未在目录中出现过的 SKILL.md，未计入`
+        : '窗口内实测出现在技能目录里的 name + description'],
+      ['全量加载成本', `≈ ${totals.fullLoadTokens} tokens`, '若把扫描到的 SKILL.md 全加载一次'],
+      ['零按需加载（窗口内）', totals.zeroUse, '窗口内出现在技能目录、但 skill 工具 0 次按需加载（不含 /name 直呼）'],
       ['references 文件', totals.referenceFiles, '已外置的按需细节'],
       ['持续进化', evolutionTotalLabel(totals), '沉淀经验与待闭环信号的组合口径'],
     ],
@@ -172,7 +174,7 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
 
   const issues = portfolio.issues || {};
   const issueLines = [];
-  if (issues.zeroUse?.length) issueLines.push(`- **零按需加载**（有足够样本）：${issues.zeroUse.map((name) => `\`${name}\``).join('、')}`);
+  if (issues.zeroUse?.length) issueLines.push(`- **零按需加载**（窗口内进过目录）：${issues.zeroUse.map((name) => `\`${name}\``).join('、')}`);
   if (issues.truncated?.length) issueLines.push(`- **描述超目录上限**：${issues.truncated.map((name) => `\`${name}\``).join('、')}`);
   if (issues.brokenLinks?.length) issueLines.push(`- **失效链接**：${issues.brokenLinks.map((item) => `\`${item.name}\` → ${item.href}`).join('；')}`);
   if (issues.dangerous?.length) issueLines.push(`- **危险命令/密钥**：${issues.dangerous.map((item) => `\`${item.name}\``).join('、')}`);

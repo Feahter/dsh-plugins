@@ -16,7 +16,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { createSkillsSurface } from './lib/host-skills.js';
 import { createAgentsSurface } from './lib/host-agents.js';
 
-const VERSION = '0.2.2';
+const VERSION = '0.2.3';
 const HEALTH_PREFIX = '/api/dsh-360/health';
 
 class HarnessError extends Error {

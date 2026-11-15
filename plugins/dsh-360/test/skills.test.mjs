@@ -15,6 +15,7 @@ import {
   applyPlan, diffText, listBackups, planFixes, resolveInside, undoBackup,
 } from '../lib/skills/fixes.js';
 import { gradeFor } from '../lib/grade.js';
+import { estimateTokens } from '../lib/util.js';
 
 const NOW = Date.UTC(2026, 10, 9, 12, 0, 0);
 const OPTIONS = { catalogDescriptionMaxLength: 500, now: NOW, sessionSpanDays: 30 };
@@ -320,6 +321,53 @@ test('overlap and portfolio verdict use sibling scores', async () => {
   assert.ok(portfolio.overlaps.length >= 1);
   assert.ok(portfolio.skills.every((report) => report.score.total > 0));
   assert.equal(portfolio.rubricVersion, '2.0');
+});
+
+test('portfolio: catalog cost only bills skills that actually appeared in a catalog', async () => {
+  const description = 'Use when reviewing academic papers and refereeing manuscripts.';
+  const base = { description, body: GOOD_BODY, refs: ['details.md'], mtime: NOW - 10 * 86400000 };
+  const seen = await analyzeFixture({ ...base, name: 'seen-skill', usage: { count: 1, sufficient: true, firstSeen: NOW - 10 * 86400000, catalogSessions: 4 } });
+  const ghost = await analyzeFixture({ ...base, name: 'ghost-skill', usage: { count: 0, sufficient: true, firstSeen: NOW - 10 * 86400000, catalogSessions: 0 } });
+  const catalogEntry = (report) => estimateTokens(`${report.name} ${report.description.slice(0, 500)}`);
+
+  const portfolio = buildPortfolio([seen.report, ghost.report], { options: OPTIONS, now: NOW, windowDays: 30, sessionsScanned: 10, usageAvailable: true });
+  assert.equal(portfolio.totals.catalogTokens, catalogEntry(seen.report));
+  assert.equal(portfolio.totals.declaredCatalogTokens, catalogEntry(ghost.report));
+
+  // Without a scanned window nothing is proven, so the declared catalog is the
+  // only figure the report can honestly show.
+  const blind = buildPortfolio([seen.report, ghost.report], { options: OPTIONS, now: NOW, windowDays: 30, sessionsScanned: 0, usageAvailable: false });
+  assert.equal(blind.totals.catalogTokens, catalogEntry(seen.report) + catalogEntry(ghost.report));
+  assert.equal(blind.totals.declaredCatalogTokens, 0);
+});
+
+test('usage: a skill never seen in a catalog has no exposure evidence, however old the file is', async () => {
+  const description = 'Use when reviewing academic papers and refereeing manuscripts.';
+  // Old file, plenty of scanned sessions, but it never appeared in a catalog:
+  // file age must not be promoted to exposure.
+  const ghost = await analyzeFixture({
+    name: 'ghost-skill', description, body: GOOD_BODY, refs: ['details.md'],
+    mtime: NOW - 400 * 86400000,
+    usage: { count: 0, sufficient: true, catalogSessions: 0 },
+    options: { sessionSpanDays: 30, sessionsScanned: 70 },
+  });
+  const evidence = ghost.report.score.dimensions.find((dim) => dim.id === 'load').items.find((item) => item.id === 'load.evidence');
+  assert.equal(ghost.report.usage.exposureDays, 0);
+  assert.equal(ghost.report.usage.sufficient, false);
+  assert.equal(evidence.applicable, false);
+
+  const portfolio = buildPortfolio([ghost.report], { options: OPTIONS, now: NOW, windowDays: 30, sessionsScanned: 70, usageAvailable: true });
+  assert.equal(portfolio.totals.zeroUse, 0);
+
+  // No scanned window at all: fall back to file age so a fresh machine still scores.
+  const blind = await analyzeFixture({
+    name: 'ghost-skill', description, body: GOOD_BODY, refs: ['details.md'],
+    mtime: NOW - 400 * 86400000,
+    usage: { count: 0, sufficient: true, catalogSessions: 0 },
+    options: { sessionSpanDays: 30, sessionsScanned: 0, usageAvailable: false },
+  });
+  assert.ok(blind.report.usage.exposureDays >= 365);
+  assert.equal(blind.report.usage.sufficient, true);
 });
 
 test('fixes: extract sections moves content to references and can be undone byte-for-byte', async () => {

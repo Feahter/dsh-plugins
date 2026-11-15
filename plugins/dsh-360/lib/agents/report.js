@@ -113,9 +113,11 @@ export function renderMarkdown(portfolio, { detail = true } = {}) {
       ['subject 总数', totals.subjects, `说明书 ${totals.instructions} · 子代理 ${totals.agents} · 预设 ${totals.presets}`],
       ['平均分', totals.avgScore, '六维加权后 100 分制'],
       ['等级分布', `S ${totals.grades.S} · A ${totals.grades.A} · B ${totals.grades.B} · C ${totals.grades.C} · D ${totals.grades.D} · E ${totals.grades.E}`, '字母粗粒度；18 档见 RUBRIC §1'],
-      ['常驻成本', `≈ ${totals.residentTokens} tokens（占 200k 上下文 ${residentPct}%）`, '所有说明书每次会话固定注入的估算'],
-      ['零注入（窗口内）', totals.zeroInject, '有足够覆盖却 0 注入证据的说明书'],
-      ['跨文件冲突', totals.conflicts, '重复/矛盾规则（词面启发式）'],
+      ['常驻成本', `≈ ${totals.residentTokens} tokens（占 200k 上下文 ${residentPct}%）`, totals.declaredTokens
+        ? `窗口内实测有注入证据的说明书；另有 ${totals.declaredTokens} tokens 声明 always 但零注入证据，未计入`
+        : '窗口内实测有注入证据的说明书每次会话固定注入的估算'],
+      ['零注入（窗口内）', totals.zeroInject, '窗口内未观测到注入标记（目前仅识别会话里的 `Instructions from:` 行，可能漏计）'],
+      ['跨文件冲突', totals.conflicts, '组合级词面检测（重复/矛盾规则）；只进 state 徽章与本节明细，不摊到个体评分'],
       ['失效引用', totals.staleRefs, '指向不存在路径/链接'],
       ['疑似密钥/危险命令', totals.secrets, '安全风险项'],
     ],

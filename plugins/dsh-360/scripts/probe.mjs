@@ -42,7 +42,9 @@ for (const subject of subjects) {
     usage: matched.usage,
     injection: matched.injection,
     siblings: subjects.filter((s) => s.kind === subject.kind && s.path !== subject.path),
-    options: { now: startedAt, windowDays, defaultRoots: roots },
+    // Match the host path: without usageAvailable the scorer falls back to
+    // declared values and every phantom file keeps its phantom penalty.
+    options: { now: startedAt, windowDays, defaultRoots: roots, usageAvailable: digest.available },
   }));
 }
 

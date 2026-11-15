@@ -72,7 +72,7 @@ score: {
 ### 2.1 按需加载（20）
 
 - **触发可选中性（12）**：触发句式命中 3；唯一触发词密度 ≥6 / 3–5 / 1–2 得 4 / 3 / 1；前置核心（前 160 字符内出现触发句式或核心动词）2；长度适配（40 ≤ chars ≤ max 得 2，≤1.4×max 得 1，过短或过长 0）；非空泛开头 1。`max` 默认 500（config `catalogDescriptionMaxLength`）。
-- **按需加载证据（8）**：只统计窗口内 `skill` 工具的加载调用。`exposureDays` 优先取该技能在 catalog 中**首次出现**的时间（`firstSeen`），而非 mtime（同步会重置 mtime）；样本充分性要求 `sessionsScanned ≥ 5` 且（暴露 ≥14 天，或 ≥2 天且 catalog 会话 ≥30）。充分时 ≥5 次且 14 天内 → 8；≥2 次 → 6；1 次 → 3（7 天内 4）；0 次且暴露 ≥45 天 → 0；0 次且 <45 天 → 2 并再降置信度 0.1。不足时该项 N/A，维度内其余条目按比例放大。
+- **按需加载证据（8）**：只统计窗口内 `skill` 工具的加载调用。`exposureDays` 优先取该技能在 catalog 中**首次出现**的时间（`firstSeen`），而非 mtime（同步会重置 mtime）；**扫描了会话却从未在目录里见过它** ⇒ 曝光 0、本项 N/A（文件年龄不能冒充曝光，另一个 agent 目录里的 SKILL.md 根本没进 DSH catalog），只有完全没有扫描窗口时才退回按文件年龄估算；样本充分性要求 `sessionsScanned ≥ 5` 且（暴露 ≥14 天，或 ≥2 天且 catalog 会话 ≥30）。充分时 ≥5 次且 14 天内 → 8；≥2 次 → 6；1 次 → 3（7 天内 4）；0 次且暴露 ≥45 天 → 0；0 次且 <45 天 → 2 并再降置信度 0.1。不足时该项 N/A，维度内其余条目按比例放大。
 - **路由唯一性（6）**：与兄弟技能算 IDF 加权余弦 `cosine`，`m = min(1, sqrt(cosine) × (1 + 0.2 × 名称重合率))`；`m < 0.25` → 6，`0.25–0.45` → 4，`0.45–0.65` → 2，`≥0.65` → 0。同时输出 `overlaps`（≥0.35，最多 5 个）。
 - **常驻成本（4）**：`catalogChars = min(descriptionChars, max)`；80–max → 4，40–79 或 `max+1–1.4×max` → 2，过短/过长 → 1，截断且触发句落在截断点之后 → 0。
 - **不扣分的质量增强**：加载前的最后一条真实用户消息与描述共享 ≥1 个触发词视为命中；`total ≥ 3 && recall < 0.4` → finding `load.prompt-mismatch`（minor），只作为改描述的输入。
@@ -138,7 +138,7 @@ frontmatter 完整 5（可解析 1、`description` 非空 1、kebab-case 1、与
 ### 3.1 注入命中（20）
 
 - **注入/使用证据（8）**：`instruction` 看 `sessionsInjected`（≥1 且 `sessionsSeen ≥ 5` → 8；≥1 → 6；0 且暴露 ≥14 天 → 2；样本 <5 → N/A）；`agent` 看 `subagentRuns`（≥3 → 8；1–2 → 5；0 且暴露 ≥45 天 → 0；<45 天 → 3）；`preset` 看 `presetSessions`（≥10 → 8；1–9 → 6；0 且 ≥30 天 → 1；<30 天 → 4）。`exposureDays = min(now − mtime, 365)`，mtime 缺失时用首次扫到时间并降置信度 0.1。
-- **常驻成本（6）**：instruction `tokensPerInjection ≤ 800 / ≤1500 / ≤2500 / >2500` → 6/4/2/0；agent `description` 字符 ≤300 / ≤500 / ≤900 / >900 或缺失 → 6/4/2/0；preset 有显式档位配置（`reasoningEffort`/`maxTokens`）→ 6，只有模型名 → 4，无模型配置 → 2。
+- **常驻成本（6）**：instruction 只在**窗口内确有注入证据**（`sessionsInjected ≥ 1`）时按 `tokensPerInjection ≤ 800 / ≤1500 / ≤2500 / >2500` → 6/4/2/0；窗口内 0 次注入的文件没有每次会话成本，本项 N/A（不进分母），不再按体积扣分；只有在完全没有使用证据（未扫描会话）时才退回按声明值估算。agent `description` 字符 ≤300 / ≤500 / ≤900 / >900 或缺失 → 6/4/2/0；preset 有显式档位配置（`reasoningEffort`/`maxTokens`）→ 6，只有模型名 → 4，无模型配置 → 2。
 - **唯一性与作用域（6）**：instruction 作用域明确且与兄弟重复率 <0.4 → 6，<0.7 → 3，≥0.7 → 0；agent `name` 唯一合法 3 分 + `description` 含触发句式 3 分。
 
 ### 3.2 分层与精简（25）
@@ -153,7 +153,7 @@ frontmatter 完整 5（可解析 1、`description` 非空 1、kebab-case 1、与
 
 ### 3.4 边界与治理（15）
 
-作用域声明 5（正文写明适用范围 5，靠路径隐含 3，无线索 1）；职责边界 5（独立“不适用/边界/禁止用于”小节 5，仅行内 3，无 0——agent 类必扣）；跨文件冲突 5（无冲突 5；1 条 duplicate（ratio ≥0.6）→ 3，≥2 条 → 1；有 contradiction → 0）。
+作用域声明 5（正文写明适用范围 5，靠路径隐含 3，无线索 1）；职责边界 5（独立“不适用/边界/禁止用于”小节 5，仅行内 3，无 0——agent 类必扣）；跨文件冲突 5（无冲突 5；1 条 duplicate（ratio ≥0.6）→ 3，≥2 条 → 1；有 contradiction → 0）。**该子项需要组合级 `detectConflicts` 结果**：单文件扫描拿不到冲突数据时本项 N/A、不进分母——缺数据不等于「无冲突」，不给满分。
 
 ### 3.5 维护卫生（10）
 

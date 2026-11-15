@@ -106,7 +106,7 @@ export function scoreSubject(metrics, context) {
     coverage = 'full',
     usage = {},
     injection = {},
-    conflicts = [],
+    conflicts = null,
     overlaps = [],
     siblings = [],
     overlapMax = 0,
@@ -171,9 +171,22 @@ export function scoreSubject(metrics, context) {
   // ---- inject.cost (6)
   let costScore;
   let costDetail;
+  let costApplicable = true;
   if (kind === 'instruction') {
-    costScore = tokensPerInjection <= 800 ? 6 : tokensPerInjection <= 1500 ? 4 : tokensPerInjection <= 2500 ? 2 : 0;
-    costDetail = `每次注入约 ${tokensPerInjection} tokens。`;
+    if (sessionsInjected >= 1) {
+      costScore = tokensPerInjection <= 800 ? 6 : tokensPerInjection <= 1500 ? 4 : tokensPerInjection <= 2500 ? 2 : 0;
+      costDetail = `每次注入约 ${tokensPerInjection} tokens（窗口内 ${sessionsInjected} 次注入）。`;
+    } else if (usageAvailable) {
+      // A file that never reaches a request carries no per-session cost, so
+      // charging it for size would be a phantom penalty. Leave the item out of
+      // the denominator instead of scoring it.
+      costApplicable = false;
+      costScore = 0;
+      costDetail = '窗口内 0 次注入，常驻成本不成立，本项不评分。';
+    } else {
+      costScore = tokensPerInjection <= 800 ? 6 : tokensPerInjection <= 1500 ? 4 : tokensPerInjection <= 2500 ? 2 : 0;
+      costDetail = `每次注入约 ${tokensPerInjection} tokens（无使用证据，按声明值估算）。`;
+    }
   } else if (kind === 'agent') {
     costScore = descriptionChars <= 300 ? 6 : descriptionChars <= 500 ? 4 : descriptionChars <= 900 ? 2 : 0;
     costDetail = descriptionChars > 0
@@ -186,7 +199,7 @@ export function scoreSubject(metrics, context) {
     costDetail = hasModelTier ? '有显式模型档位配置（reasoningEffort/maxTokens）。'
       : hasModelName ? '只配置了模型名。' : '无模型配置。';
   }
-  items.inject.push(item('inject.cost', '常驻成本', costScore, 6, costDetail));
+  items.inject.push(item('inject.cost', '常驻成本', costScore, 6, costDetail, { applicable: costApplicable }));
 
   // ---- inject.unique (6)
   let uniqueScore;
@@ -286,15 +299,21 @@ export function scoreSubject(metrics, context) {
     { evidence: bodyEvidence(rawBody, BOUNDARY_INLINE_RE) }));
 
   // ---- gov.conflicts (5)
-  const myConflicts = (conflicts || []).filter((conflict) => conflict.a === name || conflict.b === name
+  // detectConflicts needs the whole portfolio, so a single-subject pass usually
+  // has no conflict data. Absence of data must not read as "no conflicts": that
+  // awarded a free 5/5 while the portfolio table reported dozens of conflicts.
+  const conflictsKnown = Array.isArray(conflicts);
+  const myConflicts = conflictsKnown ? conflicts.filter((conflict) => conflict.a === name || conflict.b === name
     || conflict.a === context.id || conflict.b === context.id
-    || (Array.isArray(conflict.subjects) && conflict.subjects.includes(context.id)));
+    || (Array.isArray(conflict.subjects) && conflict.subjects.includes(context.id))) : [];
   const myDupes = myConflicts.filter((conflict) => conflict.kind === 'duplicate' && conflict.ratio >= 0.6).length;
   const myContradictions = myConflicts.filter((conflict) => conflict.kind === 'contradiction').length;
   const conflictScore = myContradictions > 0 ? 0 : myDupes >= 2 ? 1 : myDupes === 1 ? 3 : 5;
   items.governance.push(item('gov.conflicts', '跨文件冲突', conflictScore, 5,
-    myContradictions > 0 ? `有 ${myContradictions} 条矛盾规则。`
-      : myDupes > 0 ? `有 ${myDupes} 条重复规则。` : '无跨文件冲突。'));
+    !conflictsKnown ? '未做组合级冲突比对，本项不评分。'
+      : myContradictions > 0 ? `有 ${myContradictions} 条矛盾规则。`
+        : myDupes > 0 ? `有 ${myDupes} 条重复规则。` : '无跨文件冲突。',
+    { applicable: conflictsKnown }));
 
   // ============================================================= hygiene (10)
   items.hygiene.push(item('hyg.placeholders', '占位与未完成', metrics.todos > 0 ? 0 : 3, 3,
@@ -630,13 +649,17 @@ function computeVerdict(ctx) {
   const { total, exposureDays, usage, overlapMax, myContradictions, kind, tokensPerInjection, layerScore, overlapName } = ctx;
   const missing = injectEvidenceMissing(kind, { sessionsInjected: ctx.sessionsInjected }, usage, exposureDays);
   const archive = total < 55 && exposureDays >= 60 && (usage.sessions || 0) === 0 && overlapMax < 0.5;
-  const trim = total < 70 || layerScore < 12.5 || tokensPerInjection > 2500;
+  // Size only counts as a cost when the file actually reaches a request;
+  // otherwise the verdict contradicted inject.cost, which is N/A in that case.
+  const costIsReal = kind !== 'instruction' || (ctx.sessionsInjected || 0) >= 1;
+  const heavy = costIsReal && tokensPerInjection > 2500;
+  const trim = total < 70 || layerScore < 12.5 || heavy;
   const watch = missing || myContradictions > 0;
   if (archive) {
     return { code: 'archive', label: '归档候选', reason: `总分 ${total}，长期无使用（exposure ${exposureDays} 天），且与邻居重叠低（${overlapMax.toFixed(2)}）。` };
   }
   if (trim) {
-    const why = tokensPerInjection > 2500 ? `每次注入 ${tokensPerInjection} tokens 偏重`
+    const why = heavy ? `每次注入 ${tokensPerInjection} tokens 偏重`
       : layerScore < 12.5 ? `分层维度 ${layerScore}/25 偏低` : `总分 ${total} 偏低`;
     return { code: 'trim', label: '精简', reason: `${why}${overlapName ? `，与 ${overlapName} 重叠 ${overlapMax.toFixed(2)}` : ''}。` };
   }

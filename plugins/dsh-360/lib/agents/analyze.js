@@ -16,6 +16,7 @@ import { buildEvolution, parseLessons, LESSONS_BLOCK } from './evolution.js';
 import { subjectId, scopeForInstruction } from './collect.js';
 import { normalizeInjectionPath } from '../usage.js';
 import { classifyAgent, classificationTags, taxonomyCatalog } from '../taxonomy.js';
+import { gradeFor } from '../grade.js';
 
 export const RUBRIC_VERSION = '1.0';
 const DAY_MS = 86_400_000;
@@ -314,7 +315,9 @@ export function analyzeSubject(input) {
   // ---- score
   const scored = scoreSubject(metrics, {
     kind, name: subject.name || basename(path || ''), id, description, scope, coverage,
-    usage, injection, conflicts: input.conflicts || [], overlaps, siblings, overlapMax, overlapName,
+    // Only forward conflicts when the caller actually ran a portfolio pass;
+    // an empty array would claim "no conflicts" and hand out free governance points.
+    usage, injection, conflicts: Array.isArray(input.conflicts) ? input.conflicts : null, overlaps, siblings, overlapMax, overlapName,
     evolution, options: { ...options, now }, rawBody: body, files,
     config: subject.config, usageAvailable: (input.digest?.available ?? options.usageAvailable ?? false),
     mtimeMissing: subject.mtime == null, previousTotal: input.previousTotal ?? null,
@@ -402,6 +405,10 @@ export function buildPortfolio(reports, meta = {}) {
   const gradeCodes = {};
   const counts = { instructions: 0, agents: 0, presets: 0 };
   let residentTokens = 0;
+  let declaredTokens = 0;
+  // 只有窗口内真的观测到注入，才能说这份说明书"每次会话都付这份钱"。
+  // 没有使用证据（新机器、没扫到会话）时退回声明口径，避免把常驻成本算成 0。
+  const hasInjectionEvidence = meta.usageAvailable !== false && (Number(meta.sessionsScanned) || 0) > 0;
   let staleRefsTotal = 0;
   let secretsTotal = 0;
   const zeroInject = [];
@@ -414,7 +421,9 @@ export function buildPortfolio(reports, meta = {}) {
     gradeCodes[code] = (gradeCodes[code] || 0) + 1;
     if (report.kind === 'instruction') {
       counts.instructions += 1;
-      residentTokens += Number(report.injection.tokensPerInjection) || 0;
+      const tokens = Number(report.injection.tokensPerInjection) || 0;
+      if (!hasInjectionEvidence || (Number(report.injection.sessionsInjected) || 0) > 0) residentTokens += tokens;
+      else declaredTokens += tokens;
       if (report.injection.sessionsSeen >= 5 && report.injection.sessionsInjected === 0) {
         zeroInject.push({ id: report.id, name: report.name });
       }
@@ -455,6 +464,43 @@ export function buildPortfolio(reports, meta = {}) {
       enriched.tags = classificationTags(enriched);
       report.classification = enriched;
     }
+  }
+
+  // The conflict pass above covers every subject, so the governance item can be
+  // charged for real. Single-subject scoring leaves it N/A (no portfolio data);
+  // leaving it N/A here would silently drop 5 of governance's 15 points.
+  for (const report of list) {
+    const gov = report.score?.dimensions?.find((dim) => dim.id === 'governance');
+    const entry = gov?.items?.find((item) => item.id === 'gov.conflicts');
+    if (!entry || !report.score) continue;
+    const mine = conflicts.filter((conflict) => conflict.a === report.name || conflict.b === report.name
+      || conflict.a === report.id || conflict.b === report.id
+      || (Array.isArray(conflict.subjects) && conflict.subjects.includes(report.id)));
+    const dupes = mine.filter((conflict) => conflict.kind === 'duplicate' && conflict.ratio >= 0.6).length;
+    const contradictions = mine.filter((conflict) => conflict.kind === 'contradiction').length;
+    entry.applicable = true;
+    entry.score = contradictions > 0 ? 0 : dupes >= 2 ? 1 : dupes === 1 ? 3 : 5;
+    entry.detail = contradictions > 0 ? `有 ${contradictions} 条矛盾规则。`
+      : dupes > 0 ? `有 ${dupes} 条重复规则。` : '无跨文件冲突。';
+
+    const scored = gov.items.filter((item) => item.applicable);
+    const earned = scored.reduce((sum, item) => sum + item.score, 0);
+    const possible = scored.reduce((sum, item) => sum + item.max, 0);
+    gov.score = round1(possible > 0 ? (earned / possible) * gov.max : 0);
+
+    const dimensions = report.score.dimensions;
+    const evolutionDim = dimensions.find((dim) => dim.id === 'evolution');
+    const fiveDimTotal = dimensions.filter((dim) => dim.id !== 'evolution')
+      .reduce((sum, dim) => sum + dim.score, 0);
+    const total = evolutionDim && evolutionDim.applicable === false
+      ? round1(fiveDimTotal * 100 / 90)
+      : round1(dimensions.reduce((sum, dim) => sum + dim.score, 0));
+    report.score.total = total;
+    const g = gradeFor(total);
+    report.score.grade = g.code;
+    report.score.letter = g.letter;
+    report.score.tier = g.tier;
+    report.score.rank = g.rank;
   }
 
   const pairSeen = new Set();
@@ -530,6 +576,7 @@ export function buildPortfolio(reports, meta = {}) {
       grades,
       gradeCodes,
       residentTokens,
+      declaredTokens,
       zeroInject: zeroInject.length,
       conflicts: conflicts.length,
       staleRefs: staleRefsTotal,

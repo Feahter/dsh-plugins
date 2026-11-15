@@ -137,11 +137,17 @@ export function analyzeSkill(input) {
   // firstSeen is the precise catalog exposure signal. A session-file mtime
   // span is only a fallback when the catalog scanner saw no entry for this
   // skill; using both via max() would inflate a just-added skill to 14+ days.
-  const exposureDays = firstSeen > 0
-    ? seenDays
-    : Math.min(365, Math.max(ageDays, evidenceDays >= 14 ? evidenceDays : 0));
   const sessionsScanned = Number(options.sessionsScanned) || 0;
   const catalogSessions = Number(input.usage?.catalogSessions) || 0;
+  // File age is not exposure. When we did scan sessions and never saw this
+  // skill in a catalog, there was no opportunity to load it: report zero
+  // exposure instead of letting ageDays masquerade as evidence. Only when the
+  // window itself is missing (fresh machine) do we fall back to file age.
+  const exposureDays = firstSeen > 0
+    ? seenDays
+    : sessionsScanned > 0
+      ? 0
+      : Math.min(365, Math.max(ageDays, evidenceDays >= 14 ? evidenceDays : 0));
   // A short but dense session history (e.g. 70 sessions in 4 days) is real
   // evidence when the skill actually appeared in those catalogs. This avoids
   // judging a skill added this morning by yesterday's zero calls.
@@ -280,9 +286,13 @@ export function buildPortfolio(reports, meta = {}) {
 
   list.sort((a, b) => a.score.total - b.score.total || a.name.localeCompare(b.name));
 
+  // Without a scanned session window every skill falls back to the declared
+  // catalog, so a fresh machine still reports a catalog cost instead of 0.
+  const catalogEvidenceAvailable = meta.usageAvailable !== false && (Number(meta.sessionsScanned) || 0) > 0;
   const grades = { S: 0, A: 0, B: 0, C: 0, D: 0, E: 0 };
   const gradeCodes = {};
   let catalogTokens = 0;
+  let declaredCatalogTokens = 0;
   let fullLoadTokens = 0;
   let referenceFiles = 0;
   const bySource = {};
@@ -296,7 +306,15 @@ export function buildPortfolio(reports, meta = {}) {
     grades[letter] = (grades[letter] || 0) + 1;
     const code = report.score.grade || 'E-';
     gradeCodes[code] = (gradeCodes[code] || 0) + 1;
-    catalogTokens += estimateTokens(`${report.name} ${report.description.slice(0, options.catalogDescriptionMaxLength || 500)}`);
+    const catalogEntryTokens = estimateTokens(`${report.name} ${report.description.slice(0, options.catalogDescriptionMaxLength || 500)}`);
+    // Catalog cost only exists for skills that actually appeared in a scanned
+    // skill catalog. A SKILL.md sitting on disk that never reached a request
+    // (another agent's dir, a parked skill) must not be billed as per-session cost.
+    if (!catalogEvidenceAvailable || (Number(report.usage?.catalogSessions) || 0) > 0) {
+      catalogTokens += catalogEntryTokens;
+    } else {
+      declaredCatalogTokens += catalogEntryTokens;
+    }
     fullLoadTokens += report.metrics.estTokens;
     referenceFiles += report.metrics.referenceCount;
     bySource[report.source] = (bySource[report.source] || 0) + 1;
@@ -409,6 +427,7 @@ export function buildPortfolio(reports, meta = {}) {
       grades,
       gradeCodes,
       catalogTokens,
+      declaredCatalogTokens,
       fullLoadTokens,
       zeroUse: zeroUse.length,
       referenceFiles,
