@@ -113,7 +113,9 @@ export function ProgressBar({ value = 0, total = 0, tone = 'ink' }) {
 }
 
 export function Field({ label, hint, children, className }) {
-  return React.createElement('label', { className: cx('nf-field', className) },
+  // 不用 <label> 包整块：字段里常有按钮（随机、润色），包进 label 会让按钮的
+  // 可访问名变成整段字段文案，读屏器把提示连在一起念，按钮也没法按名字定位。
+  return React.createElement('div', { className: cx('nf-field', className) },
     React.createElement('span', { className: 'nf-label' }, label, hint ? React.createElement('em', null, hint) : null),
     children,
   )

@@ -30,6 +30,20 @@ export const STAGE_ARTIFACT = {
 export const GENRES = ['悬疑', '奇幻', '科幻', '都市', '历史', '言情', '恐怖', '武侠', '通用']
 export const POVS = ['第三人称限知', '第三人称全知', '第一人称']
 
+// 网文长篇定位：频道决定读者契约，更新节奏决定卷末钩子与存稿建议。
+export const CHANNELS = ['男频', '女频', '通用']
+export const CADENCES = ['日更', '周更', '不定期']
+export const LONGFORM_FIELDS = {
+  channel: '频道',
+  tags: '标签',
+  sellingPoint: '一句话卖点',
+  chaptersPerVolume: '每卷章数',
+  updateCadence: '更新节奏',
+  goldenFinger: '金手指',
+  comps: '对标作品',
+  more: '更多设定',
+}
+
 export const STATUS_LABEL = {
   idle: '未开始',
   pending: '等待',
@@ -70,6 +84,12 @@ export const zh = {
   startWithOneLine: '用一句话开始',
   loading: '正在翻开…',
   retry: '重试',
+  toolsOn: '对话工具：开',
+  toolsOff: '对话工具：关',
+  toolsHint: '开启后助手才能调用墨炉的小说工具；关闭时不占任何 token。只对最近一次对话生效，重启后重置。',
+  toolsOpened: '已为最近一次对话开启：回到对话发一句话，助手就能调用墨炉工具。',
+  toolsClosed: '已关闭最近一次对话的墨炉工具。',
+  toolsNeedSession: '还没有可接手的对话：先在对话里发一句话，再回来开启。',
 }
 
 export const en = {
@@ -86,4 +106,10 @@ export const en = {
   startWithOneLine: 'Start with one line',
   loading: 'Opening…',
   retry: 'Retry',
+  toolsOn: 'Conversation tools: on',
+  toolsOff: 'Conversation tools: off',
+  toolsHint: 'Turn this on so the assistant can call Novel Forge tools; when off, they cost no tokens. Applies to the most recent conversation only; resets on restart.',
+  toolsOpened: 'Enabled for the most recent conversation. Send it a message and the assistant can call Novel Forge tools.',
+  toolsClosed: 'Novel Forge tools turned off for the most recent conversation.',
+  toolsNeedSession: 'No conversation to attach to yet: send a message in a chat first, then come back.',
 }

@@ -2,6 +2,7 @@
 // handle() 不碰 req/res，测试可以直接喂 {method,path,query,body}。
 
 import { readBody, sendJson, statusForError, httpError } from './json.js'
+import { runAssist, validateAssistInput } from './assist.js'
 
 export const ROUTE_PREFIX = '/novel-forge'
 
@@ -57,7 +58,7 @@ async function getRunForProject(engine, project, after) {
   return runView(latest ? await engine.getRun(latest.id) : null, after)
 }
 
-export async function handle({ engine, modelInfo }, request) {
+export async function handle({ engine, modelInfo, activation }, request) {
   const method = (request.method ?? 'GET').toUpperCase()
   const path = request.path ?? '/'
   const query = request.query ?? {}
@@ -75,6 +76,42 @@ export async function handle({ engine, modelInfo }, request) {
   if (parts.length === 1 && parts[0] === 'estimate' && method === 'POST') {
     const estimate = engine.estimateFor(body?.recipeId, body?.params ?? {})
     return { status: 200, body: { estimate } }
+  }
+
+  // 面板开关：novel_* 工具默认闲置，只有这里点开才进模型提示。
+  if (parts.length === 1 && parts[0] === 'tools' && activation) {
+    if (method === 'GET') {
+      return { status: 200, body: { tools: activation.state() } }
+    }
+    if (method === 'POST') {
+      const conversationId = typeof body?.conversationId === 'string' ? body.conversationId.trim() : ''
+      if (body?.enabled === true) {
+        if (conversationId) {
+          activation.enable(conversationId)
+        } else {
+          const result = activation.enableLatest()
+          if (result?.code === 'NO_SESSION') {
+            throw httpError(409, 'NO_SESSION', '还没有可接手的对话')
+          }
+        }
+      } else {
+        // 不给 id 就是「全部关掉」。
+        activation.disable(conversationId)
+      }
+      return { status: 200, body: { tools: activation.state() } }
+    }
+    throw httpError(405, 'METHOD_NOT_ALLOWED', '方法不支持')
+  }
+
+  // 写作助手：纯文本改写，不落项目、不写产物。
+  if (parts.length === 1 && parts[0] === 'assist') {
+    if (method !== 'POST') throw httpError(405, 'METHOD_NOT_ALLOWED', '方法不支持')
+    const task = body?.task
+    const text = body?.text
+    const problem = validateAssistInput({ task, text })
+    if (problem) throw httpError(400, 'invalid_params', problem)
+    const output = await runAssist({ engine, task, text, genre: body?.genre, tone: body?.tone })
+    return { status: 200, body: { text: output } }
   }
 
   if (parts[0] !== 'projects') {
@@ -202,7 +239,7 @@ export async function handle({ engine, modelInfo }, request) {
  * 适配 DSH webServer 的 handler。
  * guard(req) 返回 falsy 放行，返回数字用该状态码拒绝（默认 403）。
  */
-export function makeHandler({ engine, modelInfo, guard }) {
+export function makeHandler({ engine, modelInfo, guard, activation }) {
   const info = modelInfo ?? (() => ({ available: false, message: '未对接模型服务' }))
   return async function novelForgeHandler(req, res) {
     try {
@@ -223,7 +260,7 @@ export function makeHandler({ engine, modelInfo, guard }) {
       const method = (req.method ?? 'GET').toUpperCase()
       const body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readBody(req) : null
       const result = await handle(
-        { engine, modelInfo: info },
+        { engine, modelInfo: info, activation },
         { method, path, query: Object.fromEntries(url.searchParams), body },
       )
       sendJson(res, result.status, result.body)

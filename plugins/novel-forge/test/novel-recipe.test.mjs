@@ -51,6 +51,8 @@ import {
   sampleVolumeChapters,
   sampleSpine,
   sampleBeats,
+  samplePitch,
+  sampleOpener,
   sampleProse,
   SAMPLE_PARAMS,
   PROMISE_IDS,
@@ -160,8 +162,8 @@ test('validateRecipe 接受 recipe，并返回同一对象', () => {
 test('estimate：调用数按 v2 成本模型（每章 3.5 次 + 每卷卷纲），参数被夹紧', () => {
   const withReview = novelRecipe.estimate({ ...paramsDefaults, chapters: 6, wordsPerChapter: 1200, autoReview: true })
   assert.equal(withReview.chapters, 6)
-  // 6 个单次阶段 + 6 章 × 3.5（细纲 1、草稿 1、摘要/正典补丁 0.5、审校+修订 1）+ 1 卷卷纲
-  assert.equal(withReview.calls, 28)
+  // 7 个单次阶段（v0.3 起 premise 多一次 pitch）+ 6 章 × 3.5（细纲 1、草稿 1、摘要/正典补丁 0.5、审校+修订 1）+ 1 卷卷纲
+  assert.equal(withReview.calls, 29)
   assert.equal(withReview.volumePlans, 1)
   assert.ok(withReview.estTokensIn > 0)
   assert.ok(withReview.estTokensOut > 0)
@@ -169,14 +171,14 @@ test('estimate：调用数按 v2 成本模型（每章 3.5 次 + 每卷卷纲）
   assert.match(withReview.note, /每章材料是一份固定上限的 packet/)
 
   const withoutReview = novelRecipe.estimate({ ...paramsDefaults, chapters: 6, autoReview: false })
-  assert.equal(withoutReview.calls, 22) // 不开审校：每章只剩细纲 + 草稿 + 摘要/正典补丁
+  assert.equal(withoutReview.calls, 23) // 不开审校：每章只剩细纲 + 草稿 + 摘要/正典补丁
   assert.match(withoutReview.note, /不含审校/)
 
   // v2 按 packet 上限估固定每章成本（不是 v1 的逐章累加）：12 章 × 3000 字
   const measured = novelRecipe.estimate({ chapters: 12, wordsPerChapter: 3000, autoReview: true })
-  assert.equal(measured.calls, 49)
-  assert.equal(measured.estTokensIn, 210987)
-  assert.equal(measured.estTokensOut, 75249)
+  assert.equal(measured.calls, 50)
+  assert.equal(measured.estTokensIn, 215188)
+  assert.equal(measured.estTokensOut, 77450)
 
   // 章数上限 3000、单章字数下限 800；超过 40 卷会被压回 40 卷。
   const clamped = novelRecipe.estimate({ chapters: 99999, wordsPerChapter: 1 })
@@ -399,9 +401,9 @@ test('craft：stats 精确（cjk/段落/对话比/场景数）', () => {
   const { findings, stats } = checkDraft({ text, params: { wordsPerChapter: 100 }, beats: null })
   assert.equal(stats.cjk, 12)
   assert.equal(stats.paragraphs, 2)
-  assert.equal(stats.dialogueRatio, 0.222)
+  assert.equal(stats.dialogueRatio, 0.25)
   assert.equal(stats.sceneCount, 1)
-  assert.equal(dialogueRatio(text), 0.222)
+  assert.equal(dialogueRatio(text), 0.25)
   assert.ok(findings.every((finding) => finding.severity !== 'block'))
 })
 
@@ -565,31 +567,34 @@ test('premise：JSON 校验后写 brief；params.title 覆盖模型书名', asyn
   const recipe = createNovelRecipe({ prompts })
   const ctx = createFakeCtx({
     params: { ...SAMPLE_PARAMS, title: '用户书名' },
-    outputs: [jsonOut(sampleBrief())],
+    // v0.3：premise 先跑一次 pitch 再跑故事核，两次都是 JSON。
+    outputs: [jsonOut(samplePitch()), jsonOut(sampleBrief())],
   })
   const out = await stageOf(recipe, 'premise').run(ctx)
   assert.equal(out.artifacts.brief.kind, 'json')
   assert.equal(out.artifacts.brief.content.title, '用户书名')
   assert.equal(out.artifacts.brief.content.logline, sampleBrief().logline)
+  assert.equal(out.artifacts.pitch.content.channel, '男频')
   assert.equal(ctx.calls[0].json, true)
-  assert.equal(ctx.calls[0].phase, 'premise')
+  assert.equal(ctx.calls[0].phase, 'pitch')
+  assert.equal(ctx.calls[1].phase, 'premise')
 })
 
 test('premise：缺软字段降级成空串，缺 logline / 非 JSON 才失败', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
   // 软字段缺失不该让整段已付费的调用作废（模型少写 theme/promise 很常见）
-  const missing = createFakeCtx({ outputs: [jsonOut({ logline: '只有一句话' })] })
+  const missing = createFakeCtx({ outputs: [jsonOut(samplePitch()), jsonOut({ logline: '只有一句话' })] })
   const soft = await stageOf(recipe, 'premise').run(missing)
   assert.equal(soft.artifacts.brief.content.logline, '只有一句话')
   assert.equal(soft.artifacts.brief.content.theme, '')
   assert.equal(soft.artifacts.brief.content.title, '未命名')
 
   // logline 是这一阶段的唯一硬产出，空着就等于没写
-  const noLogline = createFakeCtx({ outputs: [jsonOut({ title: '无名' })] })
+  const noLogline = createFakeCtx({ outputs: [jsonOut(samplePitch()), jsonOut({ title: '无名' })] })
   await assertRejectsCode(stageOf(recipe, 'premise').run(noLogline))
 
-  const notJson = createFakeCtx({ outputs: [textOut('这不是 JSON')] })
+  const notJson = createFakeCtx({ outputs: [jsonOut(samplePitch()), textOut('这不是 JSON')] })
   const error = await assertRejectsCode(stageOf(recipe, 'premise').run(notJson))
   assert.ok('raw' in error.detail)
 })
@@ -653,7 +658,7 @@ test('outline stage：脚本搭骨架 + 一次卷纲展开，正典 v2 从 spine
       characters: { kind: 'json', content: sampleCharacters() },
       spine: { kind: 'json', content: sampleSpine(1) },
     },
-    outputs: [jsonOut(sampleVolumeChapters(6))],
+    outputs: [jsonOut(sampleVolumeChapters(6)), jsonOut(sampleOpener())],
   })
   const out = await stageOf(recipe, 'outline').run(ctx)
   const outline = out.artifacts.outline.content
@@ -666,7 +671,8 @@ test('outline stage：脚本搭骨架 + 一次卷纲展开，正典 v2 从 spine
   assert.equal(outline.chapters[0].volume, 'v01')
   // 章 id 由脚本发号：模型给的 `model-0` 之类不能进 outline。
   assert.ok(outline.chapters.every((chapter) => !String(chapter.id).startsWith('model-')))
-  assert.equal(ctx.calls.length, 1, '短篇一次展开全部卷：只调一次卷纲')
+  // v0.3：一次卷纲 + 一次黄金三章（首轮各一次）。
+  assert.equal(ctx.calls.length, 2, '短篇一次展开全部卷：卷纲 + opener 各一次')
 
   const canon = out.artifacts.canon.content
   assert.equal(canon.version, 2)
@@ -687,11 +693,16 @@ test('outline stage：已有 v2 outline 时不重写，只补 canon', async () =
       characters: { kind: 'json', content: sampleCharacters() },
       spine: { kind: 'json', content: sampleSpine(1) },
     },
-    outputs: [],
+    outputs: [jsonOut(sampleOpener())],
   })
   const out = await stageOf(recipe, 'outline').run(ctx)
-  assert.ok(!('outline' in out.artifacts), '已展开的卷不该被重写')
-  assert.equal(ctx.calls.length, 0)
+  // v0.3：卷不重写，但首轮 opener 会补前 3 章的钩子/爽点字段——这是预期内的补写。
+  const revised = out.artifacts.outline.content
+  assert.equal(revised.chapters.length, outline.chapters.length)
+  assert.equal(revised.chapters[0].title, outline.chapters[0].title, '章名不该被 opener 覆盖')
+  // 章卡的 hookType 取章末回钩的类型（endHook.type 优先），因为它决定读者要不要点下一章。
+  assert.equal(revised.chapters[0].hookType, '信息差', 'opener 的章末钩子类型要落到章卡')
+  assert.equal(ctx.calls.length, 1, '卷已展开：只剩首轮 opener 一次调用')
   assert.match(out.note, /本轮展开 0 卷、0 次模型调用/)
   assert.equal(out.artifacts.canon.content.version, 2)
 })
@@ -1535,13 +1546,16 @@ test('prompts 契约：每个 stage 都调用对应 prompt 且拿到 ctx', async
       ledger: { kind: 'json', content: sampleLedger() },
       'beats/ch01': { kind: 'json', content: sampleBeats() },
     },
-    outputs: [jsonOut({ ...sampleBrief(), title: '长夜将明' })],
+    outputs: [jsonOut(samplePitch()), jsonOut({ ...sampleBrief(), title: '长夜将明' })],
   })
   await stageOf(recipe, 'premise').run(ctx)
-  assert.equal(prompts.calls[0].id, 'premise')
+  // v0.3：premise 阶段先打 pitch，再打 premise，所以第一个 builder 是 pitch。
+  assert.equal(prompts.calls[0].id, 'pitch')
+  assert.equal(prompts.calls[1].id, 'premise')
   assert.equal(prompts.calls[0].ctx.params.chapters, SAMPLE_PARAMS.chapters)
-  // §12：12 个 builder；v0.2 删掉 outline（骨架由脚本搭），新增 volumeChapters / canonPatch。
-  assert.equal(PROMISE_IDS.length, 12)
+  // §12：14 个 builder；v0.2 删掉 outline（骨架由脚本搭），新增 volumeChapters / canonPatch；
+  // v0.3 新增 pitch（商业定位）与 opener（黄金三章）。
+  assert.equal(PROMISE_IDS.length, 14)
   assert.deepEqual(Object.keys(createPrompts()).sort(), [...PROMISE_IDS].sort())
   assert.equal('outline' in createPrompts(), false)
   assert.equal(typeof createPrompts().volumeChapters, 'function')

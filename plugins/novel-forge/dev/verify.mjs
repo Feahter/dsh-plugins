@@ -374,6 +374,8 @@ const demoRun = {
 const state = {
   projects: new Map([['demo', demo]]),
   runs: new Map([['demo', [demoRun]]]),
+  // 对话工具开关的内存状态：latest 模拟「最近一次跑过一步的对话」。
+  tools: { active: [], latest: 'verify-session' },
 }
 
 const summaryOf = project => ({
@@ -511,6 +513,39 @@ async function api(req, res, url) {
   }
   if (req.method === 'GET' && pathname === '/model') {
     return sendJSON(res, 200, { available: true, provider: 'fake', model: 'deepseek-chat' })
+  }
+
+  // 对话工具开关：与 src/host/activation.js 同语义（不给 id 就认 latest / 关全部）。
+  if (pathname === '/tools') {
+    if (req.method === 'GET') return sendJSON(res, 200, { tools: state.tools })
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      const conversationId = typeof body?.conversationId === 'string' ? body.conversationId.trim() : ''
+      if (body?.enabled === true) {
+        const target = conversationId || state.tools.latest
+        if (!target) return sendError(res, 409, '还没有可接手的对话', 'NO_SESSION')
+        if (!state.tools.active.includes(target)) state.tools.active.push(target)
+      } else if (conversationId) {
+        state.tools.active = state.tools.active.filter(item => item !== conversationId)
+      } else {
+        state.tools.active = []
+      }
+      return sendJSON(res, 200, { tools: state.tools })
+    }
+    return sendError(res, 405, '方法不支持', 'method_not_allowed')
+  }
+
+  // 写作助手：与 src/host/assist.js 同形状，返回固定文本便于断言。
+  if (req.method === 'POST' && pathname === '/assist') {
+    const body = await readBody(req)
+    const replies = {
+      'polish-premise': '旧书店的整理员在每本书的空白页上，看见了下一位借书人的死期；她想通知他们，却发现名单上有自己的名字。',
+      'polish-tone': '冷、克制、纸页摩擦的干燥感',
+      title: '纸页之下\n借书人的死期\n空白页',
+    }
+    const text = replies[body?.task]
+    if (!text) return sendError(res, 400, '任务不合法', 'invalid_params')
+    return sendJSON(res, 200, { text })
   }
 
   if (req.method === 'POST' && pathname === '/estimate') {
@@ -764,6 +799,28 @@ async function main() {
     // 2) 新建
     await page.getByRole('button', { name: '新建长篇' }).click()
     await page.waitForSelector('text=新建长篇')
+
+    // 章节上限：网文动辄几百章，新建页必须放到 recipe 支持的 3000。
+    const chapterInput = page.locator('input[type="number"]').first()
+    check('章数上限为 3000', (await chapterInput.getAttribute('max')) === '3000', await chapterInput.getAttribute('max'))
+    check('章数提示写明 3000', (await page.locator('.nf-create').innerText()).includes('6–3000 章'))
+
+    if (process.env.NF_DEBUG) {
+      console.log('[debug] create text >>>', (await page.locator('.nf-create').innerText()).slice(0, 300).replace(/\n/g, ' | '))
+      console.log('[debug] buttons >>>', await page.locator('.nf-create button').allInnerTexts())
+      console.log('[debug] url >>>', page.url())
+    } // DEBUG-CREATE
+    // 随机来一个：本地拼素材，不调模型。
+    await page.getByRole('button', { name: '随机来一个' }).click()
+    const randomPremise = await page.locator('.nf-textarea-premise').inputValue()
+    check('随机来一能填出故事核', randomPremise.length >= 8, randomPremise)
+    check('随机同时填了书名', (await page.locator('.nf-input').first().inputValue()).length > 0)
+
+    // AI 起名：POST /assist，取第一行写回书名。
+    await page.getByRole('button', { name: '起三个' }).click()
+    await page.waitForFunction(() => document.querySelector('.nf-input')?.value === '纸页之下', null, { timeout: 8000 })
+    check('AI 起名写回书名', (await page.locator('.nf-input').first().inputValue()) === '纸页之下')
+
     await page.locator('.nf-textarea-premise').fill('一个在旧书店整理遗物的女孩，发现每本书的空白页上都会浮出下一个借书人的死期。')
     await page.locator('.nf-input').first().fill('纸页之下')
     const createText = await page.locator('.nf-create').innerText()
@@ -776,6 +833,16 @@ async function main() {
     await page.waitForSelector('.nf-workbench', { timeout: 15000 })
     await page.waitForSelector('text=总览', { timeout: 10000 })
     check('新建后进入工作台', await page.locator('.nf-workbench').count() === 1)
+
+    // 对话工具开关：状态只认「最近一次对话」，点开/点关都要给明确反馈。
+    const toolBtn = page.locator('.nf-top-actions').getByRole('button').first()
+    check('对话工具开关初始为关', (await toolBtn.innerText()).includes('关'), await toolBtn.innerText())
+    await toolBtn.click()
+    await page.waitForSelector('text=已为最近一次对话开启', { timeout: 5000 })
+    check('开启后按钮变开并提示生效范围', (await toolBtn.innerText()).includes('开'), await toolBtn.innerText())
+    await toolBtn.click()
+    await page.waitForSelector('text=已关闭最近一次对话', { timeout: 5000 })
+    check('再点一次只关这个对话', (await toolBtn.innerText()).includes('关'), await toolBtn.innerText())
 
     // 新项目是 v2 形状，但还没长出 canon：入口在，点开是「还没建」而不是报错。
     await page.locator('.nf-rail-canon').click()

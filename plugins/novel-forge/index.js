@@ -16,6 +16,7 @@ import { ForgeError } from './src/forge/errors.js'
 import { novelRecipe } from './src/recipes/novel/index.js'
 import { makeHandler, ROUTE_PREFIX } from './src/host/routes.js'
 import { registerNovelTools } from './src/host/tools.js'
+import { createActivation } from './src/host/activation.js'
 
 export const name = 'dsh-novel-forge'
 
@@ -53,6 +54,8 @@ export default {
     })
 
     const engine = new ForgeEngine({ root, recipes: [novelRecipe], llm: gateway })
+    // novel_* 工具默认不激活，只有面板点开某个会话后才注入模型提示。
+    const activation = createActivation()
 
     // 上次进程被杀时残留的 running 记录，启动时收尾，避免项目永远显示"运行中"。
     Promise.resolve()
@@ -60,7 +63,7 @@ export default {
       .catch(error => console.warn('[novel-forge] 恢复中断的运行失败：', error?.message ?? error))
 
     ctx.effect(() => {
-      const offs = registerNovelTools(ctx.get('tools'), engine)
+      const offs = registerNovelTools(ctx.get('tools'), engine, { activation })
       return () => offs.forEach(off => off?.())
     }, 'dsh-novel-forge: novel_* tools')
 
@@ -70,6 +73,7 @@ export default {
       handler: makeHandler({
         engine,
         modelInfo: () => modelInfo(ctx),
+        activation,
         guard: req => {
           const connection = ctx.get('connection')
           if (typeof connection?.requestRejection !== 'function') return 403

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>墨炉 · 宿主布局模拟（顶栏 56px）</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body { background: #f7f4ee; }
+    header.hostbar { height: 56px; display: flex; align-items: center; padding: 0 16px;
+      border-bottom: 1px solid #ddd; font: 13px -apple-system, sans-serif; background: #fff; }
+    main.hostmain { position: relative; height: calc(100% - 56px); overflow: hidden; }
+    #root { height: 100%; }
+  </style>
+</head>
+<body>
+  <header class="hostbar">宿主顶栏（模拟 DSH 布局）</header>
+  <main class="hostmain"><div id="root"></div></main>
+  <script src="../dev/loader-stub.js"></script>
+  <script src="../client.js"></script>
+  <script src="../dev/harness.bundle.js"></script>
+</body>
+</html>

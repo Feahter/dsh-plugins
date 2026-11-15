@@ -48,6 +48,10 @@ try {
 const GENRES = ['悬疑', '奇幻', '科幻', '都市', '历史', '言情', '恐怖', '武侠', '通用']
 const AUDIENCES = ['成年', '青少年', '泛读者']
 const POVS = ['第一人称', '第三人称限知', '第三人称全知']
+// 网文向定位参数（v0.3）：各站读者预期不同，把「写给谁」变成显式输入。
+const CHANNELS = ['男频', '女频', '通用']
+const PLATFORMS = ['起点', '番茄', '晋江', '七猫', '未定']
+const CADENCES = ['日更', '周更', '不定期']
 
 export const paramsDefaults = {
   title: '',
@@ -65,6 +69,13 @@ export const paramsDefaults = {
   reviewGate: false,
   seed: '',
   protagonistGender: 'auto',
+  channel: '通用',
+  platform: '未定',
+  tags: '',
+  sellingPoint: '',
+  comps: '',
+  updateCadence: '日更',
+  goldenFinger: '',
 }
 
 const paramsSchema = {
@@ -103,6 +114,21 @@ const paramsSchema = {
       enum: ['auto', '男', '女'],
       description: '主角性别：auto 交给模型定；男/女 则写死并在全书统一代词',
     },
+    channel: {
+      type: 'string',
+      enum: CHANNELS,
+      description: '男频/女频/通用：决定读者预期、爽点密度与章末钩子的写法',
+    },
+    platform: {
+      type: 'string',
+      enum: PLATFORMS,
+      description: '目标平台（只记录，供 agent 与后续版本调优；不影响本轮提示词）',
+    },
+    tags: { type: 'string', maxLength: 120, description: '标签，逗号分隔 3–6 个（如 无限流,克苏鲁,群像）' },
+    sellingPoint: { type: 'string', maxLength: 60, description: '一句话卖点：冲突 + 读者能持续得到的体验' },
+    comps: { type: 'string', maxLength: 160, description: '对标作品，格式「书名：借什么机制」' },
+    updateCadence: { type: 'string', enum: CADENCES, description: '更新节奏；影响卷末钩子与存稿建议' },
+    goldenFinger: { type: 'string', maxLength: 200, description: '金手指/核心外挂：规则、边界、代价（可空）' },
   },
 }
 
@@ -121,6 +147,57 @@ const briefSchema = z.object({
   promise: soft,
   ending: soft,
   genreTags: softList,
+  // 故事创作方法的痕迹：读者诊断与被划掉的读法。软字段，模型漏写不影响立项。
+  readers: soft,
+  alternates: softList,
+})
+
+// v0.3 网文立项：全部软字段。定位失败不该让整本书开不了工，degraded 标记由调用方决定怎么提示。
+const goldenFingerSchema = z.object({
+  name: soft,
+  rule: soft,
+  cost: soft,
+  growthAxis: soft,
+  firstShowChapter: z.coerce.number().catch(1),
+})
+
+const pitchSchema = z.object({
+  version: z.coerce.number().catch(1),
+  channel: soft,
+  platform: soft,
+  tags: softList,
+  sellingPoint: soft,
+  hookLine: soft,
+  targetReader: soft,
+  promise: soft,
+  comps: z.array(z.object({ title: soft, why: soft })).catch([]),
+  goldenFinger: goldenFingerSchema.catch({}),
+  opening: z.object({ firstLine: soft, chapterOneQuestion: soft }).catch({}),
+  degraded: z.boolean().catch(false),
+})
+
+const hookSchema = z.object({ type: soft, text: soft, strength: z.coerce.number().catch(3) })
+
+const openerSchema = z.object({
+  version: z.coerce.number().catch(1),
+  strategy: soft,
+  chapters: z
+    .array(
+      z.object({
+        index: z.coerce.number().catch(1),
+        title: soft,
+        hook: hookSchema.catch({}),
+        payoff: z.object({ level: soft, text: soft, chapterDue: z.coerce.number().catch(0) }).catch({}),
+        infoDrop: z.object({ readerLearns: soft, characterLoses: soft }).catch({}),
+        promiseBeat: soft,
+        endHook: hookSchema.catch({}),
+      }),
+    )
+    .catch([]),
+  rules: z
+    .object({ payoffEveryChapters: z.array(z.coerce.number()).catch([3, 5]), bigPayoffPerVolume: z.array(z.coerce.number()).catch([2, 3]) })
+    .catch({}),
+  degraded: z.boolean().catch(false),
 })
 
 const relationSchema = z.object({ to: soft, kind: soft })
@@ -136,6 +213,12 @@ const castSchema = z.object({
   secret: soft,
   voice: soft,
   arc: soft,
+  // v0.3：金手指的压力面。模型愿意写就留着，让 draft 提示词能引用；
+  // 缺省不报错（老项目/弱模型没有这一层，正文靠卷纲里的代价兜）。
+  power: soft,
+  growth: soft,
+  cost: soft,
+  pressure: soft,
   relations: z.array(relationSchema).catch([]),
 })
 
@@ -233,8 +316,18 @@ const spineVolumeSchema = z.object({
   goal: z.string().catch(''),
   arc: z.string().catch(''),
   cast: z.array(z.string()).catch([]),
-  opens: z.array(z.string()).catch([]),
+  // v0.3：opens 可带 { text, dueIn }（dueIn = 绝对章号），字符串是旧形状，两种都收。
+  opens: z
+    .array(z.union([z.string(), z.object({ text: soft, dueIn: z.coerce.number().optional() })]))
+    .catch([]),
   closes: z.array(z.string()).catch([]),
+  // v0.3：卷级爽点/钩子/单元弧。这些字段要穿过 schema，否则 zod 会静默剥掉，
+  // 骨架拿不到 → 卷纲提示词里也就没有可兑现的排期。
+  payoffs: z
+    .array(z.object({ atChapter: z.coerce.number().optional(), level: soft, text: soft }))
+    .catch([]),
+  cliffhanger: soft,
+  unitArcs: z.array(z.string()).catch([]),
 })
 const spineSchema = z.object({
   mainline: z.string().min(1),
@@ -827,6 +920,53 @@ function volumePlanFor(params = {}) {
   }))
 }
 
+/**
+ * 把黄金三章的钩子/爽点/信息差写回章表。只补空字段，重复运行不会覆盖手改。
+ */
+function applyOpener(outline, opener) {
+  if (!opener || !Array.isArray(opener.chapters) || opener.chapters.length === 0) {
+    return { outline, changed: false }
+  }
+  const byIndex = new Map((outline.chapters ?? []).filter(Boolean).map((chapter) => [Number(chapter.index), chapter]))
+  let changed = false
+  for (const row of opener.chapters) {
+    const no = Math.floor(Number(row?.index))
+    const chapter = byIndex.get(no)
+    if (!chapter) continue
+    const hook = row?.hook && typeof row.hook === 'object' ? row.hook : {}
+    const endHook = row?.endHook && typeof row.endHook === 'object' ? row.endHook : {}
+    const next = { ...chapter }
+    if (!next.hookType) {
+      const type = String(endHook.type || hook.type || '').trim()
+      if (type) next.hookType = type
+    }
+    if (!next.hookStrength) {
+      const raw = Number(endHook.strength || hook.strength)
+      next.hookStrength = Number.isFinite(raw) ? Math.min(5, Math.max(1, Math.round(raw))) : 0
+    }
+    const payoffText = String(row?.payoff?.text ?? '').trim()
+    if (!next.payoff && payoffText) {
+      const level = String(row?.payoff?.level ?? '')
+      next.payoff = { level: ['small', 'medium', 'large'].includes(level) ? level : 'small', text: payoffText }
+    }
+    if (!next.infoDrop && row?.infoDrop && typeof row.infoDrop === 'object') {
+      const readerLearns = String(row.infoDrop.readerLearns ?? '').trim()
+      const characterLoses = String(row.infoDrop.characterLoses ?? '').trim()
+      if (readerLearns || characterLoses) next.infoDrop = { readerLearns, characterLoses }
+    }
+    if (!next.title && row?.title) next.title = String(row.title).trim()
+    if (JSON.stringify(next) !== JSON.stringify(chapter)) {
+      byIndex.set(no, next)
+      changed = true
+    }
+  }
+  if (!changed) return { outline, changed: false }
+  return {
+    outline: { ...outline, chapters: (outline.chapters ?? []).map((chapter) => byIndex.get(Number(chapter?.index)) ?? chapter) },
+    changed: true,
+  }
+}
+
 /** 把模型给的 spine 强制对齐卷计划：多了裁、少了补兜底卷，卷标题永不为空。 */
 function alignSpine(raw, volumePlan) {
   const data = raw && typeof raw === 'object' ? raw : {}
@@ -846,8 +986,12 @@ function alignSpine(raw, volumePlan) {
       goal: String(entry.goal ?? '').trim(),
       arc: String(entry.arc ?? '').trim(),
       cast: asList(entry.cast),
-      opens: asList(entry.opens),
+      // opens 可带 { text, dueIn }：dueIn 是绝对章号，canon 用它排回收期。
+      opens: plan.normalizeOpens(entry.opens),
       closes: asList(entry.closes),
+      payoffs: plan.normalizePayoffs(entry.payoffs),
+      cliffhanger: String(entry.cliffhanger ?? '').trim().slice(0, 40),
+      unitArcs: asList(entry.unitArcs).slice(0, 3),
       targetChapters: slot.targetChapters,
     }
   })
@@ -1018,15 +1162,41 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
     {
       id: 'premise',
       title: '故事核心',
-      produces: ['brief'],
+      produces: ['brief', 'pitch'],
       review: false,
       async run(ctx) {
+        const params = ctx.params ?? {}
+        // 第一步先定「写给谁、凭什么追」：定位错了，后面的世界/人物/卷纲全是白写。
+        // 失败不阻断：写 degraded 标记，brief 仍照常产出，人可以在项目里补。
+        let pitch = null
+        if (typeof prompts.pitch === 'function') {
+          try {
+            pitch = await callJson(ctx, 'pitch', prompts.pitch, pitchSchema)
+          } catch (err) {
+            if (err?.code === 'LLM_ABORTED') throw err
+            const warn = typeof ctx.warn === 'function' ? ctx.warn : ctx.log
+            warn(`商业定位生成失败，已跳过：${err?.message ?? err}`)
+            pitch = {
+              version: 1,
+              degraded: true,
+              channel: params.channel ?? '通用',
+              platform: params.platform ?? '未定',
+              tags: [],
+              comps: [],
+              goldenFinger: {},
+            }
+          }
+        }
         const data = await callJson(ctx, 'premise', prompts.premise, briefSchema)
-        const title = String(ctx.params?.title ?? '').trim() || String(data.title ?? '').trim() || '未命名'
+        const title = String(params.title ?? '').trim() || String(data.title ?? '').trim() || '未命名'
         const brief = { ...data, title }
+        const artifacts = { brief: { kind: 'json', content: brief } }
+        if (pitch) artifacts.pitch = { kind: 'json', content: pitch }
         return {
-          artifacts: { brief: { kind: 'json', content: brief } },
-          note: `故事核心：${brief.logline}`,
+          artifacts,
+          note: pitch
+            ? `商业定位：${pitch.channel ?? '通用'}${pitch.sellingPoint ? ` · ${pitch.sellingPoint}` : ''}；故事核心：${brief.logline}`
+            : `故事核心：${brief.logline}`,
         }
       },
     },
@@ -1107,7 +1277,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
     {
       id: 'outline',
       title: '卷章大纲',
-      produces: ['outline', 'canon'],
+      produces: ['outline', 'canon', 'opener'],
       review: (project) => project?.params?.reviewGate === true,
       // 长书只摊开第 1 卷；后面每卷等上一卷写完再惰性展开，靠这里把 outline 判成「还没完」。
       isStale: ({ key, artifact }) => {
@@ -1158,10 +1328,56 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           }
         }
 
+        // 黄金三章：只做一次。长篇每轮展开一卷都会重入 outline，已有就直接用。
+        let opener = jsonOr(ctx, 'opener', null)
+        if (!opener && typeof prompts.opener === 'function') {
+          const rows = chaptersOf(outline).slice(0, 3)
+          try {
+            opener = await callJson(
+              withPromptContext(ctx, {
+                brief: jsonOr(ctx, 'brief', null),
+                pitch: jsonOr(ctx, 'pitch', null),
+                spine,
+                chapters: rows,
+                openerChapters: rows,
+              }),
+              'opener',
+              prompts.opener,
+              openerSchema,
+              { phase: 'opener' },
+            )
+          } catch (err) {
+            if (err?.code === 'LLM_ABORTED') throw err
+            const warn = typeof ctx.warn === 'function' ? ctx.warn : ctx.log
+            warn(`黄金三章生成失败，已按章纲兜底：${err?.message ?? err}`)
+            opener = {
+              version: 1,
+              degraded: true,
+              strategy: '',
+              chapters: rows.map((row, offset) => ({
+                index: Number(row.index) || offset + 1,
+                title: row.title ?? '',
+                hook: { type: row.hookType || '悬念', text: row.hook ?? '', strength: row.hookStrength || 3 },
+                payoff: { level: 'small', text: row.payoff?.text ?? '', chapterDue: 0 },
+                infoDrop: { readerLearns: '', characterLoses: '' },
+                promiseBeat: '',
+                endHook: { type: row.hookType || '悬念', text: row.hook ?? '', strength: row.hookStrength || 3 },
+              })),
+              rules: { payoffEveryChapters: [3, 5], bigPayoffPerVolume: [2, 3] },
+            }
+          }
+        }
+        if (opener) {
+          const applied = applyOpener(outline, opener)
+          outline = applied.outline
+          if (applied.changed) changed = true
+        }
+
         const seeded = seedCanon(ctx, spine)
         if (seeded.source === 'ledger') ctx.log('已把连续性账本迁移为正典 v2')
         const artifacts = {}
         if (seeded.changed) artifacts.canon = { kind: 'json', content: seeded.canon }
+        if (opener) artifacts.opener = { kind: 'json', content: opener }
         if (changed) artifacts.outline = { kind: 'json', content: outline }
         return {
           artifacts,
@@ -1324,6 +1540,8 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           canonText: canonTextFor(canon, castNamesFor(beats, item), id),
           previousSummary: previous ? textOf(ctx, `summary/${previous.id}`) : '',
           nextGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
+          // 确定性体检的读数：让审校先看数字，再判断机器看不见的东西。
+          craftStats: checked?.stats ?? {},
         })
 
         let data
@@ -1488,6 +1706,8 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
     artifacts: {
       brief: { kind: 'json', title: '故事核心' },
+      pitch: { kind: 'json', title: '商业定位' },
+      opener: { kind: 'json', title: '黄金三章' },
       bible: { kind: 'md', title: '世界观设定' },
       characters: { kind: 'json', title: '人物档案' },
       spine: { kind: 'json', title: '情感脊柱（分卷 JSON）' },
@@ -1547,13 +1767,14 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       // 卷数走 plan 的同一套算法：chapters/chaptersPerVolume 超过 40 卷时会自动抬升每卷章数。
       const volumePlans = plan.volumeCount(chapters, perVolumeOf(merged))
 
-      // §12 成本模型：固定 6 段 + 每章 3.5 次（细纲 1、草稿 1、摘要/正典补丁摊 0.5、审校 1 + 修订摊薄）
+      // §12 成本模型：固定 7 段（pitch/brief/bible/characters/spine/blurb + 首卷章纲与 opener 摊）
+      // + 每章 3.5 次（细纲 1、草稿 1、摘要/正典补丁摊 0.5、审校 1 + 修订摊薄）
       // + 卷纲每卷 1 次。关键性质：每章都是同一份 ≤ contextBudget 的 packet，成本随章数线性增长。
       const perChapter = autoReview ? 3.5 : 2.5
-      const calls = Math.ceil(6 + chapters * perChapter + volumePlans)
+      const calls = Math.ceil(7 + chapters * perChapter + volumePlans)
 
-      const fixedIn = 25279
-      const fixedOut = 10177
+      const fixedIn = 32000
+      const fixedOut = 13700
       const prose = (ratio) => Math.round(wordsPerChapter * ratio)
       // 草稿/修订的输入就是 packet，因此按 contextBudget 估，而不是按章号累加：
       // 每章都是一份 ≤ contextBudget 的包，成本随章数线性增长。

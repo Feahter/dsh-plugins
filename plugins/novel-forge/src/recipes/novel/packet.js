@@ -19,8 +19,12 @@ const BEAT_FIELDS = [
 
 const SCENE_FIELDS = [
   ['goal', '目标'],
+  ['obstacle', '障碍'],
   ['conflict', '冲突'],
   ['turn', '转折'],
+  ['detail', '细节'],
+  ['payoff', '爽点'],
+  ['info', '信息'],
   ['hook', '钩子'],
   ['when', '时间'],
   ['where', '地点'],
@@ -37,7 +41,18 @@ export const SLICE_SPEC = [
   { name: 'cast', title: '本章出场人物', cap: 1500, priority: 4, required: false },
   { name: 'next', title: '下一章目标', cap: 300, priority: 5, required: false },
   { name: 'style', title: '文风', cap: 1200, priority: 6, required: false },
+  // v0.3：追加而非插入。assemble() 按 priority 排序，数组下标不再代表拼装顺序，
+  // 所以下面统一用 byName() 取 spec，别再写死 SLICE_SPEC[n]。
+  { name: 'world', title: '世界规则', cap: 600, priority: 2, required: false },
+  { name: 'pitch', title: '商业定位', cap: 300, priority: 5, required: false },
 ]
+
+/** 按名字取分片定义；拼装顺序由 priority 决定，不靠数组下标。 */
+export function sliceOf(name) {
+  const spec = SLICE_SPEC.find((item) => item.name === name)
+  if (!spec) throw new Error(`unknown slice: ${name}`)
+  return spec
+}
 
 const REVISION_SPEC = { name: 'revision', title: '需修正', cap: 1500, priority: 0, required: true }
 
@@ -158,6 +173,31 @@ function renderBrief({ params, chapter, volume, mode }) {
   lines.push(`本章目标：${textOf(c.goal).trim() || '（未给出，按细纲推进）'}`)
   if (c.conflict) lines.push(`核心冲突：${textOf(c.conflict)}`)
   if (c.turn) lines.push(`关键转折：${textOf(c.turn)}`)
+  // v0.3：卷纲排好的钩子/爽点/信息差，必须写进正文作者的写作要求里，否则只是账本字段。
+  const hookText = textOf(c.hook).trim()
+  if (hookText) {
+    const kind = textOf(c.hookType).trim()
+    const strength = Number(c.hookStrength) || 0
+    const tag = [kind, strength ? `强度 ${strength}/5` : ''].filter(Boolean).join('，')
+    lines.push(`本章钩子：${hookText}${tag ? `（${tag}）` : ''}`)
+  }
+  const payoffText = textOf(c.payoff?.text).trim()
+  if (payoffText) {
+    const level = textOf(c.payoff?.level).trim()
+    lines.push(`本章爽点：${payoffText}${level ? `（${level}）` : ''}`)
+  }
+  const readerLearns = textOf(c.infoDrop?.readerLearns).trim()
+  const characterLoses = textOf(c.infoDrop?.characterLoses).trim()
+  if (readerLearns || characterLoses) {
+    const parts = []
+    if (readerLearns) parts.push(`读者知道：${readerLearns}`)
+    if (characterLoses) parts.push(`主角失去：${characterLoses}`)
+    lines.push(`信息差：${parts.join('；')}`)
+  }
+  if (Array.isArray(c.threadDue) && c.threadDue.length) {
+    const due = c.threadDue.map((item) => textOf(item).trim()).filter(Boolean)
+    if (due.length) lines.push(`本章回收：${due.join('、')}`)
+  }
   lines.push(`视角：${req.pov}`)
   lines.push(`字数要求：${req.words} 字左右（不得少于 ${Math.round(req.words * 0.8)} 字）`)
   lines.push(`禁语：${req.banned.join('、')}（正文中不得出现）`)
@@ -228,19 +268,21 @@ export function buildPacket(input = {}) {
     slices.push({ name: spec.name, title: spec.title, text, cap: spec.cap, priority: spec.priority, required: spec.required })
   }
 
-  push(SLICE_SPEC[0], renderBrief({ params, chapter, volume, mode }))
+  push(sliceOf('brief'), renderBrief({ params, chapter, volume, mode }))
   if (mode === 'revise') {
     const findings = formatFindings(source.revisionFindings)
     if (findings) push(REVISION_SPEC, findings)
   }
-  push(SLICE_SPEC[1], normalizeBeats(source.beats))
-  push(SLICE_SPEC[2], renderPrevious(source.previous, source.previousSummary))
-  push(SLICE_SPEC[3], renderRecent(source.recentSummaries))
-  if (source.volumeDigest) push(SLICE_SPEC[4], textOf(source.volumeDigest))
-  if (source.canonText) push(SLICE_SPEC[5], textOf(source.canonText))
-  if (source.castBrief) push(SLICE_SPEC[6], textOf(source.castBrief))
-  if (source.nextChapterGoal) push(SLICE_SPEC[7], textOf(source.nextChapterGoal))
-  push(SLICE_SPEC[8], renderStyle(params, source.styleSample))
+  push(sliceOf('beats'), normalizeBeats(source.beats))
+  push(sliceOf('previous'), renderPrevious(source.previous, source.previousSummary))
+  push(sliceOf('recent'), renderRecent(source.recentSummaries))
+  if (source.worldBrief) push(sliceOf('world'), textOf(source.worldBrief))
+  if (source.volumeDigest) push(sliceOf('digest'), textOf(source.volumeDigest))
+  if (source.canonText) push(sliceOf('canon'), textOf(source.canonText))
+  if (source.castBrief) push(sliceOf('cast'), textOf(source.castBrief))
+  if (source.nextChapterGoal) push(sliceOf('next'), textOf(source.nextChapterGoal))
+  if (source.pitchText) push(sliceOf('pitch'), textOf(source.pitchText))
+  push(sliceOf('style'), renderStyle(params, source.styleSample))
 
   const { text, report } = assemble({ slices, budget })
 

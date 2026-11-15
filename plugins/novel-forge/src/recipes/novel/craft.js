@@ -18,6 +18,47 @@ export const AI_CLICHES = [
   '难以言喻',
 ]
 
+// 与 story-craft/scripts/story_check.py 的词表逐条对齐（只读参考，不要随意增删）。
+export const SENSORY_WORDS = [
+  // 触 / 温 / 体感
+  '冷', '热', '烫', '凉', '冰', '湿', '干', '硬', '软', '粗糙', '滑', '黏',
+  '疼', '痛', '麻', '抖', '颤', '汗', '痒', '沉', '轻', '重', '紧', '松',
+  // 视
+  '亮', '暗', '闪', '晃', '模糊', '反光', '影子', '阴影', '颜色', '红', '灰', '黑', '白',
+  // 听
+  '响', '哑', '嗡', '砰', '嘶', '吱', '咯吱', '铃', '喘', '脚步', '呼吸', '安静',
+  // 嗅 / 味
+  '香', '臭', '腥', '霉', '呛', '涩', '腻', '甜', '苦', '咸', '辣', '酸',
+]
+
+export const ABSTRACT_EMOTION_WORDS = [
+  '紧张', '害怕', '恐惧', '开心', '高兴', '快乐', '难过', '悲伤', '伤心',
+  '愤怒', '生气', '焦虑', '尴尬', '兴奋', '痛苦', '幸福', '感动', '震撼',
+  '绝望', '孤独', '委屈', '羞愧', '内疚', '失落', '压抑', '崩溃', '释然',
+  '温暖', '满足', '骄傲', '嫉妒', '迷茫', '空虚', '不安', '烦躁', '沮丧',
+  '愉悦', '欣慰', '心酸', '无助', '疲惫', '惶恐', '惊愕', '怅然',
+]
+
+export const ADVERBS = ['很', '非常', '十分', '特别', '极其', '格外', '异常', '无比', '相当', '颇为']
+
+/**
+ * AI 腔模式表，与 story_check.py 的 AI_PATTERNS 一一对应。
+ * 正则必须带全局标记；统计时每次重新克隆（或重置 lastIndex），不要复用带状态的实例。
+ * 注意「仿佛 / 似乎」同时也在 AI_CLICHES 里，aiMarkerCount 统计时会按起始位置去重。
+ */
+export const AI_PATTERNS = [
+  { re: /不是[^，。！？\n]{2,24}[，,]?\s*而是/g, label: '「不是…而是」排比' },
+  { re: /不仅仅?是[^，。！？\n]{2,24}[，,]?\s*更是/g, label: '「不仅仅…更是」抬高' },
+  { re: /仿佛/g, label: '「仿佛」' },
+  { re: /似乎/g, label: '「似乎」' },
+  { re: /某种[^，。！？\n]{0,8}(?:感觉|情绪|滋味)/g, label: '「某种…感觉」模糊化' },
+  { re: /一种[^，。！？\n]{0,10}(?:感觉|情绪|滋味)/g, label: '「一种…感觉」模糊化' },
+  { re: /不禁(?:让|令人|使人)/g, label: '「不禁让人」' },
+  { re: /(?:不可或缺|淋漓尽致|跃然纸上|值得(?:我们)?(?:深思|铭记))/g, label: '陈词滥调' },
+  { re: /在这个[^，。！？\n]{0,10}的时代/g, label: '「在这个…的时代」' },
+  { re: /有人[^。\n]{2,24}，有人/g, label: '「有人…有人」三段对称' },
+]
+
 const PUNCTUATION = /[\s，。！？；：、“”‘’"'（）()《》〈〉…—·,.!?;:]/
 const TRUNCATED = '…（已截断）'
 
@@ -41,14 +82,18 @@ export function countCjk(text) {
   return matched ? matched.length : 0
 }
 
+/**
+ * 对话字数占正文汉字数的比例（0–1，三位小数）。口径与 story_check.py 的
+ * dialogue_ratio 一致：分子是引号内的汉字数，分母是全文汉字数，都排除标点。
+ */
 export function dialogueRatio(text) {
-  const total = visible(text).length
+  const total = countCjk(text)
   if (!total) return 0
   const pattern = /[“"「『]([^”"」』]{1,600})[”"」』]/g
   let chars = 0
   let matched
   while ((matched = pattern.exec(String(text ?? ''))) !== null) {
-    chars += visible(matched[1]).length
+    chars += countCjk(matched[1])
   }
   return Math.round((chars / total) * 1000) / 1000
 }
@@ -58,6 +103,97 @@ export function splitParagraphs(text) {
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
+}
+
+function round1(value) {
+  return Math.round(value * 10) / 10
+}
+
+/**
+ * 切句，规则与 story_check.py 的 split_sentences 完全一致：只在句末标点
+ * （。！？!?…）后切，把紧跟的收尾引号并回前一句，丢掉不含汉字的空段。
+ * 句长按汉字数计（对应 python 的 cjk_count）。不按分号/换行切——否则与
+ * python 的读数对不上，parity 会持续报警。
+ */
+function statSentences(text) {
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n')
+  const raw = normalized.split(/(?<=[。！？!?…])/)
+  const out = []
+  for (const piece of raw) {
+    const value = piece.trim()
+    if (!value) continue
+    if (out.length && /^[」”’"']+$/.test(value)) {
+      out[out.length - 1] += value
+      continue
+    }
+    out.push(value)
+  }
+  return out.filter((sentence) => countCjk(sentence) > 0)
+}
+
+/** 句子读数：count / 平均句长 / 最长句 / 短句占比（≤12 字，百分数 0–100）。 */
+export function sentenceStats(text) {
+  const sentences = statSentences(text)
+  const lens = sentences.map((sentence) => countCjk(sentence))
+  if (!lens.length) return { count: 0, avgLen: 0, maxLen: 0, shortRatio: 0 }
+  const total = lens.reduce((sum, value) => sum + value, 0)
+  return {
+    count: lens.length,
+    avgLen: round1(total / lens.length),
+    maxLen: Math.max(...lens),
+    shortRatio: round1((100 * lens.filter((value) => value <= 12).length) / lens.length),
+  }
+}
+
+/** 每千汉字命中次数（保留 1 位小数）；空正文返回 0，不除零。 */
+export function densityPer1k(text, words) {
+  const body = String(text ?? '')
+  const cjk = countCjk(body)
+  if (!cjk) return 0
+  const list = Array.isArray(words) ? words : []
+  let hits = 0
+  for (const word of list) hits += countOf(body, String(word ?? ''))
+  return round1((1000 * hits) / cjk)
+}
+
+/**
+ * 名单中在正文出现 ≥2 次的不同人名数，再折算到 1500 字。
+ * 空正文 per1500 为 0。
+ */
+export function distinctNameDensity(text, names) {
+  const body = String(text ?? '')
+  const cjk = countCjk(body)
+  const seen = new Set()
+  let distinct = 0
+  for (const raw of Array.isArray(names) ? names : []) {
+    const name = String(raw ?? '').trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    if (countOf(body, name) >= 2) distinct += 1
+  }
+  return { names: distinct, per1500: cjk ? round1((1500 * distinct) / cjk) : 0 }
+}
+
+function castNames(cast) {
+  const names = []
+  for (const person of Array.isArray(cast) ? cast : []) {
+    const name = String(person?.name ?? '').trim()
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names
+}
+
+/** 用一个全新的全局正则扫一遍，避免复用 pattern.re 时 lastIndex 串味。 */
+function scanPattern(text, pattern) {
+  const flags = pattern.re.flags.includes('g') ? pattern.re.flags : `${pattern.re.flags}g`
+  const re = new RegExp(pattern.re.source, flags)
+  const matches = []
+  let matched
+  while ((matched = re.exec(text)) !== null) {
+    matches.push({ index: matched.index, text: matched[0] })
+    if (matched[0].length === 0) re.lastIndex += 1
+  }
+  return matches
 }
 
 function clip(text, maxChars) {
@@ -226,11 +362,23 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   const paragraphs = splitParagraphs(body)
   const cjk = countCjk(body)
   const ratio = dialogueRatio(body)
+  const sentences = sentenceStats(body)
+  const castNameList = castNames(cast)
+  const nameDensity = distinctNameDensity(body, castNameList)
   const stats = {
     cjk,
     dialogueRatio: ratio,
     paragraphs: paragraphs.length,
     sceneCount: countScenes(body, beats),
+    sentences: sentences.count,
+    avgSentenceLen: sentences.avgLen,
+    maxSentenceLen: sentences.maxLen,
+    shortSentenceRatio: sentences.shortRatio,
+    sensoryPer1k: densityPer1k(body, SENSORY_WORDS),
+    abstractEmotionPer1k: densityPer1k(body, ABSTRACT_EMOTION_WORDS),
+    adverbPer1k: densityPer1k(body, ADVERBS),
+    aiMarkerCount: 0,
+    nameDensity: nameDensity.per1500,
   }
 
   const findings = []
@@ -278,28 +426,58 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     )
   }
 
-  // 4. AI 腔黑名单
+  // 4. AI 腔黑名单 + AI 模式。计数 = 词表命中 + 模式命中，按起始位置去重，
+  // 同一处（例如 AI_CLICHES 的「仿佛」与 AI_PATTERNS 的「仿佛」）只算一次。
   const hits = []
-  let totalHits = 0
+  const covered = new Set()
+  let clicheHits = 0
   for (const phrase of AI_CLICHES) {
     let count = 0
     let position = body.indexOf(phrase)
     while (position !== -1) {
+      covered.add(position)
       count += 1
       position = body.indexOf(phrase, position + phrase.length)
     }
     if (count) {
       hits.push({ phrase, count })
-      totalHits += count
+      clicheHits += count
     }
   }
-  if (totalHits >= 3) {
+  const patternCounts = []
+  for (const pattern of AI_PATTERNS) {
+    let count = 0
+    for (const match of scanPattern(body, pattern)) {
+      if (covered.has(match.index)) continue
+      count += 1
+    }
+    if (count) patternCounts.push({ label: pattern.label, count })
+  }
+  const aiMarkerCount = clicheHits + patternCounts.reduce((sum, item) => sum + item.count, 0)
+  stats.aiMarkerCount = aiMarkerCount
+
+  if (aiMarkerCount >= 3) {
     hits.sort((a, b) => b.count - a.count)
-    const detail = hits
+    patternCounts.sort((a, b) => b.count - a.count)
+    const detail = [
+      ...hits.map((hit) => `${hit.phrase}×${hit.count}`),
+      ...patternCounts.map((item) => `${item.label}×${item.count}`),
+    ]
       .slice(0, 6)
-      .map((hit) => `${hit.phrase}×${hit.count}`)
       .join('、')
-    add('warn', 'ai-cliche', '全文', `AI 腔高频词共 ${totalHits} 次：${detail}`, '逐个换成具体动作或感官细节，删掉程度副词')
+    add('warn', 'ai-cliche', '全文', `AI 腔高频词共 ${aiMarkerCount} 次：${detail}`, '逐个换成具体动作或感官细节，删掉程度副词')
+  }
+
+  // 4b. 「不是…而是…」排比单独提示：这是最容易看出来的模板句式。
+  const notButCount = scanPattern(body, AI_PATTERNS[0]).length
+  if (notButCount) {
+    add(
+      'warn',
+      'ai-pattern',
+      '全章',
+      `出现「不是…而是…」排比 ${notButCount} 次，先否定再抬高的句式像模板`,
+      '删掉「不是…」的半句，直接陈述后半句，让信息自己落地',
+    )
   }
 
   // 5. 连续三段重复短语
@@ -350,11 +528,95 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
   }
 
+  // 10. 与 story-craft 对齐的量化指标（阈值来自 story_check.py 的 GATE）。
+  // 说明：感官 / 人名密度只在 ≥800 字的正文上判，短片段的比例没有统计意义。
+  if (stats.avgSentenceLen > 28) {
+    add(
+      'warn',
+      'sentence-length',
+      '全章',
+      `平均句长 ${stats.avgSentenceLen} 字，超过 28 字，长句连读会拖慢节奏`,
+      '按动作或转折拆成两三句，一句只放一个信息点',
+    )
+  }
+
+  if (stats.sensoryPer1k < 2 && cjk >= 800) {
+    add(
+      'warn',
+      'sensory',
+      '全章',
+      `感官词密度 ${stats.sensoryPer1k}/千字，低于 2/千字，画面立不起来`,
+      '在关键动作处补一处可感细节：温度、声音、气味或身体反应',
+    )
+  }
+
+  if (stats.abstractEmotionPer1k > 12) {
+    add(
+      'block',
+      'emotion',
+      '全章',
+      `抽象情绪词密度 ${stats.abstractEmotionPer1k}/千字，超过 12/千字，情绪在替读者感受`,
+      '删掉情绪形容词，只写人物此刻在做什么、身体有什么反应',
+    )
+  } else if (stats.abstractEmotionPer1k > 6) {
+    add(
+      'warn',
+      'emotion',
+      '全章',
+      `抽象情绪词密度 ${stats.abstractEmotionPer1k}/千字，超过 6/千字，情绪偏多`,
+      '把一半情绪词换成动作、对白或生理反应',
+    )
+  }
+
+  if (stats.adverbPer1k > 12) {
+    add(
+      'note',
+      'adverb',
+      '全章',
+      `副词密度 ${stats.adverbPer1k}/千字，超过 12/千字，「很/非常」在替你用力`,
+      '删掉程度副词，换成更有力度的动词或具体程度',
+    )
+  }
+
+  if (castNameList.length && cjk >= 800 && nameDensity.per1500 > 5) {
+    add(
+      'note',
+      'name-density',
+      '全章',
+      `活跃人名 ${nameDensity.names} 个，折算 ${nameDensity.per1500} 人/1500 字，超过 5 人，读者要一直记名字`,
+      '合并功能重复的配角，或让次要人物只用身份称呼（如「值班员」）',
+    )
+  }
+
+  if (ratio >= 0.08 && ratio < 0.15) {
+    add(
+      'note',
+      'dialogue',
+      '全章',
+      `对话占比 ${(ratio * 100).toFixed(1)}%，在 8%–15% 之间，低于 15%–45% 的参考区间`,
+      '把一段转述改成两人对话，或让对话承担更多冲突与信息',
+    )
+  }
+
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
   return { findings, stats }
 }
 
-export const defaultCraft = { checkDraft, AI_CLICHES, countCjk, dialogueRatio, splitParagraphs, severityRank }
+export const defaultCraft = {
+  checkDraft,
+  AI_CLICHES,
+  SENSORY_WORDS,
+  ABSTRACT_EMOTION_WORDS,
+  ADVERBS,
+  AI_PATTERNS,
+  sentenceStats,
+  densityPer1k,
+  distinctNameDensity,
+  countCjk,
+  dialogueRatio,
+  splitParagraphs,
+  severityRank,
+}
 export default defaultCraft
 
 export { clip as clipText }

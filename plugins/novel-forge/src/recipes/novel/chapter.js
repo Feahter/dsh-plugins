@@ -330,6 +330,46 @@ function previousDigestForVolume(read, outline, volume, maxChars = 800) {
   return digestOfVolume(read, outline, previous, { maxChars })
 }
 
+/** 世界规则：bible 前 600 字（第七段『力量与规则』排第二，所以一定包含在内）。 */
+function worldBriefOf(read) {
+  const bible = readText(read, 'bible')
+  if (!bible) return ''
+  return clip(bible, 600)
+}
+
+/** 商业定位：只把会影响单章写法的字段压成一行清单，不进 JSON 原文。 */
+function pitchTextOf(read, maxChars = 300) {
+  const pitch = readJson(read, 'pitch')
+  if (!pitch || typeof pitch !== 'object') return ''
+  const lines = []
+  const add = (label, value) => {
+    const body = text(value)
+    if (body) lines.push(`${label}：${body}`)
+  }
+  add('频道', pitch.channel)
+  add('平台', pitch.platform)
+  add('标签', Array.isArray(pitch.tags) ? pitch.tags.join('、') : pitch.tags)
+  add('卖点', pitch.sellingPoint)
+  add('开篇问题', pitch.opening?.chapterOneQuestion ?? pitch.hookLine)
+  add('目标读者', pitch.targetReader)
+  add('类型承诺', pitch.promise)
+  const finger = pitch.goldenFinger
+  if (finger && typeof finger === 'object' && (finger.name || finger.rule)) {
+    const parts = [finger.name, finger.rule, finger.cost].map((item) => text(item)).filter(Boolean)
+    if (parts.length) lines.push(`金手指：${parts.join(' · ')}`)
+  }
+  return clip(lines.join('\n'), maxChars)
+}
+
+/** 黄金三章：本章在 1–3 章内时，把该章的钩子与信息差单独交给细纲。 */
+function openerChapterOf(read, chapter) {
+  const opener = readJson(read, 'opener')
+  if (!opener || !Array.isArray(opener.chapters)) return null
+  const no = Math.floor(Number(chapter?.index))
+  if (!Number.isFinite(no) || no < 1 || no > 3) return null
+  return opener.chapters.find((row) => Math.floor(Number(row?.index)) === no) ?? null
+}
+
 /** 风格样本：最近两章的开头 + 结尾各 160 字，避免把整章塞进材料包。 */
 function styleSampleOf(read, outline, chapter) {
   const chapters = chaptersOf(outline)
@@ -587,6 +627,7 @@ function fallbackVolumePrompt(ctx) {
   const previous = text(ctx?.previousDigest)
   if (previous) lines.push(`【前情提要】\n${clip(previous, 900)}`)
   if (ctx?.existingTitles) lines.push(`【已用章节标题（避免重复）】${clip(ctx.existingTitles, 500)}`)
+  if (ctx?.threads) lines.push(`【未回收线索（threadDue 只能引用这里）】\n${clip(ctx.threads, 600)}`)
 
   lines.push([
     '【输出格式】',
@@ -601,6 +642,24 @@ function fallbackVolumePrompt(ctx) {
     maxTokens: Math.min(FALLBACK_MAX_TOKENS, 800 + count * 240),
     temperature: 0.7,
   }
+}
+
+/** 未回收线索清单：卷纲要求 threadDue 只能引用这里的文本（otherwise 只能 warn）。 */
+function openThreadsForVolume(read, maxChars = 600) {
+  const canon = readJson(read, 'canon')
+  const threads = Array.isArray(canon?.threads) ? canon.threads : []
+  const lines = []
+  for (const thread of threads) {
+    if (!thread || typeof thread !== 'object') continue
+    if (String(thread.status ?? '') === 'closed') continue
+    const id = text(thread.id)
+    const due = Math.floor(Number(thread.dueIn))
+    const dueTag = Number.isFinite(due) && due > 0 ? ` due:ch${String(due).padStart(4, '0')}` : ''
+    const body = text(thread.text)
+    if (!body) continue
+    lines.push(`- ${id}${dueTag} ${body}`)
+  }
+  return clip(lines.join('\n'), maxChars)
 }
 
 function volumePromptContext({ outline, params, read, volume, language }) {
@@ -623,6 +682,7 @@ function volumePromptContext({ outline, params, read, volume, language }) {
     characters: safeRead(read, 'characters'),
     previousDigest: previousDigestForVolume(read, outline, volume),
     existingTitles: clip(existingTitles, 600),
+    threads: openThreadsForVolume(read),
     ...promptIO(read),
   }
 }
@@ -645,6 +705,13 @@ function normalizeVolumeRows(rows, volume) {
       when: text(row.when),
       where: text(row.where),
       cast: namesOf(row.cast),
+      hookType: text(row.hookType),
+      hookStrength: row.hookStrength,
+      payoff: row.payoff,
+      infoDrop: row.infoDrop,
+      track: text(row.track),
+      unitArc: text(row.unitArc),
+      threadDue: Array.isArray(row.threadDue) ? row.threadDue : [],
     })
   }
   return out
@@ -758,6 +825,7 @@ function beatsPromptContext({ outline, params, read, chapter, volume, language }
     previousSummary: previous ? readText(read, `summary/${previous.id}`) : '',
     canonText,
     castBrief: castBriefOf(characters, names, 1500),
+    openerChapter: openerChapterOf(read, chapter),
     language,
     ...promptIO(read),
   }
@@ -873,6 +941,8 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
     volumeDigest: volumeDigestOf(read, current, chapter),
     canonText,
     castBrief: castBriefOf(characters, names, 1500),
+    worldBrief: worldBriefOf(read),
+    pitchText: pitchTextOf(read),
     styleSample: styleSampleOf(read, current, chapter),
     nextChapterGoal: nextChapterGoalOf(current, chapter),
     revisionFindings: [],
@@ -1006,6 +1076,8 @@ export function checkChapter({ read, params = {}, outline, chapterId, text } = {
     findings: checked.findings,
     counts: checked.counts,
     verdict: checked.verdict,
+    // craft 的量化读数（句长/感官/情绪/AI 标记…）：review 提示词要用它先看数字。
+    stats: checked.stats,
     canon,
   }
 }

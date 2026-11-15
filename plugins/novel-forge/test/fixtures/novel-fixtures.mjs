@@ -4,11 +4,13 @@ import { buildOutlineSkeleton, mergeVolumeChapters } from '../../src/recipes/nov
 
 // §12 的 12 个 builder：v0.2 删掉 outline（骨架由脚本搭），新增 volumeChapters / canonPatch。
 export const PROMISE_IDS = [
+  'pitch',
   'premise',
   'bible',
   'characters',
   'spine',
   'volumeChapters',
+  'opener',
   'beats',
   'draft',
   'summary',
@@ -32,6 +34,13 @@ export const SAMPLE_PARAMS = {
   autoReview: true,
   reviewGate: false,
   seed: '头七',
+  channel: '通用',
+  platform: '未定',
+  tags: '民俗,悬疑,夜班',
+  sellingPoint: '给死人守夜的人，靠头七的规矩活命。',
+  comps: '',
+  updateCadence: '日更',
+  goldenFinger: '',
 }
 
 export function normalizeArtifact(key, value) {
@@ -390,4 +399,47 @@ export function sampleProse({
   if (summary) text += `\n\n<<<SUMMARY>>>\n${summary}`
   if (canon) text += `\n\n<<<CANON>>>\n${JSON.stringify(canon)}`
   return text
+}
+
+/** v0.3：商业定位。字段全软，测试只关心形状与关键值。 */
+export function samplePitch(overrides = {}) {
+  return {
+    version: 1,
+    channel: '男频',
+    platform: '起点',
+    tags: ['悬疑', '灵异', '成长'],
+    sellingPoint: '给死人守夜的人，靠头七的规矩活命。',
+    hookLine: '头七那晚，冷柜里多出一具不认识的尸体。',
+    targetReader: '喜欢冷峻悬疑、能接受慢热的男性读者',
+    promise: '每一章解决一个亡者的执念，同时逼近母亲的死因。',
+    comps: [{ title: '深夜书屋', why: '同样是殡仪馆开场' }],
+    goldenFinger: {
+      name: '听见最后一句话',
+      rule: '死者头七能回答三个问题',
+      cost: '每个答案扣掉一段活着的记忆',
+      growthAxis: '回答得越准，忘得越多',
+      firstShowChapter: 1,
+    },
+    opening: { firstLine: '冷柜的警报响到第三声，他才伸手。', chapterOneQuestion: '这具尸体是谁送来的？' },
+    ...overrides,
+  }
+}
+
+/** v0.3：黄金三章。前 3 章各一条钩子/爽点/信息差。 */
+export function sampleOpener(overrides = {}) {
+  return {
+    version: 1,
+    strategy: '第一章给规矩与异常，第二章兑现一次小爽点，第三章把母亲的名字塞进读者手里。',
+    chapters: [1, 2, 3].map((index) => ({
+      index,
+      title: `黄金第${index}章`,
+      hook: { type: index === 1 ? '危机' : '悬念', text: `第${index}章开场的钩子`, strength: index === 1 ? 5 : 4 },
+      payoff: { level: 'small', text: `第${index}章兑现一件小事`, chapterDue: 0 },
+      infoDrop: { readerLearns: `读者知道第${index}件事`, characterLoses: `主角失去第${index}样东西` },
+      promiseBeat: `承诺推进 ${index}`,
+      endHook: { type: '信息差', text: `第${index}章末的回钩`, strength: 4 },
+    })),
+    rules: { payoffEveryChapters: [3, 5], bigPayoffPerVolume: [2, 3] },
+    ...overrides,
+  }
 }

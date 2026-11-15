@@ -73,12 +73,14 @@ export default createPrompts
 
 | builder | 必须读 | 可选读 |
 |---|---|---|
-| `premise` | `params.premise` | `genre`、`audience`、`pov`、`tone`、`styleGuide`、`seed`、`chapters`、`wordsPerChapter`、`project.title` |
+| `pitch` | `params.premise`、`params` | `brief`（重跑时）、`genre`、`audience`、`pov`、`tone`、`styleGuide`、`sellingPoint`、`tags`、`comps`、`goldenFinger` |
+| `premise` | `params.premise` | `genre`、`audience`、`pov`、`tone`、`styleGuide`、`seed`、`chapters`、`wordsPerChapter`、`project.title`、`pitch`（v0.3：商业定位已定，故事核不得矛盾） |
 | `bible` | `params.premise` 或 `brief` | `seed`、`styleGuide`、`params.genre` |
 | `characters` | `brief` | `bible`、`params.protagonistGender` |
 | `spine` | `params`、`brief`、`bible`、`characters`、`volumePlan` | `seed`、`styleGuide` |
-| `volumeChapters` | `params`、`volume`、`spine` | `bible`、`characters`、`previousDigest`、`existingTitles` |
-| `beats` | `params`、`chapter` | `volume`、`previousSummary`、`canonText`、`castBrief` |
+| `volumeChapters` | `params`、`volume`、`spine` | `bible`、`characters`、`previousDigest`、`existingTitles`、`threads`（v0.3：canon 未回收线索 + dueIn） |
+| `opener` | `pitch`、`brief`、`spine`、`chapters`（前 3 章章卡） | `params`、`styleGuide` |
+| `beats` | `params`、`chapter` | `volume`、`previousSummary`、`canonText`、`castBrief`、`openerChapter`（v0.3：第 1–3 章才有） |
 | `draft` | `params`、`chapter`、`packet.text` | 无——`packet.text` 缺失时才用最小兜底包 |
 | `summary` | `chapter`、`draft`、`beats` | `params` |
 | `canonPatch` | `chapter`、`summary`、`beats` | `canonText`、`params` |
@@ -224,8 +226,11 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 
 ### 7.1 premise：一句话 → 可生产冲突的承诺
 
-- 输出 `brief` 六字段：`title`、`logline`、`theme`、`promise`、`ending`、`genreTags`。
-- logline 必须含：主角 + 处境 + 行动 + 代价，≤60 字，有具体对手或倒计时。
+- 输出 `brief` 八字段：`title`、`logline`、`theme`、`promise`、`ending`、`genreTags`，以及 story-craft 带来的 `readers`、`alternates`。
+- `readers`（≤120 字）：读者诊断——谁 · 此刻关心什么 · 已知什么 · 想得到什么 · 读完做什么；用户没给受众时按最可能的默认值填并标「（假设）」。
+- `alternates`（2–3 条，各 ≤30 字）：被划掉的读法，每条以「划掉：」开头。第一条必须是「公共记忆版」（一句话能猜出结尾的那种），证明模型先想到它、再主动放弃。
+- logline 必须含：主角 + 处境 + 行动 + 代价，≤60 字，有具体对手或倒计时；写完过故事核三检——可反对（有人盼他失败）／有代价（具体失去什么）／有然后（听的人会问「然后呢」）。三检不过就改核，不用文笔救。
+- promise 要写明核心物件到结尾怎么变（只出现不承重的道具，换掉）。
 - theme 写成可被反驳的命题，不写「关于爱与救赎」。
 - ending 只写落点和代价，不写过程；必须回答主题，并让主角失去不可逆的东西。
 - **书名取舍**：契约只有 `title` 一个字段，不能加 `titleCandidates`。因此要求模型在草稿里按「意象／冲突／人称／时间／反讽」各拟一个，共 5 个，比选后只把胜者写进 `title`。
@@ -339,8 +344,11 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 
 - 输出严格 JSON：`{"findings":[{"severity","kind","where","issue","fix"}],"verdict"}`。
 - user 里增加【正典】（`ctx.canonText`，2200 上限），并把「正典是既成事实，正文与它冲突就是硬错」写进附录：v2 的连续性以 canon 为准，不再有单独的 ledger。
-- 七项对账：事实／时间线／知情／视角／AI 腔／节奏／对话。
-- 每条 finding 必须有 `where`（第几段或引用原句，≤30 字）和 `fix`（怎么改：替换动作、删哪句、补哪个感官细节）。
+- user 里先放【机器读数】（`ctx.craftStats`：字数/段/场/平均句长/最长句/短句占比/对话比/感官/抽象情绪/副词/AI 标记/人名密度），再放正文。0 也是有效读数，必须显示（「AI 标记 0 处」），缺字段才跳过；整段为空时渲染「无机器读数」，并明确不许编造读数。
+- 先读读数再判：读数已越界的项直接写成 finding，不重复描述；读数正常的项，不许凭感觉报同类问题。
+- 三闸（前闸不过不写后闸）：① 认知负荷——读者能否回答「谁想要什么、卡在哪」，1500 字内主要人名是否 >5；② 预期——标出建立模式与打破模式的位置，打破后 200 字内有没有解释；③ 自我嵌入——这个冲突对应读者的什么处境（只用于判断，不写进正文）。
+- 再过七项连续性对账：事实／时间线／知情／视角／AI 腔／节奏／对话。
+- 每条 finding 必须有 `where`（第几段或引用原句，≤30 字）和 `fix`（必须写成「改成什么」：替换成哪个动作／删哪句／补哪个物；「加强描写」不算 fix）。
 - `severity`：`block`＝读者会出戏／前后矛盾／关键信息错；`warn`＝明显削弱体验；`note`＝可改可不改。
 - `verdict`：有 `block` 或 `warn ≥ 3` → `revise`，否则 `pass`。
 - 明确「不要输出 ledgerPatch」：正典由本章自己的 canon patch 维护，review 只读不写。
@@ -512,28 +520,28 @@ beats,bible,blurb,canonPatch,characters,draft,premise,review,revise,spine,summar
 列：system / user / maxTokens / temperature。
 
 ```text
-premise        1550    992  1400  0.9
-bible          1512    700  3000  0.7
-characters     1579   5134  3200  0.85
-spine          1679   4364  6000  0.7
-volumeChapters 1653   3643  6000  0.6
-beats          1625   3567  2200  0.75
-draft          2458    250  6600  0.9     ← user = packet.text（假 ctx 里很短）
-summary        1464   3070   900  0.2
-canonPatch     1668   1595  1200  0.2
-review         1777   6062  4000  0.1
-revise         1524   3225  6600  0.5
-blurb          1516   1587  1400  0.85
+premise        1840   1290  1400  0.9
+bible          1512    500  3000  0.7
+characters     1600   1474  3200  0.85
+spine          1679   1726  6000  0.7
+volumeChapters 1653   1294  6000  0.6
+beats          1629   1032  2200  0.75
+draft          2372    136  2640  0.9     ← user = packet.text（假 ctx 里很短）
+summary        1464    222   900  0.2
+canonPatch     1668    590  1200  0.2
+review         2005   1129  4000  0.1
+revise         1578    410  2640  0.5
+blurb          1516    466  1400  0.85
 ```
 
-system 全部 ≤2500；draft 最紧（2458），再加内容前先砍 CRAFT 或反 AI 腔清单以外的句子。
+system 全部 ≤2500；draft 最紧（2372），review 次之（2005）。再加内容前先砍 CRAFT 或反 AI 腔清单以外的句子。
 
 ### 12.4 JSON 契约校验
 
 对 `premise`/`characters`/`spine`/`volumeChapters`/`beats`/`review` 的 ` ```json ` 块做 `JSON.parse`，字段与 §12 契约一致：
 
 ```text
-premise        keys= title,logline,theme,promise,ending,genreTags
+premise        keys= title,logline,theme,promise,ending,genreTags,readers,alternates
 characters     keys= cast（name,role,gender,want,fear,secret,voice,arc,relations）
 spine          keys= mainline,ending,volumes（title,goal,arc,cast,opens,closes）
 volumeChapters keys= chapters（title,goal,conflict,turn,hook,pov,when,where,cast）

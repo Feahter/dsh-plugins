@@ -32,6 +32,47 @@ function textList(value) {
   return [...new Set(out)]
 }
 
+/**
+ * opens 允许两种写法：纯文本，或 { text, dueIn }。
+ * dueIn 是「预计第几章回收」的绝对章号；缺省时由 canon 用开线卷末章兜底。
+ */
+export function normalizeOpens(value) {
+  if (!Array.isArray(value)) return []
+  const out = []
+  for (const entry of value) {
+    if (entry && typeof entry === 'object') {
+      const body = text(entry.text ?? entry.title ?? entry.name)
+      if (!body) continue
+      const due = Math.floor(Number(entry.dueIn))
+      out.push(Number.isFinite(due) && due >= 1 ? { text: body, dueIn: due } : body)
+      continue
+    }
+    const body = text(entry)
+    if (body) out.push(body)
+  }
+  return out
+}
+
+/** 卷级爽点排期：atChapter 是全局绝对章号，level 只认 medium / large。 */
+export function normalizePayoffs(value) {
+  if (!Array.isArray(value)) return []
+  const out = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const at = Math.floor(Number(entry.atChapter))
+    const level = text(entry.level)
+    const body = clipText(entry.text, 40)
+    if (!Number.isFinite(at) || at < 1 || !body) continue
+    out.push({ atChapter: at, level: level === 'large' ? 'large' : 'medium', text: body })
+  }
+  return out.slice(0, 3)
+}
+
+function clipText(value, max) {
+  const body = text(value)
+  return body.length > max ? body.slice(0, max) : body
+}
+
 function castNames(value) {
   if (!Array.isArray(value)) return []
   const names = []
@@ -105,8 +146,11 @@ export function buildOutlineSkeleton({ chapters, chaptersPerVolume = 30, spine, 
       goal: text(source.goal ?? source.purpose),
       arc: text(source.arc),
       cast: castNames(source.cast),
-      opens: textList(source.opens),
+      opens: normalizeOpens(source.opens),
       closes: textList(source.closes),
+      payoffs: normalizePayoffs(source.payoffs),
+      cliffhanger: clipText(source.cliffhanger, 40),
+      unitArcs: textList(source.unitArcs).slice(0, 3),
       targetChapters: target,
       planned: false,
       chapterIds: [],
@@ -140,22 +184,74 @@ export function volumeOfChapter(outline, chapterIdValue) {
   return (outline.volumes ?? []).find((volume) => (volume?.chapterIds ?? []).includes(chapterIdValue)) ?? null
 }
 
+const HOOK_TYPES = ['悬念', '危机', '反转', '期待', '情感', '信息差']
+const TRACKS = ['unit', 'main', 'both']
+const PAYOFF_LEVELS = ['none', 'small', 'medium', 'large']
+
+function hookStrengthOf(value) {
+  const n = Math.round(Number(value))
+  if (!Number.isFinite(n)) return 0
+  return Math.min(5, Math.max(1, n))
+}
+
+function payoffOf(value) {
+  if (value && typeof value === 'object') {
+    const level = text(value.level)
+    const body = text(value.text)
+    if (!level && !body) return null
+    return { level: PAYOFF_LEVELS.includes(level) ? level : 'small', text: body }
+  }
+  const body = text(value)
+  return body ? { level: 'small', text: body } : null
+}
+
+function infoDropOf(value) {
+  if (value && typeof value === 'object') {
+    const readerLearns = text(value.readerLearns)
+    const characterLoses = text(value.characterLoses)
+    return readerLearns || characterLoses ? { readerLearns, characterLoses } : null
+  }
+  const body = text(value)
+  return body ? { readerLearns: body, characterLoses: '' } : null
+}
+
+/**
+ * 章级字段的单一白名单：卷纲合并与后续读盘都走这里。
+ * v0.3 新增的网文节奏字段全部可选；旧数据没有就返回空值，读侧不报错。
+ */
+function chapterFields(entry) {
+  const source = entry && typeof entry === 'object' ? entry : {}
+  const hookType = text(source.hookType)
+  const track = text(source.track)
+  const threadDue = Array.isArray(source.threadDue)
+    ? source.threadDue.map((item) => text(item)).filter(Boolean).slice(0, 3)
+    : []
+  return {
+    title: text(source.title),
+    goal: text(source.goal),
+    conflict: text(source.conflict),
+    turn: text(source.turn),
+    hook: text(source.hook),
+    pov: text(source.pov),
+    when: text(source.when),
+    where: text(source.where),
+    cast: castNames(source.cast),
+    hookType: HOOK_TYPES.includes(hookType) ? hookType : '',
+    hookStrength: hookStrengthOf(source.hookStrength),
+    payoff: payoffOf(source.payoff),
+    infoDrop: infoDropOf(source.infoDrop),
+    track: TRACKS.includes(track) ? track : '',
+    unitArc: text(source.unitArc),
+    threadDue,
+  }
+}
+
 function normalizeVolumeChapters(list) {
   if (!Array.isArray(list)) return []
   const out = []
   for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue
-    out.push({
-      title: text(entry.title),
-      goal: text(entry.goal),
-      conflict: text(entry.conflict),
-      turn: text(entry.turn),
-      hook: text(entry.hook),
-      pov: text(entry.pov),
-      when: text(entry.when),
-      where: text(entry.where),
-      cast: castNames(entry.cast),
-    })
+    out.push(chapterFields(entry))
   }
   return out
 }
@@ -185,17 +281,7 @@ export function mergeVolumeChapters(outline, volumeIdValue, chapters) {
   const incoming = normalizeVolumeChapters(chapters)
   const perVolume = volumes.map((volume, index) => {
     if (index === targetIndex) return incoming
-    return existingChaptersOf(outline, volume).map((chapter) => ({
-      title: text(chapter.title),
-      goal: text(chapter.goal),
-      conflict: text(chapter.conflict),
-      turn: text(chapter.turn),
-      hook: text(chapter.hook),
-      pov: text(chapter.pov),
-      when: text(chapter.when),
-      where: text(chapter.where),
-      cast: castNames(chapter.cast),
-    }))
+    return existingChaptersOf(outline, volume).map((chapter) => chapterFields(chapter))
   })
 
   const total = chapterTotal(
@@ -233,6 +319,13 @@ export function mergeVolumeChapters(outline, volumeIdValue, chapters) {
         when: chapter.when,
         where: chapter.where,
         cast: chapter.cast,
+        hookType: chapter.hookType,
+        hookStrength: chapter.hookStrength,
+        payoff: chapter.payoff,
+        infoDrop: chapter.infoDrop,
+        track: chapter.track,
+        unitArc: chapter.unitArc,
+        threadDue: chapter.threadDue,
       }
     })
     nextChapters.push(...merged)

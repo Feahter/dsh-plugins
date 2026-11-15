@@ -60,11 +60,11 @@ v2 大纲形状（已实现，`plan.js` 全权负责）：
 
 | # | id | title | each | produces | 模型调用 | 说明 |
 |---|---|---|---|---|---|---|
-| 1 | `premise` | 故事核心 | — | brief | 1 | 不变 |
+| 1 | `premise` | 故事核心 | — | brief, pitch | 1–2 | v0.3：先跑 `pitch`（频道/卖点/金手指/开篇问题），失败标 `degraded` 不阻断，再跑 `brief` |
 | 2 | `bible` | 世界设定 | — | bible | 1 | 不变 |
 | 3 | `characters` | 人物档案 | — | characters | 1 | 不变；同时作为 canon 实体种子 |
 | 4 | `spine` | 故事脊柱 | — | spine | 1 | **改 JSON**：主线 + 结局 + 卷列表（id/v01…/标题/目标/弧光/重点人物/开线/收线/目标章数） |
-| 5 | `outline` | 卷章大纲 | — | outline, canon | 0 或 1 | **脚本建骨架**（卷数组、空 chapters）+ 迁移；短篇（≤60 章）一次展开全部章节；长篇只展开第 1 卷。**不调模型建骨架** |
+| 5 | `outline` | 卷章大纲 | — | outline, canon, opener | 0 或 1（+1 首轮） | **脚本建骨架**（卷数组、空 chapters）+ 迁移；短篇（≤60 章）一次展开全部章节；长篇只展开第 1 卷。**不调模型建骨架**；首轮额外生成 `opener`（黄金三章，含幂等守卫） |
 | 6 | `draft` | 章节草稿 | outline.chapters | draft/*, summary/*, beats/*, canon | 1 + 1~2 | **工作单元**：缺卷纲→先展开本卷；缺细纲→先生成；拼 packet；写正文 + 内联摘要 + 内联 canon patch |
 | 7 | `review` | 连续性审校 | outline.chapters | review/* | 1 | LLM 审校 + 确定性一致性检查（`consistency.js` + `craft.js`）；不再维护 ledgerPatch（兼容旧字段） |
 | 8 | `revise` | 修订 | outline.chapters | draft/*, summary/* | 0.5 | 不变（`alwaysRun`） |
@@ -211,8 +211,10 @@ export function buildPacket(input)   // input 见下；返回 { text, report, se
 | `cast` | 1500 | 4 | | 本章出场者速查 |
 | `next` | 300 | 5 | | 下一章目标 |
 | `style` | 1200 | 6 | | styleGuide + 风格样本 |
+| `world` | 600 | 2 | | v0.3：bible 前 600 字（含第二段「力量与规则」） |
+| `pitch` | 300 | 5 | | v0.3：频道/标签/卖点/金手指压成清单 |
 
-`contextBudget` 默认 12000，上表 cap 合计 12600 → 允许 1 片被压缩，但**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。
+`contextBudget` 默认 12000，上表 cap 合计 13500 → 允许 2 片被压缩，但**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。
 
 ### 5.3 集成点
 
@@ -257,6 +259,28 @@ export function checkChapter({ read, params, outline, chapterId, text })
 - `ensureVolume` 幂等：同一卷调用两次只产生 1 次模型调用，且第二次返回 `created:false`。
 - 只允许 import：`./packet.js` `./canon.js` `./consistency.js` `./craft.js` `./plan.js` `./outline.js` `../../forge/errors.js`。
 
+### 6.1 craft 量化指标（与 story-craft 对齐）
+
+`craft.checkDraft` 在字数/段落/对话/AI 套话之外，再算一组与 `~/.dsh/skills/story-craft/scripts/story_check.py` 同口径的读数，全部进 `stats`，并各生成一条 finding：
+
+| `stats` 字段 | 含义 | 触发 |
+|---|---|---|
+| `sentences` / `avgSentenceLen` / `maxSentenceLen` / `shortSentenceRatio` | 句子数、平均句长、最长句、≤12 字短句占比 | 平均句长 > 28 字 → warn `sentence-length` |
+| `sensoryPer1k` | 感官词每千汉字命中数 | < 2 且正文 ≥ 800 字 → warn `sensory` |
+| `abstractEmotionPer1k` | 抽象情绪词每千汉字命中数 | > 6 → warn `emotion`，> 12 → block `emotion` |
+| `adverbPer1k` | 程度副词每千汉字命中数 | > 12 → note `adverb` |
+| `aiMarkerCount` | 13 个 AI 套话词＋10 条模板句式的命中总数（按起始位置去重） | ≥ 3 → warn `ai-cliche`；「不是…而是…」单独 warn `ai-pattern` |
+| `nameDensity` | 出场 ≥2 次的具名人物数，折算到 1500 字 | > 5 且正文 ≥ 800 字、有 cast → note `name-density` |
+| `dialogueRatio` | 引号内汉字数 / 全文汉字数（0–1） | < 8% → warn `dialogue`；8%–15% → note `dialogue` |
+
+口径纪律：切句只在 `。！？!?…` 后切、句长按汉字数、占比按汉字数——与 `story_check.py` 逐项一致。`scripts/craft-parity.mjs` 拿同一份稿子跑两边，11 项指标超出容差就 exit 1：
+
+```bash
+node scripts/craft-parity.mjs test/fixtures/craft/skill-story.md
+```
+
+`craft.js` 本身不剥 Markdown（流水线收到的正文第一行就是 `## 第N章`）；parity 脚本会先按 `story_check.py` 的 `strip_markdown` 规则剥一遍，保证两边量的是同一段文字。
+
 ## 7. Agent-first 工具（`src/host/tools.js`）
 
 | 工具 | 参数 | 返回 |
@@ -280,6 +304,33 @@ export function checkChapter({ read, params, outline, chapterId, text })
 - 读 v2 项目的 `ledger` 返回一句说明字符串（"v0.2 用 canon.json…"），不抛错；v1 项目读 `canon` 则在内存里迁移出临时 canon。
 
 **工具描述必须写清分工**：`novel_context` 拿材料 → 你自己写正文（不要用流程模板）→ `novel_commit` 提交；`novel_run` 是"让它自己连着写一批"，不是必须先跑它。
+
+**工具按需装载（v0.2.1：不写小说时 0 常驻 token）**
+
+13 个工具默认不参与模型请求。`registerNovelTools` 改成 `tools.register(definition, { when })`，`when` 每个模型步求值一次；返回 `false` 时 DSH 把该工具排除在 executor description、PTC 绑定与执行之外——请求 `tools[]` 里根本没有这条，不是"标记了但还能用"。账：13 个 schema 合计约 2,581 token/请求，长期对话里是纯闲置开销。
+
+- 状态在 `src/host/activation.js`：进程内内存，按 sessionId 一个 Set，外加 `latest`（最近一次求值看到的 `agent.id`）。不落盘，重启清空。
+- 开关：`GET /novel-forge/tools` 读状态；`POST /novel-forge/tools` body `{enabled, conversationId?}` 开/关。不带 `conversationId` 时作用"最近活跃的对话"（客户端拿不到会话 id），一个活跃对话都没有则返回 409 `NO_SESSION`。面板按钮的亮灭只看"最近一次对话"是否在 `active` 里（不看全局面），关闭时带 `conversationId` 只关这一个；状态在内存，插件重载或进程重启即回到闲置。
+- 客户端：墨炉面板顶栏的「对话工具：开/关」按钮走的就是这条接口。
+- 中途开启的代价：当前对话的工具声明变了，DSH 追加一条 `tool-addition` developer message，并从第一个变化的请求 token 起失效前缀缓存——一次性，之后每轮照常命中。
+- 兼容：宿主 `tools.register` 若忽略第二参（老版本），退化为"一直常开"，与改造前行为一致，不会崩。
+- 发现路径：`~/.agents/ON-DEMAND.md` 记着这条（0 常驻成本），人从面板开，agent 从那份清单知道有这个能力。
+
+**写作助手（新建页的 AI 按钮）**
+
+新建页的「AI 润色 / 起三个」走一条很小的 host 路由，不碰流水线引擎：
+
+| 接口 | 入参 | 出参 |
+|---|---|---|
+| `POST /novel-forge/assist` | `{task:'polish-premise'\|'polish-tone'\|'title', text, genre?, tone?}` | `{text}`；400 `invalid_params`（未知 task / text 空或 >4000 字）；503 `LLM_UNAVAILABLE`（宿主没给 llm） |
+
+- 实现在 `src/host/assist.js`：一次 `engine.llm.generate({system,user,maxTokens,sessionId:'dsh-forge-assist'})`，maxTokens polish 900 / title 200，返回剥掉 Markdown 围栏的纯文本，空输出抛 `LLM_EMPTY`。三条 system 都是「只改表达、不新增人名/事件/设定」的窄指令，合计 546 字。
+- 前端降级：源文本为空时不发请求，直接提示先写两句；请求失败只 `notify` 报错，不动用户已填内容；书名结果取第一行并剥掉「1. 」这类前缀。
+- 「随机来一个」不调模型：`client-src/ideas.js` 里 9 个类型 × 6 条冲突化故事核 + 书名/文风素材，本地随机拼装，0 token。
+
+**面板尺寸兜底（`client-src/app.jsx`）**
+
+`.nf-root` 本应靠 `position:absolute;inset:0` 铺满宿主槽位，但宿主不一定给了「被定位过、且高度等于可视区」的祖先：祖先是 static 时 `inset:0` 落到视口上，祖先比视口矮时底部被顶栏/输入框盖住，而面板自身 `overflow:hidden`，滚也滚不出来。`App` 挂载时量一次父容器的可见矩形，偏差超过 1px 才把面板钉成 `fixed` 并写死宽高（底部再与 `window.innerHeight` 取小），布局本来就对的时候不写任何样式。`dev/page-host.html` + `node dev/host-check.mjs` 复现「顶栏 + 短槽位」这种宿主布局，量面板矩形与 `.nf-scroll` 能否滚到底。
 
 ## 8. 一致性检查（`src/recipes/novel/consistency.js`）
 

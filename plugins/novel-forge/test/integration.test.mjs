@@ -13,7 +13,7 @@ import { createNovelRecipe } from '../src/recipes/novel/index.js'
 
 const PREMISE = '殡仪馆夜班的新人发现，停尸柜里的亡者会在凌晨三点开口说话'
 
-function fakePrompts() {
+function fakePrompts(seen = { review: [] }) {
   const one = () => ({ system: '你是小说家。', user: '写。', maxTokens: 4000, temperature: 0.8 })
   // §12 的 12 个 builder：v0.2 没有 outline（骨架由脚本搭）。
   // 卷纲/细纲在 chapter.js 内部调用，不传 phase；用 user 前缀让假模型认得出阶段
@@ -23,7 +23,12 @@ function fakePrompts() {
     volumeChapters: () => ({ ...one(), user: '【卷纲】写。' }),
     beats: () => ({ ...one(), user: '【细纲】写。' }),
     draft: one, summary: one,
-    canonPatch: one, review: one, revise: one, blurb: one,
+    canonPatch: one, revise: one, blurb: one,
+    // 留一个钩子：把 index.js 传进来的 ctx 记下来，供集成测试核对 craftStats 接线。
+    review: (ctx) => {
+      seen.review.push(ctx)
+      return one()
+    },
   }
 }
 
@@ -76,6 +81,8 @@ function fakeLlm() {
         promise: '每章替一位亡者了结遗愿',
         ending: '沈砚烧掉名册，离开殡仪馆',
         genreTags: ['悬疑', '民俗'],
+        readers: '（假设）夜里读悬疑的上班族：关心名册真相，想每夜得到一条新线索。',
+        alternates: ['划掉：一个殡仪馆工人的救赎故事', '划掉：母子情深的回忆录'],
       }
     }
     if (phase === 'characters') {
@@ -149,7 +156,7 @@ function fakeLlm() {
     async generate(opts) {
       const explicit = opts.phase ?? opts.label
       const phase = explicit ?? promptKind(opts)
-      calls.push({ phase, chars: (opts.user ?? '').length })
+      calls.push({ phase, chars: (opts.user ?? '').length, user: opts.user ?? '' })
       const value = payload({ ...opts, phase })
       // spine 在 v0.2 是 JSON；文本阶段只有正文/摘要/设定/简介。
       if (phase === 'prose' || phase === 'revise' || phase === 'summary' || phase === 'bible' || phase === 'blurb') {
@@ -177,12 +184,13 @@ async function setup(t, { reviewGate = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'novel-forge-it-'))
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))
   const llm = fakeLlm()
-  const engine = new ForgeEngine({ root, recipes: [createNovelRecipe({ prompts: fakePrompts() })], llm })
+  const seen = { review: [] }
+  const engine = new ForgeEngine({ root, recipes: [createNovelRecipe({ prompts: fakePrompts(seen) })], llm })
   const project = await engine.createProject({
     title: '长夜将明',
     params: { premise: PREMISE, chapters: 6, wordsPerChapter: 800, pov: '第三人称限知', reviewGate },
   })
-  return { engine, llm, project, root }
+  return { engine, llm, project, root, seen }
 }
 
 async function waitRun(engine, runId) {
@@ -193,7 +201,7 @@ async function waitRun(engine, runId) {
 }
 
 test('整条流水线：6 章从故事核跑到导出', async (t) => {
-  const { engine, llm, project } = await setup(t)
+  const { engine, llm, project, seen } = await setup(t)
   const started = await engine.startRun(project.id, { autoApprove: true })
   const final = await waitRun(engine, started.id)
 
@@ -236,6 +244,14 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
   assert.equal(count('review'), 6)
   assert.ok(llm.calls.length >= 30, `calls=${llm.calls.length}`)
 
+  // P2 接线：index.js 的 review 阶段必须把 checkChapter 的 craft stats 放进 builder 的 ctx。
+  assert.equal(seen.review.length, 6, `review builder 应被调用 6 次，实际 ${seen.review.length}`)
+  for (const ctx of seen.review) {
+    assert.ok(ctx.craftStats && typeof ctx.craftStats === 'object', 'review ctx 缺 craftStats')
+    assert.ok(ctx.craftStats.avgSentenceLen > 0, 'craftStats 缺 avgSentenceLen')
+    assert.equal(typeof ctx.craftStats.aiMarkerCount, 'number')
+  }
+
   // 每章四件套齐全（细纲在 draft 阶段补，不再有独立 beats 阶段）
   for (const id of ['ch01', 'ch03', 'ch06']) {
     assert.ok(await engine.getArtifact(project.id, `beats/${id}`), `${id} beats`)
@@ -244,6 +260,12 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
     assert.ok(await engine.getArtifact(project.id, `summary/${id}`), `${id} summary`)
     assert.ok(await engine.getArtifact(project.id, `review/${id}`), `${id} review`)
   }
+
+  // premise 的 story-craft 字段（readers/alternates）必须被 briefSchema 收下，不能被 zod 剥掉。
+  const brief = await engine.getArtifact(project.id, 'brief')
+  assert.ok(brief.content.readers.length > 0, 'brief.readers 被 schema 剥掉了')
+  assert.equal(brief.content.alternates.length, 2)
+  assert.match(brief.content.alternates[0], /^划掉：/)
 
   // 审校补丁合并进了 canon.json（v1 的 ledger.json 不再写）
   const canon = await engine.getArtifact(project.id, 'canon')

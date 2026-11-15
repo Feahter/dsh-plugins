@@ -157,6 +157,17 @@ function normalizeRelations(relations) {
  * 从 brief / 人物档案 / 参数 / 卷纲建初始正典。
  * 自由文本（故事核、主题等）不是三元组，按 §4.1 归入 notes；人物档案成为实体种子。
  */
+/**
+ * 回收排期与爽点等级：跨度 ≤5 章算小节拍，≤30 章算中伏笔，再长是大主线。
+ * 纯函数，保证同一份 spine 每次迁移出同样的 dueIn/等级。
+ */
+function payoffLevelOf(span) {
+  if (!Number.isFinite(span) || span <= 0) return 'small'
+  if (span <= 5) return 'small'
+  if (span <= 30) return 'medium'
+  return 'large'
+}
+
 export function createCanon({ brief = {}, characters = null, params = {}, spine = {} } = {}) {
   const canon = emptyCanon()
 
@@ -195,13 +206,26 @@ export function createCanon({ brief = {}, characters = null, params = {}, spine 
 
   // 卷纲里的开线/收线先落成线索，卷目标落时间线；后续章节里的具体线索再增量合并。
   const volumes = Array.isArray(spine?.volumes) ? spine.volumes : []
+  // 计算每卷的绝对章号区间：dueIn 必须能被下一章的开线检索直接比较，不能只写卷 id。
+  const spans = []
+  let cursor = 0
   for (const volume of volumes) {
+    const start = cursor + 1
+    const size = Math.max(1, Math.floor(Number(volume?.targetChapters) || 0))
+    cursor += size
+    spans.push({ start, end: cursor })
+  }
+  for (const [volumeIndex, volume] of volumes.entries()) {
     if (!volume || typeof volume !== 'object') continue
     const volumeId = norm(volume.id)
     const openings = Array.isArray(volume.opens) ? volume.opens : volume.opens ? [volume.opens] : []
+    const span = spans[volumeIndex] ?? { start: 1, end: 1 }
     for (const raw of openings) {
-      const text = norm(raw)
+      const item = raw && typeof raw === 'object' ? raw : { text: raw }
+      const text = norm(item.text)
       if (!text) continue
+      const dueRaw = Math.floor(Number(item.dueIn))
+      const dueIn = Number.isFinite(dueRaw) && dueRaw >= 1 ? dueRaw : span.end
       canon.threads.push({
         id: nextId('t', canon.threads, 2),
         text,
@@ -209,6 +233,8 @@ export function createCanon({ brief = {}, characters = null, params = {}, spine 
         status: 'open',
         closedIn: null,
         payoff: '',
+        dueIn,
+        payoffLevel: payoffLevelOf(dueIn - span.start + 1),
       })
     }
     const event = norm(volume.goal) || norm(volume.title)
@@ -330,6 +356,7 @@ function mergeThreads(canon, entries, chapter) {
         target.closedIn = norm(entry.closedIn) || norm(chapter) || target.closedIn || ''
       }
       if (entry.payoff != null) target.payoff = norm(entry.payoff)
+      if (entry.dueIn != null && Number.isFinite(Number(entry.dueIn))) target.dueIn = Math.floor(Number(entry.dueIn))
       continue
     }
 
@@ -344,6 +371,7 @@ function mergeThreads(canon, entries, chapter) {
       status: wantsClosed ? 'closed' : 'open',
       closedIn: wantsClosed ? norm(entry.closedIn) || norm(chapter) : null,
       payoff: norm(entry.payoff),
+      ...(Number.isFinite(Number(entry.dueIn)) ? { dueIn: Math.floor(Number(entry.dueIn)) } : {}),
     })
   }
 }
@@ -514,7 +542,10 @@ export function queryCanon(canon, { cast, keywords, location, atChapter, limit }
       ? chapterDistance(thread.opened, atChapter)
       : 0
     const ageBonus = open && Number.isFinite(age) ? Math.min(Math.max(0, age), 50) : 0
-    threads.push({ score: (open ? 5 : 0) + ageBonus, id: norm(thread.id), thread })
+    // 到了回收章还没收的线，必须挤进本章材料：这是「伏笔有排期」能兑现的唯一机制。
+    const due = Math.floor(Number(thread.dueIn))
+    const dueBonus = open && Number.isFinite(due) && at >= 0 && due <= at ? 8 : 0
+    threads.push({ score: (open ? 5 : 0) + ageBonus + dueBonus, id: norm(thread.id), thread })
   }
   threads.sort((a, b) => b.score - a.score || cmpStr(a.id, b.id))
 
@@ -701,13 +732,15 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
       const opened = norm(thread.opened) || '—'
       const payoff = norm(thread.payoff)
       const closedIn = norm(thread.closedIn)
+      const due = Math.floor(Number(thread.dueIn))
+      const dueTag = Number.isFinite(due) && due > 0 ? ` due:ch${String(due).padStart(4, '0')}` : ''
       // 章号必带；payoff / 回收章有就带上，方便 agent 判断这条线值不值得接。
       const tail = payoff
         ? `（payoff：${payoff}${closedIn ? ` @${closedIn}` : ''}）`
         : closedIn
           ? `（回收于：${closedIn}）`
           : ''
-      return `- ${norm(thread.id)} [${opened}] ${norm(thread.text)}${tail}`
+      return `- ${norm(thread.id)} [${opened}]${dueTag} ${norm(thread.text)}${tail}`
     }),
   )
 

@@ -39,11 +39,13 @@ const GENRE_PROMISE = {
  * - 其余阶段沿用 v0.1 的口径，按 §12 的 maxTokens 微调。
  */
 const BUDGET = {
+  pitch: { premise: 1200, style: 400, user: 4000 },
   premise: { seed: 2000, style: 600, user: 6000 },
   bible: { brief: 1800, seed: 600, style: 600, user: 9000 },
   characters: { brief: 1800, bible: 3500, user: 10000 },
   spine: { brief: 1500, bible: 2200, characters: 2600, volumePlan: 1600, user: 10000 },
-  volumeChapters: { spine: 2000, bible: 1200, characters: 1200, digest: 1200, titles: 1000, user: 9000 },
+  opener: { pitch: 1200, brief: 1200, spine: 1200, chapters: 1200, style: 400, user: 5000 },
+  volumeChapters: { spine: 2000, bible: 1200, characters: 1200, digest: 1200, titles: 1000, threads: 600, user: 9000 },
   beats: { chapter: 1800, volume: 400, prev: 800, canon: 2400, cast: 1400, user: 10000 },
   // 预算归 packet，不再使用（architecture-v2 §5.2）。
   draft: { beats: 2500, prev: 800, ledger: 3000, next: 400, cast: 1500, style: 1500, user: 11800 },
@@ -56,10 +58,12 @@ const BUDGET = {
 }
 
 const TEMPERATURE = {
+  pitch: 0.85,
   premise: 0.9,
   bible: 0.7,
   characters: 0.85,
   spine: 0.7,
+  opener: 0.8,
   volumeChapters: 0.6,
   beats: 0.75,
   draft: 0.9,
@@ -143,17 +147,32 @@ const CRAFT = `【工艺宪法】
 
 /** 每个阶段在宪法之上追加的工艺重点（输出格式契约在 user 里）。 */
 const ADDENDA = {
+  pitch: `【本阶段：商业定位】
+你只做定位，不写梗概：这份 JSON 决定这本书卖给谁、凭什么被点开，不负责讲完故事。
+- 读者先于故事：targetReader 写具体的人（年龄／处境／此刻的阅读需求），不写"所有喜欢玄幻的人"。
+- 卖点＝冲突＋承诺：sellingPoint 必须写出"他必须付出什么"与"读者能持续得到什么"；禁止"热血""逆袭""爽""神作"这类空形容词。
+- 对标只借机制：comps 写清借它的什么机制，不抄设定、不抄人物、不抄世界观；宁缺毋滥。
+- 金手指四要素缺一不可：获得方式、规则边界、代价、成长轴；任缺一项就重写。firstShowChapter 必须在 1–3 章内第一次展示，且第一次展示就要露出代价。
+- 开篇第一句是钩子：opening.firstLine 必须制造一个未回答的问题；chapterOneQuestion 是读者读完第 1 章还想知道的那一件事，不是本章剧情概括。
+- 与 premise 分工：这里只给定位与骨架，不写主角经历、不写结局；promise 一旦定下，premise 只能同义复述，不得另起一套。`,
+
   premise: `【本阶段：故事核心】
 你要把一句话的种子炼成能撑住一部长篇的承诺。标准不是"好听"，是"能不能连续生产冲突"。
-- logline：主角（谁）＋处境（被什么困住）＋行动（他决定做什么）＋代价（失去什么）。≤60 字，必须有具体对手或倒计时。
+- 读者诊断（先填再定故事）：readers 写「谁·此刻关心什么·已知什么·想得到什么·读完做什么」，≤120 字；用户没给受众，按最可能的默认值填，并标「（假设）」。
+- 三种读法：同一素材写 3–4 个一句话读法；划掉第一个想到的公共记忆版，再划掉一个站不住的，留下只用原素材就能成立的那个。alternates 记 2–3 条划掉的（第一条是公共记忆版），每条 ≤30 字，前缀「划掉：」。
+- logline：主角＋处境＋行动＋代价，≤60 字，有具体对手或倒计时。写完过故事核三检：可反对（有人盼他失败）／有代价（钱、位置、一个人、一个身份）／有然后（听的人会问然后呢）。三检不过就改核，不要用文笔救。
 - 主题：写成可被反驳的命题（"人能不能靠遗忘活下去"），不要写成"关于爱与救赎"。
-- promise：读者翻开后会持续得到的体验（谜题／压迫／温情／升级），说人话。
+- promise：读者会持续得到的体验（谜题／压迫／温情／升级）；写明核心物件到结尾怎么变；若已有 pitch，必须与 pitch.promise 同义，不得另起一套。
+- 定位先于故事：pitch 已定下频道／标签／卖点／金手指，genreTags 必须覆盖它的 tags；不要另写一本更"文学"的书。
+- 核心物件：故事里最重要的物件到结尾必须改变状态或含义；只出现不承重，就换掉。
 - ending：只写落点和代价，不写过程；必须回答主题，并让主角失去不可逆的东西。
 - 书名：先在草稿里拟 5 个候选（意象／冲突／人称／时间／反讽各一），按"有画面、不剧透、能记住"挑一个写进 title，不要在 JSON 里新增候选字段。`,
 
   bible: `【本阶段：世界设定】
 你不是在写百科，是在造一套"会咬人"的规则。每条设定都要回答：让谁得利、让谁受害、逼人物做什么选择。写不进冲突的设定，一律不写。
 - 只写这本书会反复用到的：三条硬规则、三到六个地点、时代日常（钱／交通／通信／权力／时间怎么过）、禁忌与代价、反复出现的意象与物件。
+- 七段顺序固定，不得调换：一句话世界→力量与规则→硬规则→地点→时代与日常→禁忌与代价→意象与物件。「力量与规则」必须紧跟「一句话世界」，因为材料包只取前 600 字。
+- 力量与规则四要素缺一不可：获得方式、规则边界、代价、3–5 级升级阶梯（每级：能做什么／要付什么）。缺一项就重写。
 - 规则必须有边界和代价；越强的设定，限制越具体。
 - 地点要有感官锚点（气味／声音／光线／温度）和"谁的地盘"；同一地点在不同章节要能变味。
 - 每条规则后面用一句话写"它会逼出什么冲突"。
@@ -161,20 +180,33 @@ const ADDENDA = {
 
   characters: `【本阶段：人物】
 人物不是标签，是"在压力下会怎么做"的预测模型。每个人必须有：当下想要的（want）、不敢面对的（fear）、不能让人知道的（secret）、说话方式（voice）、会变的弧光（arc）。
-- want 与 fear 必须互相拉扯；secret 必须能在中段爆炸；arc 必须由事件逼出来，不是顿悟。
+- want 与 fear 必须互相拉扯，且主角想要的东西至少有一方反对（可反对）；secret 必须能在中段爆炸；arc 必须由事件逼出来，不是顿悟。
 - voice 写两句：第一句说话方式（句长／用词／口头禅／沉默时做什么），第二句行为底线（他会……；绝不会……）。这两句是后文写对白的锚。
 - 关系要不对称：A 以为是朋友，B 只在利用 A。每条 relations 写"谁对谁"，不要写"互为好友"。
 - 配角也要有自己想要的东西；没有欲望的人不许出场。
-- 人数控制在主角 1、对手 1、关键配角 3–5，不要建一个连名字都记不住的名单。`,
+- 人数控制在主角 1、对手 1、关键配角 4–6，不要建一个连名字都记不住的名单。
+- 主角必须给 power（起点能力／资源）、growth（成长轴）、cost（代价）；反派必须给 pressure（怎么施压）。四样都要能落进事件，不许写成标签。`,
 
   spine: `【本阶段：故事脊柱】
 脊柱是"因为 A，所以 B，终于 C"的因果链，不是大纲。每一环都必须是主角的一次选择带来的后果，不是"后来发生了……"。
 - mainline 写 6–10 环：因为【前因】，他选择【行动】，所以【后果】；下一环从前一环的后果开始。
 - 卷数、卷序、每卷目标章数已经由脚本定死在【卷表】里。你只填内容：第 i 个 volumes 对象只能是第 i 卷，不许增、删、合并、跳过、调序，也不许把两卷的内容塞进一卷。
 - 每卷三件事必须咬合：goal 是本卷主角要拿到／守住的具体东西；arc 是本卷结束时他相信的东西怎么错、他变成什么样；opens／closes 是这一卷开的线与收的线。上一卷 opens 的线，本卷至少要接住一条。
+- 每卷给 payoffs 2–3 条：atChapter 必须是本卷章号区间内的绝对章号（见【卷表】的「第 a–b 章」），level 只能 medium／large，text ≤40 字；每卷至少 1 条 large。
+- cliffhanger ≤40 字，停在具体动作／话／物件上；unitArcs 0–3 条，每条 ≤30 字，是本卷能独立成立的单元剧目标。
+- opens 的每条可以是 string（≤16 字），也可以是 {text, dueIn}：dueIn 是绝对章号，长线伏笔才填，不填按本卷末章回收。
 - 相邻两卷要有不可逆的升级：后一卷的麻烦不能和前一卷同一量级，也不能换个地方重演。
 - 结局只写落点和代价，不写过程；必须回答主题，并让主角失去一样再也拿不回来的东西。
 - 禁止"经过一系列冒险，他成长了"；禁止用巧合解决主线；禁止把卷写成同质的三段循环。`,
+
+  opener: `【本阶段：黄金三章】
+三章是三次"承诺—兑现—更大的问题"，不是三次铺垫。每章都要独立成立，又要让读者非翻下一章不可。
+- 第 1 章 300 字内必须出现异常、危机、欲望之一；世界观解释≤150 字，只能从人物的动作与误判里漏出来。
+- 每章只投放 1 条必记信息：infoDrop.readerLearns 是读者新知道的，characterLoses 是主角因此失去的（信息／安全／关系）。
+- 爽点等级递进：第 1 章 small，第 2 章 small 或 medium，第 3 章 medium；large 留给卷末，不许提前烧掉。
+- 三章章末钩子类型（endHook）不重复（悬念／危机／反转／期待／情感／信息差）；第 3 章末要指向第一幕的大问题。
+- payoff.chapterDue 必须落在 1–3 章内；承诺了却不兑现，比不承诺更伤读者。
+- strategy 写这三章的总打法（先给什么、藏什么、什么时候翻），≤120 字；不要写成章节摘要。`,
 
   volumeChapters: `【本阶段：卷纲展开】
 你在给"这一卷"排章表，不是写小说。每章只回答四件事：谁想要什么（goal）、什么挡着（conflict）、局面怎么变（turn）、留下什么钩子（hook）。
@@ -184,44 +216,46 @@ const ADDENDA = {
 - 每章至少推进一条主线或一条人物弧；删掉所有"过渡章""铺垫章"。
 - 章与章用因果咬合：上一章的 hook 是下一章的开场压力；本卷最后一章必须落在本卷的弧光转折上。
 - cast 只从人物档案里选 1–4 人；需要路人就用无名配角，不要临时发明重要角色。
+- 章级字段一次给全：hookType 六类之一、hookStrength 1–5、payoff {level, text}、infoDrop ≤40 字、track（unit／main／both）、unitArc ≤30 字、threadDue ≤3 条。
+- 节奏：每 3–5 章至少 1 个 small｜medium 爽点；hookStrength 不得连续 3 章 ≤2；本卷最后一章 hookStrength 必须是 5。
+- threadDue 只能原样引用【待回收线索】清单里的文本（每条 ≤16 字）；清单里没有的不要写，脚本匹配不到只会 warn，等于这条线丢了。
 - 不要写正文，不要复述前面章节已经写过的内容（前情只用来接续），钩子必须留悬念，不要在本章解决。`,
 
   beats: `【本阶段：章节细纲】
 把一章拆成 5–9 个可拍的场景。每个场景是一个小型的"目标—阻碍—转折—出口"，上一场的出口就是下一场的入口。
 - scenes 每场五项：goal（这场谁想要什么）／obstacle（什么挡着）／turn（局面怎么变）／detail（写正文时必须落地的一个具体动作、道具或感官锚点）／cast（1–4 个已有人物）。
-- turn 要让局面变好或变坏，不能原地打转；detail 不是"气氛描写"，是能拍出来的东西（声音／气味／温度／触感／光线／一个动作）。
+- turn 要让局面变好或变坏，不能原地打转；detail 是能拍出来的具体物或动作，不写情绪概括；本场只新增一个信息或一个人物，新名字一次给全。
 - 场数按信息量与情绪重量分配，不要平均切：重场戏 2–3 场，过场 1 场带过。
 - beats 是给后文检索用的一句话节拍：5–8 条，按发生顺序，每条以动词开头，写"谁做了什么、局面变成什么"。
 - hook 是本章最后落在的那个悬念，必须能被下一章直接接手。
+- hookType 六类之一（悬念／危机／反转／期待／情感／信息差）；hookStrength 1–5，大爽点留卷末。
+- 每场标 payoff（small／medium／none）与 info（≤30 字，只新增一条必记信息）；开篇三章必须兑现 opener 的 payoff 与 infoDrop。
 - 不要在细纲里写对白全文，只写"这场戏要争什么"。`,
 
   draft: `【本章写作契约】
 你是这本书的作者，不是助手。读者要的是这一章，不是关于这一章的说明。
 - 直接写正文，第一行必须是「## 第N章 标题」，段落之间空一行。
-- 不要前言、不要总结、不要解释、不要小标题、不要列表、不要作者按、不要"以下是本章"。
-- 连续性纪律：只用【材料包】里给出的人物、设定、前情与正典。包里没有的设定不许自造；新细节只能是场景级的小物件、小动作，不许新增有名有姓的人物、规则，或改动已发生的事实。
+- 不要前言、总结、解释、小标题、列表、作者按、不要"以下是本章"。
+- 连续性：只用【材料包】里的人物、设定、前情与正典；包里没有的不许自造，不新增有名有姓的人物或规则。
 - 细纲是骨架，允许为了更强而偏离，但必须兑现本章的转折与结尾钩子。
-- 结尾停在钩子指向的具体动作、话语或物件上，不要写"他陷入了沉思"。
 - 语感：句子长短交替，动词承担画面，少用形容词和比喻；不用现成的感受词。
+- 预期三段式：每章至少一处「先建立模式→再打破→打破后 200 字内给可理解的解释」；只打破不解释＝事故。
+- 一个场景只引入一个新设定或一个新人物；新名字一次给全，不要挤在同一段。
+- 落点三选一（落在钩子指向处）：动作收＝一个动作就停／画面收＝停在一个意象／回环收＝回到开头的物件或话，但意义已变。禁止总结主题、点名言志、反问升华。
+- 最后 3 行必须落在钩子上：一个动作、一句话或一个物件；不许总结本章，不许发议论。
+- 每 800 字至少一次进展：信息、能力、关系至少变一样；原地打转的段落删掉。
+- 爽点靠「选择＋代价」兑现：他放弃了什么、谁因此受损；不许用旁白宣布"他赢了"。
 
-【反 AI 腔：命中左边，就换成右边，不是"少用"】
-1. 仿佛／似乎／宛如／像是 → 具体观察或身体反应（后颈汗毛立起来）
-2. 突然／忽然／猛地 → 删掉副词让动作自己发生；真正的突然靠结果
-3. 不禁／不由得 → 删掉，直接写动作（后退一步，鞋跟撞上门槛）
-4. 缓缓／微微／轻轻 → 给速度、幅度或声音（抬头，脖颈响了一声）
-5. 一丝／一抹／几分 → 换成看得见的东西（嘴角动了一下，很快压回去）
-6. 眼中闪过／嘴角勾起 → 一个动作或一句台词
-7. 空气仿佛凝固 → 在场者的具体反应（没人接话，挂钟走了三格）
-8. 心中五味杂陈 → 一个自相矛盾的动作（想笑，喉咙里出来的却是咳嗽）
-9. 莫名的／难以言喻的 → 来源不明但具体的细节（他把钥匙数了三遍）
-10. 他知道／她明白＋解释 → 把认知变成决定或动作
-11. 不是 A，而是 B → 直接写 B
-12. 三连排比／抽象名词堆叠 → 只留最具体的一项
-13. 与此同时／在城市的另一端 → 删掉全知切换，回到视角人物眼前
-14. 他感到／她意识到＋抽象名词 → 写感官证据
-15. 形容词堆叠 → 让一个动词承担
-16. 章末总结／抒情 → 落回具体动作或物件（天快亮时，烟灰缸满了）
-17. 对话讲设定 → 让规矩在冲突里显形`,
+【反 AI 腔：命中左边，就换成右边】
+仿佛／似乎／宛如 → 具体观察或身体反应（后颈汗毛立起来）
+突然／忽然／猛地 → 删副词让动作自己发生；真正的突然靠结果
+缓缓／微微／轻轻 → 给速度、幅度或声音（抬头，脖颈响了一声）
+一丝／一抹／几分 → 换成看得见的东西（嘴角动了一下，很快压回去）
+眼中闪过／嘴角勾起 → 一个动作或一句台词
+空气仿佛凝固 → 在场者的具体反应（没人接话，挂钟走了三格）
+心中五味杂陈 → 一个自相矛盾的动作（想笑，喉咙里出来的却是咳嗽）
+莫名的／难以言喻的 → 来源不明但具体的细节（他把钥匙数了三遍）
+三连排比／抽象名词堆叠 → 只留最具体的一项`,
 
   summary: `【本阶段：章节摘要】
 摘要不是缩写，是写给"下一章的自己"的交接单。只保留四类信息：
@@ -243,7 +277,12 @@ const ADDENDA = {
 
   review: `【本阶段：连续性审校】
 你是这本书的责任编辑，不是夸奖者。只报可验证的问题，每条必须能指到具体段落或原句；指认不了的"感觉"不要写。同时参考【正典】：正典是这本书的既成事实，正文与它冲突就是硬错。
-按顺序对账：
+先读【机器读数】再判：读数已越界的项直接写成 finding，不要重复描述；读数正常的项，不许凭感觉报同类问题。
+按顺序过三闸，前闸不过不写后闸：
+1. 认知负荷：读者此刻能否回答「谁想要什么、卡在哪」；1500 字内主要人名是否超过 5 个。
+2. 预期：标出建立模式与打破模式的位置；打破后 200 字内有没有可理解的解释。
+3. 自我嵌入：这个冲突对应读者的什么处境／恐惧／没被满足的渴望；只用来判断，不写进正文。
+再按连续性对账：
 1. 事实：与正典／前文矛盾的人名、物件、伤势、钱、地点、天气、规则。
 2. 时间线：本章内部的时间推进、与上一章的时间衔接、路程与耗时是否可能。
 3. 知情：每个出场人物此刻知道什么、从哪知道的；有没有人用了自己还没得到的信息。
@@ -252,11 +291,12 @@ const ADDENDA = {
 6. 节奏：连续多段无对话／无动作、单段过长、场景原地打转、该慢的地方一笔带过。
 7. 对话：台词是否只在交换信息、是否人人说一样的话、有没有潜台词。
 severity 标准：block＝读者会出戏／前后矛盾／关键信息错；warn＝明显削弱体验；note＝可改可不改。
-fix 要写成"怎么改"：给出替换动作、删哪句、补哪个感官细节。
+fix 必须写成"改成什么"：替换成哪个动作／删掉哪句／补哪个物；写"加强描写"不算 fix。
 verdict：有 block，或 warn ≥3 → revise；否则 pass。不要输出 ledgerPatch，正典由本章自己的 canon patch 维护。`,
 
   revise: `【本阶段：修订】
 你是外科医生，不是重写者。只动【需修正】点名的位置；没被点名的段落尽量原样保留，包括你认为可以更好的地方。
+修改顺序：结构 → 场景 → 句子 → 字词。上一层的病没解决，不要动下一层的字；点名处跨层时，先修高层。
 - 禁止：重写全章、改主线／结局、增删场景、改人物关系、改叙事视角、换文风。
 - 允许：替换句子、补一个感官细节、删一句解释、按 finding 调换段落、补一句过渡。
 - 每条 finding 都要落地；无法执行的直接跳过，不要把修改说明写进正文。
@@ -507,6 +547,23 @@ function chapterCard(ch, n) {
   if (ch.conflict) lines.push(`冲突：${ch.conflict}`)
   if (ch.turn) lines.push(`转折：${ch.turn}`)
   if (ch.hook) lines.push(`钩子：${ch.hook}`)
+  // v0.3：卷纲里排好的钩子类型/爽点/信息差，要让写正文的人看得见，否则字段只是账本。
+  if (ch.hookType) {
+    const strength = Number(ch.hookStrength) || 0
+    lines.push(`钩子类型：${ch.hookType}${strength ? `（强度 ${strength}/5）` : ''}`)
+  }
+  if (ch.payoff && str(ch.payoff.text)) {
+    lines.push(`本章爽点：${str(ch.payoff.text)}${ch.payoff.level ? `（${ch.payoff.level}）` : ''}`)
+  }
+  if (ch.infoDrop && (str(ch.infoDrop.readerLearns) || str(ch.infoDrop.characterLoses))) {
+    const drop = []
+    if (str(ch.infoDrop.readerLearns)) drop.push(`读者知道：${str(ch.infoDrop.readerLearns)}`)
+    if (str(ch.infoDrop.characterLoses)) drop.push(`主角失去：${str(ch.infoDrop.characterLoses)}`)
+    lines.push(`信息差：${drop.join('；')}`)
+  }
+  if (Array.isArray(ch.threadDue) && ch.threadDue.length) {
+    lines.push(`本章回收：${ch.threadDue.map(str).filter(Boolean).join('、')}`)
+  }
   const meta = []
   if (ch.pov) meta.push(`视角：${ch.pov}`)
   if (ch.when) meta.push(`时间：${ch.when}`)
@@ -920,6 +977,153 @@ function mdContract(structure) {
  * 3. 十二个阶段
  * ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ *
+ * 3.5 商业定位与开篇：pitch 先定"卖给谁、凭什么卖"，opener 再把前三章写成承诺
+ * ------------------------------------------------------------------ */
+
+/** pitch.json：可能缺失；缺了就当空对象，所有字段退回新建参数。 */
+function pitchOf(ctx) {
+  const data = readJson(ctx, 'pitch', null)
+  return data && typeof data === 'object' && !Array.isArray(data) ? data : {}
+}
+
+function tagList(value) {
+  const raw = Array.isArray(value) ? value : str(value).split(/[、,，\s]+/)
+  return raw.map((x) => str(x)).filter(Boolean).slice(0, 6)
+}
+
+function compsText(value) {
+  const list = Array.isArray(value) ? value : []
+  return list
+    .map((item) => {
+      if (typeof item === 'string') return `- ${str(item)}`
+      if (!item || typeof item !== 'object') return ''
+      const title = str(item.title)
+      return title ? `- ${title}${item.why ? `：${str(item.why)}` : ''}` : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function goldenFingerText(value) {
+  if (!value) return ''
+  if (typeof value === 'string') return str(value)
+  return [
+    value.name ? `名称：${str(value.name)}` : '',
+    value.rule ? `规则：${str(value.rule)}` : '',
+    value.cost ? `代价：${str(value.cost)}` : '',
+    value.growthAxis ? `成长轴：${str(value.growthAxis)}` : '',
+    value.firstShowChapter ? `首次展示：第 ${num(value.firstShowChapter, 0) || '?'} 章` : '',
+  ]
+    .filter(Boolean)
+    .join('；')
+}
+
+/** 商业定位块：pitch.json 已定优先，其次新建参数；两处都没有就返回空串。 */
+function commercialLines(ctx) {
+  const pitch = pitchOf(ctx)
+  const p = paramsOf(ctx)
+  const channel = str(pitch.channel) || str(p.channel)
+  const platform = str(pitch.platform) || str(p.platform)
+  const tags = tagList(pitch.tags && pitch.tags.length ? pitch.tags : p.tags)
+  const sellingPoint = str(pitch.sellingPoint) || str(p.sellingPoint)
+  const targetReader = str(pitch.targetReader) || str(p.targetReader)
+  const promise = str(pitch.promise) || str(p.promise)
+  const hookLine = str(pitch.hookLine) || str(p.hookLine)
+  const comps = compsText(pitch.comps && pitch.comps.length ? pitch.comps : p.comps)
+  const golden = goldenFingerText(pitch.goldenFinger || p.goldenFinger)
+  const cadence = str(pitch.updateCadence) || str(p.updateCadence)
+  const opening = pitch.opening && typeof pitch.opening === 'object' ? pitch.opening : {}
+  const firstLine = str(opening.firstLine) || str(p.firstLine)
+  const question = str(opening.chapterOneQuestion) || str(p.chapterOneQuestion)
+  return [
+    channel || platform ? `- 频道／平台：${channel || '未定'}｜${platform || '未定'}` : '',
+    tags.length ? `- 标签：${tags.join('、')}` : '',
+    sellingPoint ? `- 卖点：${sellingPoint}` : '',
+    targetReader ? `- 目标读者：${targetReader}` : '',
+    promise ? `- 读者承诺：${promise}` : '',
+    hookLine ? `- 钩子句：${hookLine}` : '',
+    comps ? `- 对标（只借机制，不抄人物与桥段）：\n${comps}` : '',
+    golden ? `- 金手指：${golden}` : '',
+    cadence ? `- 更新节奏：${cadence}` : '',
+    firstLine ? `- 开篇第一句：${firstLine}` : '',
+    question ? `- 第 1 章要回答的问题：${question}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/**
+ * pitch：商业定位。只决定"卖给谁、凭什么卖"，不写故事梗概。
+ * 产物 pitch.json 会被 premise／bible／opener 继续引用。
+ */
+function pitchPrompt(ctx) {
+  const p = paramsOf(ctx)
+  const seed = str(p.seed)
+  const user = [
+    projectHeader(ctx),
+    section(
+      '故事种子',
+      fit(ctx, [str(p.premise), seed ? `灵感与母题：${seed}` : ''].filter(Boolean).join('\n'), BUDGET.pitch.premise),
+      '（用户没有给故事核：从类型与文风反推一个能连续生产冲突的核心。）'
+    ),
+    section('类型承诺', genrePromise(p.genre)),
+    section(
+      '已填的定位（用户已定，不得矛盾）',
+      commercialLines(ctx),
+      '（用户还没填：你来定，但要能从上一条类型承诺推出来。）'
+    ),
+    section('文风与尺度', styleText(ctx, BUDGET.pitch.style), '（未指定：克制、具体、少形容词。）'),
+    jsonContract(
+      [
+        '- version：number，固定 1',
+        '- channel：string，只能是「男频」「女频」「通用」',
+        '- platform：string，≤20 字，如起点／番茄／晋江；不确定写「通用」',
+        '- tags：string[]，3–6 个，读者用来搜到这本书的词，不是主题词',
+        '- sellingPoint：string，≤60 字，一句话说清"谁在什么处境里，被什么逼着做什么"；不许写热血／逆袭／爽文',
+        '- hookLine：string，≤40 字，能放在封面或第一章第一行的钩子句',
+        '- targetReader：string，≤80 字，谁·此刻关心什么·愿意为什么付费',
+        '- promise：string，≤80 字，读者会持续得到的体验（与 premise.promise 同义）',
+        '- comps：array，0–2 项，每项 {title, why}；why≤40 字，只写可借的机制',
+        '- goldenFinger：object，{name≤12, rule≤60, cost≤40, growthAxis≤60, firstShowChapter 1–3}；没有金手指就写现实向能力，不允许空对象',
+        '- opening：object，{firstLine≤40, chapterOneQuestion≤40}；firstLine 是正文第一句，不是梗概',
+        '- degraded：string[]，0–3 条，被降级或没做到的定位点；没有就写 []',
+      ],
+      {
+        version: 1,
+        channel: '女频',
+        platform: '通用',
+        tags: ['悬疑', '民俗', '殡葬', '母女', '头七'],
+        sellingPoint: '殡仪馆夜班员替无名尸守七夜，每守一夜就多看见一个死者，也多一条母亲死因的线索。',
+        hookLine: '头七那晚，三号柜里的手机响了，来电显示是我妈。',
+        targetReader: '二十五到三十五岁、夜里读悬疑的上班族；关心母亲死因能否查清，愿意为每夜一条新线索付费。',
+        promise: '每晚一个死者带来一条线索；铜钥匙从开不了门，到打开母亲锁着的抽屉，活人比死人更难审。',
+        comps: [{ title: '《殡葬师手记》', why: '借"职业规矩即超自然规则"的机制，不借人物' }],
+        goldenFinger: {
+          name: '守夜眼',
+          rule: '替死者守满七夜，能看见他死前最后十分钟；只看，不能改。',
+          cost: '每看一次，自己少记一段活人时的记忆。',
+          growthAxis: '从看见画面，到听见死者说话，到能问一个问题。',
+          firstShowChapter: 1,
+        },
+        opening: {
+          firstLine: '三号柜里的手机响了第七次，我才敢接。',
+          chapterOneQuestion: '母亲死的那晚，三号柜里躺的是谁？',
+        },
+        degraded: [],
+      }
+    ),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  return {
+    system: `${CRAFT}\n\n${ADDENDA.pitch}`,
+    user: hardCap(ctx, user, BUDGET.pitch.user),
+    maxTokens: 1600,
+    temperature: TEMPERATURE.pitch,
+  }
+}
+
 function premisePrompt(ctx) {
   const p = paramsOf(ctx)
   const chapters = num(p.chapters, 24)
@@ -933,6 +1137,11 @@ function premisePrompt(ctx) {
       '（用户没有给故事核：请从类型与文风反推一个能连续生产冲突的核心，但不要偏离类型承诺。）'
     ),
     seed ? section('灵感与母题', seed) : '',
+    section(
+      '商业定位（已定，不得矛盾）',
+      fit(ctx, commercialLines(ctx), 1200),
+      '（尚未定：按类型承诺给出可执行的定位，不写空泛口号。）'
+    ),
     section('类型承诺', genrePromise(p.genre)),
     section(
       '硬约束',
@@ -940,24 +1149,28 @@ function premisePrompt(ctx) {
         `- 类型：${str(p.genre) || '通用'}；目标读者：${str(p.audience) || '成年'}；叙事视角：${str(p.pov) || '第三人称限知'}。`,
         `- 规模：${chapters} 章 × ${words} 字，约 ${((chapters * words) / 10000).toFixed(1)} 万字。这个体量要求主线能撑住 ${chapters} 次推进，不能是一句话就能讲完的短篇。`,
         '- 结局方向必须回答主题，并让主角付出不可逆的代价。',
-        '- 五个书名候选只在草稿里比较，最终只输出一个；不要新增 JSON 字段。',
+        '- 五个书名候选只在草稿里比较，最终只输出一个；不要新增契约之外的 JSON 字段。',
       ].join('\n')
     ),
     section('文风与尺度', styleText(ctx, BUDGET.premise.style), '（未指定：用克制、具体、少形容词的叙述。）'),
     jsonContract(
       [
+        '- readers：string，≤120 字，谁·此刻关心什么·已知什么·想得到什么·读完做什么；默认值标（假设）',
+        '- alternates：string[]，2–3 条被划掉的读法，每条 ≤30 字，以「划掉：」开头',
         '- title：string，2–8 字，不带书名号，不剧透结局',
-        '- logline：string，≤60 字，主角＋处境＋行动＋代价',
+        '- logline：string，≤60 字，主角＋处境＋行动＋代价；写完过故事核三检（可反对／有代价／有然后）',
         '- theme：string，一句可被反驳的命题',
-        '- promise：string，≤80 字，读者会持续得到的体验',
+        '- promise：string，≤80 字，必须与 pitch.promise 同义；写明核心物件到结尾怎么变',
         '- ending：string，≤80 字，只写落点与代价，不写过程',
-        '- genreTags：string[]，3–5 个，不含"小说"二字',
+        '- genreTags：string[]，3–5 个，必须覆盖 pitch.tags 里的每一个标签，不含"小说"二字',
       ],
       {
+        readers: '（假设）二十五到三十五岁、夜里读悬疑的上班族：关心母亲死因能否查清，已知殡仪馆夜班规矩，想得到每夜一条新线索，读完想翻回前文找伏笔。',
+        alternates: ['划掉：一个殡仪馆工人的救赎故事', '划掉：母子情深的回忆录'],
         title: '长夜将明',
         logline: '殡仪馆夜班员为查母亲死因替无名尸守七夜，代价是开始看见死者。',
         theme: '人能不能靠遗忘活下去。',
-        promise: '每晚一个死者带来一条线索，活人比死人更难审。',
+        promise: '每晚一个死者带来一条线索；铜钥匙从开不了门，到打开母亲锁着的抽屉，活人比死人更难审。',
         ending: '他查清真相，却必须亲手烧掉唯一能证明母亲清白的东西。',
         genreTags: ['悬疑', '民俗', '亲情'],
       }
@@ -976,16 +1189,19 @@ function premisePrompt(ctx) {
 function biblePrompt(ctx) {
   const p = paramsOf(ctx)
   const seed = str(p.seed)
+  const golden = goldenFingerText(pitchOf(ctx).goldenFinger || p.goldenFinger)
   const user = [
     projectHeader(ctx),
     section('故事核心', prettyArtifact(ctx, 'brief', BUDGET.bible.brief), '（缺失：先按故事种子判断这本书需要哪三条硬规则。）'),
     seed ? section('灵感与母题', seed) : '',
     section('类型承诺', genrePromise(p.genre)),
+    golden ? section('金手指（必须与 pitch 一致）', golden) : '',
     section('写作边界', '只写会反复用到的设定；每条规则都要有代价和冲突出口；不写百科条目、不写年表、不解释正文能自己展示的东西。'),
     section('文风与尺度', styleText(ctx, BUDGET.bible.style), '（未指定：冷、具体、少形容词。）'),
     mdContract(`# 世界设定
 
 ## 一句话世界（≤40 字）
+## 力量与规则（第二小标题，不得后移；金手指／超自然体系：获得方式、规则边界、代价、3–5 级升级阶梯，每级写"能做什么／要付什么"）
 ## 硬规则（3 条；每条：规则／边界／代价／会逼出什么冲突）
 ## 地点（3–6 个；每个：感官锚点／谁的地盘／暗藏的危险）
 ## 时代与日常（钱、交通、通信、权力、时间怎么过）
@@ -1018,7 +1234,7 @@ function charactersPrompt(ctx) {
     section('类型承诺', genrePromise(p.genre)),
     section(
       '人物数量',
-      '主角 1、对手 1、关键配角 3–5。每个配角都要有自己想要的东西；没有欲望的人不许出场。关系写成"谁对谁"，不要写"互为好友"。输出 cast 必须 5–7 人；示例只列 1 人，是形状示范。'
+      '主角 1、对手 1、关键配角 4–6。每个配角都要有自己想要的东西；没有欲望的人不许出场。关系写成"谁对谁"，不要写"互为好友"。输出 cast 必须 6–8 人；示例只列 1 人，是形状示范。'
     ),
     section(
       '性别与代词（必须先定，后文不得再改）',
@@ -1033,9 +1249,13 @@ function charactersPrompt(ctx) {
     ),
     jsonContract(
       [
-        '- cast：array，5–7 人',
+        '- cast：array，6–8 人',
         '- cast[].name：string，2–4 字，全书唯一',
         '- cast[].role：string，如"主角""对手""关键配角"',
+        '- cast[].power：string，≤30 字，主角必填；起点能力／资源',
+        '- cast[].growth：string，≤40 字，主角必填；成长轴（从能做什么，到能做什么）',
+        '- cast[].cost：string，≤30 字，主角必填；每次用能力要付的代价',
+        '- cast[].pressure：string，≤30 字，反派必填；他靠什么施压',
         "- cast[].gender：string，'男' 或 '女'；必填，决定后文用「他」还是「她」",
         '- cast[].want：string，≤40 字，当下最想要的东西',
         '- cast[].fear：string，≤40 字，不敢面对的东西',
@@ -1055,6 +1275,9 @@ function charactersPrompt(ctx) {
             secret: '十岁那年见过一次死者回来，但一直说自己忘了',
             voice: '话少，句子短，紧张时重复对方最后一个词。她会为陌生人破例，绝不会在活人面前提母亲。',
             arc: '从靠规矩躲事，到主动破坏规矩换真相',
+            power: '熟悉殡仪馆所有规矩，能值夜班',
+            growth: '从看得见，到问得出一个问题',
+            cost: '每用一次守夜眼，少记一段活人时的记忆',
             relations: [{ to: '周迟', kind: '互相利用的师徒，沈砚欠他一条命' }],
           },
         ],
@@ -1079,7 +1302,10 @@ function spinePrompt(ctx) {
   const p = paramsOf(ctx)
   const plan = volumePlanOf(ctx)
   const total = num(p.chapters, plan.reduce((sum, v) => sum + v.targetChapters, 0))
-  const planLines = plan.map((v) => `第 ${v.index} 卷｜目标章数 ${v.targetChapters}｜工作标题：${v.title}`)
+  const planLines = plan.map((v) => {
+    const r = chapterRange(v, num(p.chaptersPerVolume, 30))
+    return `第 ${v.index} 卷｜第 ${r.start}–${r.end} 章（${v.targetChapters} 章）｜工作标题：${v.title}`
+  })
   const user = [
     projectHeader(ctx),
     section('故事核心', prettyArtifact(ctx, 'brief', BUDGET.spine.brief), '（缺失：先按故事种子确定主角、对手与结局方向。）'),
@@ -1091,6 +1317,7 @@ function spinePrompt(ctx) {
         `全书 ${total} 章，分 ${plan.length} 卷。卷数、卷序、每卷目标章数不是你的决定。`,
         ...planLines,
         '工作标题只是占位，你可以换成更好的卷名；但 volumes 的条数、顺序、每卷对应的章数一个字都不能改。',
+        '每卷的 payoffs 必须落在该卷「第 a–b 章」区间内，atChapter 用绝对章号。',
       ].join('\n'),
       ''
     ),
@@ -1103,8 +1330,11 @@ function spinePrompt(ctx) {
         '- volumes[].goal：string，≤60 字，本卷主角要拿到或守住的具体东西',
         '- volumes[].arc：string，≤60 字，本卷结束时他相信的东西怎么错、他变成什么样',
         '- volumes[].cast：string[]，1–4 个已有人物名',
-        '- volumes[].opens：string[]，1–3 条，每条 ≤16 字，本卷新开的线',
+        '- volumes[].opens：array，1–3 条；每条是 string（≤16 字）或 {text, dueIn}：dueIn 为绝对章号',
         '- volumes[].closes：string[]，0–3 条，每条 ≤16 字，本卷收掉的线',
+        '- volumes[].payoffs：array，2–3 条，每项 {atChapter, level, text}；atChapter 必须落在本卷章号区间，level 只能 medium／large，text ≤40 字；每卷至少 1 条 large',
+        '- volumes[].cliffhanger：string，≤40 字，本卷最后一章停在的具体动作／话／物件',
+        '- volumes[].unitArcs：string[]，0–3 条，每条 ≤30 字，本卷能独立成立的单元剧目标',
         '- 不要输出 index／targetChapters／chapters 字段；卷数与章数由脚本管',
       ],
       {
@@ -1119,6 +1349,12 @@ function spinePrompt(ctx) {
             cast: ['沈砚', '周迟'],
             opens: ['三号柜里的手机'],
             closes: ['母亲的死亡证明'],
+            payoffs: [
+              { atChapter: 3, level: 'medium', text: '第一次看见死者最后十分钟' },
+              { atChapter: 6, level: 'large', text: '拿到母亲死亡登记' },
+            ],
+            cliffhanger: '三号柜自己弹开一条缝',
+            unitArcs: ['替无名尸找到名字'],
           },
           {
             title: '借命',
@@ -1127,6 +1363,12 @@ function spinePrompt(ctx) {
             cast: ['沈砚', '陈婆'],
             opens: ['袖口的香灰'],
             closes: ['三号柜'],
+            payoffs: [
+              { atChapter: 9, level: 'medium', text: '确认规矩是一场交易' },
+              { atChapter: 12, level: 'large', text: '用守夜眼换来母亲最后一句话' },
+            ],
+            cliffhanger: '陈婆把香灰按进他掌心',
+            unitArcs: ['查出谁在替死者签字'],
           },
         ],
       }
@@ -1136,6 +1378,7 @@ function spinePrompt(ctx) {
       [
         `你这一稿要写 ${plan.length} 卷。40 卷量级时整份 JSON 必须一次写完：`,
         '- 每卷各字段 ≤60 字；卷数超过 20 时压到 40 字以内，宁短勿长。',
+        '- payoffs 每卷 2–3 条，atChapter 必须落在本卷区间；cliffhanger／unitArcs 宁短勿长。',
         '- cast 只写名字不写解释；opens／closes 每条 ≤16 字，不许写成句子。',
         '- 不要为了凑字数重复上一卷的说法；相邻卷的 goal 必须不同，arc 必须推进。',
       ].join('\n')
@@ -1151,6 +1394,211 @@ function spinePrompt(ctx) {
   }
 }
 
+/** 第一卷卷卡：opener 要跟脊柱对齐，但不重复整份脊柱。 */
+function spineFirstVolumeText(ctx, max) {
+  const spine = readJson(ctx, 'spine', null)
+  const volumes = spine && Array.isArray(spine.volumes) ? spine.volumes : []
+  const v = volumes[0]
+  if (!v) return ''
+  const payoffs = Array.isArray(v.payoffs)
+    ? v.payoffs.map((x) => str(x && x.text ? x.text : x)).filter(Boolean).join('／')
+    : ''
+  return fit(
+    ctx,
+    [
+      v.title ? `卷名：${str(v.title)}` : '',
+      v.goal ? `目标：${str(v.goal)}` : '',
+      v.arc ? `弧光：${str(v.arc)}` : '',
+      payoffs ? `本卷爽点：${payoffs}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    max
+  )
+}
+
+/** outline.json 已排的前三章：重跑时 opener 必须沿用，不许另起一套。 */
+function outlineHeadText(ctx, max) {
+  const outline = readJson(ctx, 'outline', null)
+  const chapters = outline && Array.isArray(outline.chapters) ? outline.chapters : []
+  const lines = chapters
+    .slice(0, 3)
+    .map((c) => {
+      const hook = c && c.hook && typeof c.hook === 'object' ? c.hook : {}
+      const title = str(c && c.title) || '（未命名）'
+      return `第 ${num(c && c.index, 0) || '?'} 章《${title}》｜${str(hook.type)}｜${str(hook.text)}`
+    })
+    .filter((x) => x.trim().length > 4)
+  return fit(ctx, lines.join('\n'), max)
+}
+
+/**
+ * opener：黄金三章＝三次"承诺—兑现—更大的问题"。
+ * 输出 opener.json；chapters 恰好 3 条，重跑必须沿用 outline 已有标题。
+ */
+function openerPrompt(ctx) {
+  const user = [
+    projectHeader(ctx),
+    section(
+      '商业定位（已定）',
+      fit(ctx, commercialLines(ctx), BUDGET.opener.pitch),
+      '（无 pitch：按类型承诺定读者与卖点。）'
+    ),
+    section('故事核心', prettyArtifact(ctx, 'brief', BUDGET.opener.brief), '（缺失：按故事种子判断第一章该抛什么。）'),
+    section('第一卷脊柱', spineFirstVolumeText(ctx, BUDGET.opener.spine), '（缺失：前三章服务第一卷目标。）'),
+    section('已排的前三章（有就沿用）', outlineHeadText(ctx, BUDGET.opener.chapters), '（还没排：你来排。）'),
+    section('文风与尺度', styleText(ctx, BUDGET.opener.style), '（未指定：克制、具体、少形容词。）'),
+    jsonContract(
+      [
+        '- version：number，固定 1',
+        '- strategy：string，≤120 字，三章各承担什么承诺，一句一章',
+        '- chapters：array，恰好 3 条，index 依次为 1／2／3',
+        '- chapters[].title：string，≤16 字，有画面，不剧透结局',
+        '- chapters[].hook：object，{type, text, strength}；type 只能是悬念／危机／反转／期待／情感／信息差，text≤40 字，strength 1–5',
+        '- chapters[].payoff：object，{level, text, chapterDue}；level 只能是 small／medium／large，text≤40 字，chapterDue 1–3',
+        '- chapters[].infoDrop：object，{readerLearns, characterLoses}；各 ≤40 字，每章只投一条必记信息',
+        '- chapters[].promiseBeat：string，≤30 字，本章兑现了哪一句承诺',
+        '- chapters[].endHook：string，六类钩子之一（写类型名，不写具体句子）',
+        '- rules：object，固定 {payoffEveryChapters:[3,5], bigPayoffPerVolume:[2,3]}',
+        '- degraded：string[]，0–3 条；没有就写 []',
+      ],
+      {
+        version: 1,
+        strategy: '第一章用母亲的电话把人拽进来；第二章让他第一次违规看见死者；第三章把"规矩是交易"摊开，留下更大的问题。',
+        chapters: [
+          {
+            index: 1,
+            title: '头七',
+            hook: { type: '悬念', text: '三号柜里的手机响了，来电显示是母亲', strength: 4 },
+            payoff: { level: 'small', text: '他确认声音来自登记簿里的手机', chapterDue: 1 },
+            infoDrop: {
+              readerLearns: '殡仪馆有"头七不接电话"的规矩',
+              characterLoses: '他错过了最后一个能挂断的机会',
+            },
+            promiseBeat: '死者会带来线索',
+            endHook: '悬念',
+          },
+          {
+            index: 2,
+            title: '第二夜',
+            hook: { type: '危机', text: '三号柜自己打开，里面躺着他母亲', strength: 4 },
+            payoff: { level: 'medium', text: '他第一次看见死者最后十分钟', chapterDue: 2 },
+            infoDrop: {
+              readerLearns: '守夜眼要拿活人的记忆换',
+              characterLoses: '他忘了母亲生前最爱做的一道菜',
+            },
+            promiseBeat: '看见的代价是失去',
+            endHook: '危机',
+          },
+          {
+            index: 3,
+            title: '交易',
+            hook: { type: '反转', text: '定规矩的人就是替他母亲签字的人', strength: 5 },
+            payoff: { level: 'medium', text: '他确认规矩是一场交易', chapterDue: 3 },
+            infoDrop: {
+              readerLearns: '守夜规矩是活人跟死人做的交易',
+              characterLoses: '他失去了对周迟的最后一点信任',
+            },
+            promiseBeat: '规矩可以被查',
+            endHook: '反转',
+          },
+        ],
+        rules: { payoffEveryChapters: [3, 5], bigPayoffPerVolume: [2, 3] },
+        degraded: [],
+      }
+    ),
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  return {
+    system: `${CRAFT}\n\n${ADDENDA.opener}`,
+    user: hardCap(ctx, user, BUDGET.opener.user),
+    maxTokens: 2000,
+    temperature: TEMPERATURE.opener,
+  }
+}
+
+/** 正典里已开、还没收的线索：volumeChapters 的 threadDue 只能引用这里的原文。 */
+function openThreadsText(ctx, max) {
+  const canon = readJson(ctx, 'canon', null)
+  const threads = canon && Array.isArray(canon.threads) ? canon.threads : []
+  const lines = threads
+    .filter((t) => {
+      const status = str(t && t.status)
+      return t && str(t.text) && (!status || status === 'open' || status === '未回收')
+    })
+    .map((t) => {
+      const due = num(t.dueIn, 0)
+      const level = str(t.payoffLevel) || str(t.level)
+      const tail = due ? `（第 ${due} 章前回收${level ? `，${level}` : ''}）` : ''
+      return `- ${str(t.text)}${tail}`
+    })
+  return fit(ctx, lines.join('\n'), max)
+}
+
+/** opener.json 已定的前三章：volumeChapters 重跑时沿用标题与钩子类型。 */
+function renderOpenerChapters(ctx, max) {
+  const opener = readJson(ctx, 'opener', null)
+  const chapters = opener && Array.isArray(opener.chapters) ? opener.chapters : []
+  const lines = chapters.slice(0, 3).map((c) => {
+    const hook = c && c.hook && typeof c.hook === 'object' ? c.hook : {}
+    const payoff = c && c.payoff && typeof c.payoff === 'object' ? c.payoff : {}
+    const info = c && c.infoDrop && typeof c.infoDrop === 'object' ? c.infoDrop : {}
+    return [
+      `第 ${num(c && c.index, 0) || '?'} 章《${str(c && c.title) || '未命名'}》`,
+      `章末钩子：${str(hook.type) || '?'}／强度 ${num(hook.strength, 0) || '?'}`,
+      `爽点：${str(payoff.level) || '?'}／第 ${num(payoff.chapterDue, 0) || '?'} 章兑现`,
+      str(info.readerLearns) ? `读者要知道：${str(info.readerLearns)}` : '',
+    ]
+      .filter(Boolean)
+      .join('｜')
+  })
+  return fit(ctx, lines.join('\n'), max)
+}
+
+/**
+ * beats 的前三章开篇约定：优先用 ctx.openerChapter（本批现成的那一章），
+ * 没有就读 opener.json 的对应章；只给 payoff 与 infoDrop，不写正文。
+ */
+function openerChapterOf(ctx, n) {
+  const direct = ctx && ctx.openerChapter
+  if (direct) {
+    if (typeof direct === 'string' && direct.trim()) return fit(ctx, direct, 600)
+    if (typeof direct === 'object') {
+      const payoff = direct.payoff && typeof direct.payoff === 'object' ? direct.payoff : {}
+      const info = direct.infoDrop && typeof direct.infoDrop === 'object' ? direct.infoDrop : {}
+      const text = [
+        str(direct.title) ? `第 ${n} 章《${str(direct.title)}》` : '',
+        str(payoff.text) ? `爽点：${str(payoff.level) || '?'}｜${str(payoff.text)}` : '',
+        str(info.readerLearns) ? `读者必须知道：${str(info.readerLearns)}` : '',
+        str(info.characterLoses) ? `角色必须失去：${str(info.characterLoses)}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+      if (text) return fit(ctx, text, 600)
+    }
+  }
+
+  const opener = readJson(ctx, 'opener', null)
+  const chapters = opener && Array.isArray(opener.chapters) ? opener.chapters : []
+  const c = chapters.find((x) => num(x && x.index, 0) === n) || chapters[n - 1]
+  if (!c) return ''
+  const payoff = c.payoff && typeof c.payoff === 'object' ? c.payoff : {}
+  const info = c.infoDrop && typeof c.infoDrop === 'object' ? c.infoDrop : {}
+  return fit(
+    ctx,
+    [
+      `第 ${n} 章《${str(c.title) || '未命名'}》`,
+      str(payoff.text) ? `爽点：${str(payoff.level) || '?'}｜${str(payoff.text)}` : '',
+      str(info.readerLearns) ? `读者必须知道：${str(info.readerLearns)}` : '',
+      str(info.characterLoses) ? `角色必须失去：${str(info.characterLoses)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    600
+  )
+}
+
 /**
  * volumeChapters：一次只展开一卷。章数、章号段由脚本给，模型只填每章内容。
  * 条数必须等于 volume.targetChapters。
@@ -1162,6 +1610,7 @@ function volumeChaptersPrompt(ctx) {
   const { prev, next } = neighbourVolumes(ctx, range.index)
   const digest = str(ctx && ctx.previousDigest)
   const titles = existingTitles(ctx, BUDGET.volumeChapters.titles)
+  const openerRank = range.start <= 3 ? renderOpenerChapters(ctx, 600) : ''
   const fixed = [
     '【写作纪律】',
     `1. 本卷共 ${range.target} 章，请一次给全 ${range.target} 章：chapters 必须恰好 ${range.target} 条，第 1 条是第 ${range.start} 章，最后一条是第 ${range.end} 章。`,
@@ -1171,7 +1620,13 @@ function volumeChaptersPrompt(ctx) {
     range.target >= 40
       ? `5. 本卷章数多（${range.target} 章），字段再压短：goal／conflict ≤24 字、turn ≤30 字、hook ≤24 字，保证整份 JSON 一次写完不被截断。`
       : '5. 每章都必须是可写的戏，不要出现"过渡章""铺垫章"。',
-  ].join('\n')
+    '6. 节奏：每 3–5 章至少一次 small｜medium 爽点；hookStrength 不得连续 3 章 ≤2；本卷最后一章 hookStrength 必须是 5。',
+    '7. threadDue 只能原样引用【待回收线索】清单里的文本，每条 ≤16 字；清单为空就写 []，不要自己造线索。',
+    '8. track 是 unit／main／both；unitArc 是单元剧目标（≤30 字），纯主线章可以不填。',
+    openerRank ? '9. 有【开篇前三章（已定）】时，前三条 chapters 的 title 与 hookType 必须沿用，不许换。' : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
   const materials = fitSections(
     ctx,
     [
@@ -1189,8 +1644,9 @@ function volumeChaptersPrompt(ctx) {
       { text: castDump(ctx, BUDGET.volumeChapters.characters), cap: BUDGET.volumeChapters.characters },
       { text: digest, cap: BUDGET.volumeChapters.digest },
       { text: titles ? `已用过的章名（不要重名，也不要只换一个字）：\n${titles}` : '', cap: BUDGET.volumeChapters.titles },
+      { text: openThreadsText(ctx, BUDGET.volumeChapters.threads), cap: BUDGET.volumeChapters.threads },
     ],
-    BUDGET.volumeChapters.user - 2600
+    BUDGET.volumeChapters.user - 3300
   )
   const user = [
     projectHeader(ctx),
@@ -1199,6 +1655,12 @@ function volumeChaptersPrompt(ctx) {
     section('人物档案', materials[2] || '', '（缺失：cast 只用本章卷目标里提到的人。）'),
     section('本卷前情', materials[3] || '', '（本卷还没写：按卷目标开场。）'),
     materials[4] ? section('已有章名', materials[4]) : '',
+    section(
+      '待回收线索（canon 已开）',
+      materials[5] || '',
+      '（正典里还没有 open 的线索：threadDue 一律写 []，不要编造线索。）'
+    ),
+    openerRank ? section('开篇前三章（已定，必须沿用）', openerRank, '') : '',
     section('卷卡与前后卷', materials[0] || '', ''),
     fixed,
     jsonContract(
@@ -1213,6 +1675,13 @@ function volumeChaptersPrompt(ctx) {
         '- chapters[].when：string，≤20 字',
         '- chapters[].where：string，≤20 字',
         '- chapters[].cast：string[]，1–4 个已有人物名',
+        '- chapters[].hookType：string，六类之一：悬念／危机／反转／期待／情感／信息差',
+        '- chapters[].hookStrength：number，1–5',
+        '- chapters[].payoff：object，{level: small|medium|large, text≤40}；没有就 level 写 none、text 写空串',
+        '- chapters[].infoDrop：string，≤40 字，本章读者新知道的那一条信息',
+        '- chapters[].track：string，unit／main／both',
+        '- chapters[].unitArc：string，≤30 字，本卷单元剧目标；纯主线章可写空串',
+        '- chapters[].threadDue：string[]，0–3 条，只引用【待回收线索】原文（每条 ≤16 字）',
         '- 不要输出 id／index／volume：章号由脚本发',
       ],
       {
@@ -1227,6 +1696,13 @@ function volumeChaptersPrompt(ctx) {
             when: '头七夜十一点',
             where: '殡仪馆值班室',
             cast: ['沈砚'],
+            hookType: '悬念',
+            hookStrength: 4,
+            payoff: { level: 'small', text: '确认声音来自登记簿里的手机' },
+            infoDrop: '殡仪馆有"头七不接电话"的规矩',
+            track: 'both',
+            unitArc: '替无名尸找到名字',
+            threadDue: ['三号柜里的手机'],
           },
         ],
       }
@@ -1300,9 +1776,11 @@ function beatsPrompt(ctx) {
   const p = paramsOf(ctx)
   const prevId = itemIdAt(ctx, -1)
   const prevSummary = str(ctx && ctx.previousSummary) || readText(ctx, `summary/${prevId}`, BUDGET.beats.prev)
+  const openerChapter = n <= 3 ? openerChapterOf(ctx, n) : ''
   const user = [
     projectHeader(ctx),
     section('本章任务', chapterCard(ch, n), '（缺失：按项目规模与上一章钩子自行确定本章目标与转折。）'),
+    openerChapter ? section('开篇约定（本批前三章，必须兑现）', openerChapter, '') : '',
     section(
       '所属卷',
       volumeLines(volume) || '（无卷信息：按本章任务推进，不要提前收束主线。）',
@@ -1317,7 +1795,7 @@ function beatsPrompt(ctx) {
     section('人物速查', castBriefOf(ctx, chapterCastNames(ctx, ch), BUDGET.beats.cast), '（档案缺失：只用本章任务里出现的名字。）'),
     section(
       '数量硬约束',
-      'scenes 必须 5–9 场；beats 必须 5–8 条；示例只列 1 场，是形状示范，不要照着只写 1 场。'
+      `scenes 必须 5–9 场；beats 必须 5–8 条；示例只列 1 场，是形状示范，不要照着只写 1 场。${openerChapter ? ' 本章必须至少一场兑现 opener 的 payoff，且 info 与 opener 的 infoDrop.readerLearns 是同一条。' : ''}`
     ),
     jsonContract(
       [
@@ -1325,9 +1803,13 @@ function beatsPrompt(ctx) {
         '- scenes[].goal：string，≤28 字，这场戏谁想要什么',
         '- scenes[].obstacle：string，≤28 字，什么挡着',
         '- scenes[].turn：string，≤36 字，局面怎么变',
-        '- scenes[].detail：string，≤40 字，写正文时必须落地的一个具体动作／道具／感官锚点',
+        '- scenes[].detail：string，≤40 字，能拍出来的具体物／动作，本场只新增一个信息或人物',
         '- scenes[].cast：string[]，1–4 个已有人物名',
+        '- scenes[].payoff：string，small／medium／none，本场给出的爽点等级',
+        '- scenes[].info：string，≤30 字，本场读者新知道的一条信息',
         '- hook：string，≤40 字，本章最后落在的具体悬念',
+        '- hookType：string，六类之一：悬念／危机／反转／期待／情感／信息差',
+        '- hookStrength：number，1–5',
         '- beats：string[]，5–8 条，每条 ≤30 字，一句话节拍，按发生顺序，以动词开头',
       ],
       {
@@ -1338,9 +1820,13 @@ function beatsPrompt(ctx) {
             turn: '他发现响的不是柜子，是登记簿里的手机',
             detail: '冰柜低鸣；他数到第三声时，手指停在登记簿边缘',
             cast: ['沈砚'],
+            payoff: 'small',
+            info: '殡仪馆有"头七不接电话"的规矩',
           },
         ],
         hook: '电话那头叫出他母亲的名字',
+        hookType: '悬念',
+        hookStrength: 4,
         beats: ['沈砚接班', '三号柜开始响', '她查监控', '发现声音来自登记簿', '接起电话'],
       }
     ),
@@ -1480,6 +1966,35 @@ function canonPatchPrompt(ctx) {
   }
 }
 
+/**
+ * 机器读数：字段名以 craft.js 的 checkDraft().stats 为准（v0.3）。
+ * 缺失字段跳过，0 是有效读数（AI 标记 0 处也要让审校看见）。全空返回 ''，
+ * 由调用处渲染「无机器读数」兜底。
+ */
+function craftStatsText(ctx) {
+  const s = ctx && ctx.craftStats && typeof ctx.craftStats === 'object' ? ctx.craftStats : {}
+  const num = (key) => {
+    const value = Number(s[key])
+    return Number.isFinite(value) ? value : null
+  }
+  const ratio = num('dialogueRatio')
+  const bits = [
+    num('cjk') == null ? '' : `全章 ${num('cjk')} 字`,
+    num('paragraphs') == null ? '' : `${num('paragraphs')} 段`,
+    num('sceneCount') == null ? '' : `${num('sceneCount')} 场`,
+    num('avgSentenceLen') == null ? '' : `平均句长 ${num('avgSentenceLen')} 字`,
+    num('maxSentenceLen') == null ? '' : `最长句 ${num('maxSentenceLen')} 字`,
+    num('shortSentenceRatio') == null ? '' : `短句（≤12 字）占比 ${num('shortSentenceRatio')}%`,
+    ratio == null ? '' : `对话比 ${Math.round((ratio <= 1 ? ratio * 100 : ratio) * 10) / 10}%`,
+    num('sensoryPer1k') == null ? '' : `感官密度 ${num('sensoryPer1k')}/千字`,
+    num('abstractEmotionPer1k') == null ? '' : `抽象情绪密度 ${num('abstractEmotionPer1k')}/千字`,
+    num('adverbPer1k') == null ? '' : `副词密度 ${num('adverbPer1k')}/千字`,
+    num('aiMarkerCount') == null ? '' : `AI 标记 ${num('aiMarkerCount')} 处`,
+    num('nameDensity') == null ? '' : `活跃人名 ${num('nameDensity')} 个/1500 字`,
+  ].filter(Boolean)
+  return bits.length ? bits.join('｜') : ''
+}
+
 function reviewPrompt(ctx) {
   const ch = chapterOf(ctx)
   const n = chapterNo(ctx)
@@ -1491,6 +2006,7 @@ function reviewPrompt(ctx) {
   const user = [
     projectHeader(ctx),
     section('审校对象', `第 ${n} 章${ch.title ? `《${ch.title}》` : ''}（${chId}）`, ''),
+    section('机器读数', craftStatsText(ctx), '（无机器读数：按正文自行判断，不要编造读数。）'),
     section(
       '本章正文',
       fitEnds(ctx, draft, BUDGET.review.draft),
@@ -1635,10 +2151,12 @@ function blurbPrompt(ctx) {
 
 export function createPrompts() {
   return {
+    pitch: pitchPrompt,
     premise: premisePrompt,
     bible: biblePrompt,
     characters: charactersPrompt,
     spine: spinePrompt,
+    opener: openerPrompt,
     volumeChapters: volumeChaptersPrompt,
     beats: beatsPrompt,
     draft: draftPrompt,

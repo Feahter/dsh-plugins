@@ -217,6 +217,10 @@ test('SLICE_SPEC：严格匹配 §5.2 的 cap/priority/required', () => {
       ['cast', 1500, 4, false],
       ['next', 300, 5, false],
       ['style', 1200, 6, false],
+      // v0.3：世界设定摘要（bible 前 600 字，含力量与规则）与商业定位。
+      // 只在数组尾部追加：装配按 priority 排序，插中间会改变同优先级分片的先后。
+      ['world', 600, 2, false],
+      ['pitch', 300, 5, false],
     ],
   )
 })

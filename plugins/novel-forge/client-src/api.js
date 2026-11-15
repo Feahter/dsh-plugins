@@ -90,7 +90,22 @@ export const exportProject = (projectId, format) =>
   // 直接返回 { filename, path, mime, bytes }：再包一层 export 会让调用方二次解包成 undefined。
   request(`/projects/${id(projectId)}/export`, { method: 'POST', body: { format } }).then(data => data?.export ?? data)
 
+// ------------------------------------------------------------------ 对话工具
+// 不传 conversationId：作用于宿主当前最近活跃的对话；没有活跃对话会抛 409 NO_SESSION。
+export const getToolState = () => request('/tools').then(data => data?.tools ?? { active: [], latest: null })
+
+// 传布尔值等价于 { enabled }（关 = 清空全部）；传对象可只关某一个 conversationId。
+export const setToolState = input => {
+  const body = typeof input === 'boolean' ? { enabled: input } : input
+  return request('/tools', { method: 'POST', body }).then(data => data?.tools ?? { active: [], latest: null })
+}
+
 // ------------------------------------------------------------------ 其他
 export const getRecipes = () => request('/recipes').then(data => data.recipes ?? [])
+
+// 写作助手：一次性调用宿主当前模型，返回值直接放进输入框。
+// task：polish-premise / polish-tone / title。
+export const assist = ({ task, text, genre, tone }) =>
+  request('/assist', { method: 'POST', body: { task, text, genre, tone } }).then(data => data?.text ?? '')
 
 export const getModel = () => request('/model')
