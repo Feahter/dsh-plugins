@@ -17,6 +17,7 @@ import { join } from 'node:path'
 
 import { getRoute, httpError, jsonRoute } from './host/http.js'
 import { createBrain, splitSentences } from './host/persona.js'
+import { createRateLimiter, designTheme } from './host/theme.js'
 import { createSentenceSpeaker, VOICES } from './host/tts.js'
 import { TASK_PERMISSION_PRESET, TASK_REASONING_EFFORT, createTaskBoard } from './host/tasks.js'
 import { createCommandService } from './host/command.js'
@@ -31,7 +32,7 @@ import { DEFAULT_CHARACTER, listCharacters, resolveCharacter } from './src/clien
 
 export const name = 'voice-companion'
 export const ROUTE_PREFIX = '/api/voice-companion'
-export const VERSION = '0.3.0'
+export const VERSION = '0.4.0'
 
 const CONFIG_PATH = join(homedir(), '.deepseek', 'config.toml')
 const CONFIG_TTL_MS = 60_000
@@ -175,6 +176,8 @@ export function apply(ctx, options = {}) {
   const board = createTaskBoard({ ctx, now })
   const commands = createCommandService({ ctx, now })
   const listTitles = createTitleLister(ctx)
+  // One bucket per Host instance: 8/min + 60/h, at most 2 model calls at once.
+  const themeLimiter = createRateLimiter({ now })
 
   /**
    * Which voice speaks which sentence. The Host decides so every client (panel,
@@ -296,6 +299,22 @@ export function apply(ctx, options = {}) {
         speed: { min: 0.75, max: 1.35 },
       },
     }
+  }
+
+  /**
+   * "Say one sentence, get a theme." Validates the utterance, spends exactly one
+   * model call, and returns a sanitized patch the client merges and re-validates.
+   * @param {any} payload
+   */
+  async function handleThemeDesign(payload) {
+    const result = await designTheme({
+      brain,
+      utterance: payload?.utterance,
+      base: payload?.base,
+      keep: payload?.keep,
+      limiter: themeLimiter,
+    })
+    return { body: { ok: true, ...result } }
   }
 
   /** @param {any} payload */
@@ -432,6 +451,7 @@ export function apply(ctx, options = {}) {
       register('/plan', jsonRoute({ handle: handlePlan, getOrigin: origin }))
       register('/send', jsonRoute({ handle: handleSend, getOrigin: origin }))
       register('/characters', getRoute(handleCharacters))
+      register('/theme/design', jsonRoute({ handle: handleThemeDesign, getOrigin: origin }))
 
       logger.info?.('[voice-companion] routes registered')
       return () => {

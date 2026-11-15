@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PARTS = [
   'characters.js',
+  'core3d.js',
+  'theme.js',
+  'theme-store.js',
   'voice-profile.js',
   'avatar.js',
   'audio.js',
@@ -29,6 +32,24 @@ function flatten(source) {
     .replace(/^export\s+default\s+/gm, '');
 }
 
+/**
+ * The shipped bundle does not need the authoring comments, so whole-line `//`
+ * comments and trailing spaces are dropped here instead of in the sources.
+ * Lines inside template literals are left untouched: CSS/GLSL bodies there use
+ * `//` as data, not as a comment.
+ */
+function stripComments(source) {
+  const out = [];
+  let inTemplate = false;
+  for (const line of source.split('\n')) {
+    const bare = line.replace(/\\`/g, '').replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+    const isComment = !inTemplate && /^\s*\/\//.test(line);
+    if (!isComment) out.push(line.replace(/\s+$/, ''));
+    if (!isComment && (bare.match(/`/g) || []).length % 2 === 1) inTemplate = !inTemplate;
+  }
+  return out.join('\n');
+}
+
 const override = process.env.AVATAR_OVERRIDE;
 const parts = [];
 for (const name of PARTS) {
@@ -36,7 +57,7 @@ for (const name of PARTS) {
     ? override
     : join(root, 'src', 'client', name);
   const source = await readFile(path, 'utf8');
-  const body = flatten(source);
+  const body = stripComments(flatten(source));
   parts.push(`// ---- src/client/${name} ----\n${body.trim()}\n`);
 }
 

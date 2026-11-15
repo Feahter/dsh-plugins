@@ -28,6 +28,25 @@ import {
   writeVoiceProfile,
 } from './voice-profile.js';
 
+import { applyTheme, ensureThemeStyle } from './theme.js';
+import {
+  deleteTheme,
+  exportTheme,
+  getActiveId,
+  importTheme,
+  listThemes,
+  resolveTheme,
+  saveTheme,
+  setActiveId,
+} from './theme-store.js';
+import { createCore3D } from './core3d.js';
+
+// 外观分区的文案。占位符是用户看到的唯一提示，所以写清「一句话」和例子。
+// 名字长度这里单独定一份：theme-store.js 的内部常量在打包后同名（单一作用域）。
+const THEME_PROMPT_PLACEHOLDER = '一句话改样式，例如：赛博朋克红黑';
+const THEME_NAME_LIMIT = 16;
+const THEME_FALLBACK_NAME = '自定义主题';
+
 const SUBTITLE_MAX = 60;
 const BLINK_MIN_MS = 3000;
 const BLINK_MAX_MS = 6000;
@@ -50,23 +69,30 @@ const VOICE_FALLBACK = 'tide';
 // ------------------------------------------------------------------- styling
 
 const STYLE_TEXT = `
-[data-vc-avatar]{--vc-accent:#6b85ff;position:fixed;right:18px;bottom:18px;z-index:2147483000;width:320px;box-sizing:border-box;color:#edf2ff;font:13px/1.45 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-user-select:none;user-select:none;text-align:left}
+[data-vc-avatar]{--vc-accent:var(--vc-accent-base, #6b85ff);position:fixed;right:18px;bottom:18px;z-index:var(--vc-board-z, 2147483000);width:var(--vc-board-width, 340px);
+box-sizing:border-box;color:var(--vc-text-primary, #edf2ff);font:var(--vc-type-size, 13px)/var(--vc-type-line-height, 1.45) var(--vc-type-font, system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif);-webkit-user-select:none;user-select:none;text-align:left}
 [data-vc-avatar] *{box-sizing:border-box}
-[data-vc-avatar] .vc-panel{position:relative;height:260px;padding:9px 12px 8px;display:flex;flex-direction:column;gap:6px;border-radius:20px;border:1px solid rgba(120,150,255,.18);background:linear-gradient(160deg,rgba(20,32,66,.88),rgba(8,14,30,.94));box-shadow:0 18px 44px rgba(2,7,16,.5),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);overflow:hidden;transition:transform .18s ease,box-shadow .3s ease}
-[data-vc-avatar] .vc-head{display:flex;align-items:center;gap:6px;min-height:22px;flex:none;font-size:11px;letter-spacing:.02em;color:#cfd9f5}
-[data-vc-avatar] .vc-dot{width:6px;height:6px;border-radius:50%;background:#8b93a7;flex:none;transition:background .2s ease,box-shadow .2s ease}
+[data-vc-avatar] .vc-panel{position:relative;height:var(--vc-board-height, 316px);padding:var(--vc-board-padding, 9px 12px 8px);display:flex;flex-direction:column;gap:var(--vc-board-gap, 6px);border-radius:var(--vc-board-radius, 20px);
+border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba(120,150,255,.18));background:linear-gradient(var(--vc-board-bg-angle, 160deg),var(--vc-board-bg-from, rgba(20,32,66,.88)),var(--vc-board-bg-to, rgba(8,14,30,.94)));box-shadow:var(--vc-board-shadow, 0 18px 44px rgba(2,7,16,.5)),inset 0 1px 0 var(--vc-board-inner-light, rgba(255,255,255,.08));backdrop-filter:blur(var(--vc-board-blur, 14px)) saturate(var(--vc-board-saturate, 140%));-webkit-backdrop-filter:blur(var(--vc-board-blur, 14px)) saturate(var(--vc-board-saturate, 140%));overflow:hidden;transition:transform .18s ease,box-shadow .3s ease}
+[data-vc-avatar] .vc-head{display:flex;align-items:center;gap:var(--vc-board-gap, 6px);min-height:22px;flex:none;font-size:11px;letter-spacing:.02em;color:var(--vc-text-secondary, #cfd9f5)}
+[data-vc-avatar] .vc-dot{width:var(--vc-dot-size, 6px);height:var(--vc-dot-size, 6px);border-radius:50%;background:var(--vc-dot-idle, #8b93a7);flex:none;transition:background .2s ease,box-shadow .2s ease}
 [data-vc-avatar] .vc-label{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-[data-vc-avatar] .vc-picker{display:flex;gap:4px;flex:none}
-[data-vc-avatar] .vc-chip{appearance:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;display:grid;place-items:center;transition:transform .12s ease,background .15s ease,border-color .15s ease}
+[data-vc-avatar] .vc-picker{display:none;gap:4px;flex:none}
+[data-vc-avatar] .vc-chip{appearance:none;width:var(--vc-chip-size, 21px);height:var(--vc-chip-size, 21px);padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:var(--vc-chip-bg, rgba(255,255,255,.06));color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;display:grid;place-items:center;transition:transform .12s ease,background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-chip:hover{background:rgba(255,255,255,.12)}
 [data-vc-avatar] .vc-chip:active{transform:translateY(1px)}
-[data-vc-avatar] .vc-chip:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar] .vc-chip[aria-pressed="true"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(200,216,255,.55);color:#fff;box-shadow:0 0 0 1px rgba(120,150,255,.35)}
+[data-vc-avatar] .vc-chip:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-chip[aria-pressed="true"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(200,216,255,.55);color:#fff;box-shadow:0 0 0 1px rgba(120,150,255,.35)}
 [data-vc-avatar] .vc-mode{appearance:none;flex:none;height:21px;padding:0 8px;border-radius:11px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;letter-spacing:.02em;transition:background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-mode:hover{background:rgba(255,255,255,.12)}
-[data-vc-avatar] .vc-mode[data-mode="dictation"]{background:linear-gradient(180deg,#5fd0a8,#22a37a);border-color:rgba(180,255,224,.5);color:#04241b}
-[data-vc-avatar] .vc-mode:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
+[data-vc-avatar] .vc-mode[data-mode="dictation"]{background:linear-gradient(180deg,var(--vc-mode-dictation-from, #5fd0a8),var(--vc-mode-dictation-to, #22a37a));border-color:rgba(180,255,224,.5);color:var(--vc-text-on-accent, #04241b)}
+[data-vc-avatar] .vc-mode:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
 [data-vc-avatar] .vc-actions{margin-left:auto;display:flex;gap:6px;flex:none}
+[data-vc-avatar] .vc-receipt{display:none;align-items:center;max-width:132px;height:20px;padding:0 8px;border-radius:999px;border:1px solid rgba(103,226,166,.24);background:var(--vc-receipt-bg, rgba(103,226,166,.12));color:var(--vc-receipt-color, #8ff0c4);font:600 10px/1 "PingFang SC","Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+[data-vc-avatar] .vc-receipt[data-state="pending"]{display:inline-flex}
+[data-vc-avatar] .vc-receipt[data-state="done"]{display:inline-flex;border-color:rgba(103,226,166,.34);background:var(--vc-receipt-bg, rgba(103,226,166,.12));color:var(--vc-receipt-color, #8ff0c4)}
+[data-vc-avatar] .vc-receipt[data-state="failed"]{display:inline-flex;border-color:rgba(255,118,118,.34);background:rgba(255,118,118,.10);color:var(--vc-dot-error, #ff7676)}
+[data-vc-avatar] .vc-receipt[data-state="idle"]{display:none}
 
 /* The panel floats above the app, so it must never become a roadblock: the head
    is a drag handle, the top-right button folds the whole thing into a pill. */
@@ -75,41 +101,47 @@ const STYLE_TEXT = `
 [data-vc-avatar][data-dragging] .vc-panel{transition:none}
 [data-vc-avatar] .vc-min{appearance:none;flex:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 13px/1 system-ui,sans-serif;cursor:pointer;display:grid;place-items:center;transition:background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-min:hover{background:rgba(255,255,255,.14)}
-[data-vc-avatar] .vc-min:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar][data-collapsed]{width:max-content;max-width:min(320px,calc(100vw - 36px))}
-[data-vc-avatar][data-collapsed] .vc-panel{height:auto;width:auto;padding:6px 10px;border-radius:999px}
-[data-vc-avatar][data-collapsed] .vc-head{width:auto}
+[data-vc-avatar] .vc-min:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar][data-collapsed]{width:44px;height:44px;max-width:44px}
+[data-vc-avatar][data-collapsed] .vc-panel{height:44px;width:44px;padding:0;border-radius:50%;display:grid;place-items:center}
+[data-vc-avatar][data-collapsed] .vc-panel::before{content:'';width:28px;height:28px;border-radius:50%;background:conic-gradient(from 210deg,var(--vc-core-rim, #8fb4ff),rgba(143,180,255,.08) 38%,var(--vc-core-rim, #8fb4ff) 62%,rgba(143,180,255,.28) 82%,var(--vc-core-rim, #8fb4ff));box-shadow:0 0 14px rgba(143,180,255,.35);pointer-events:none}
+[data-vc-avatar][data-collapsed] .vc-head{position:absolute;inset:0;width:44px;height:44px;min-height:0;gap:0;justify-content:flex-start}
+[data-vc-avatar][data-collapsed] .vc-dot{position:absolute;top:6px;right:6px;z-index:2;width:7px;height:7px}
 [data-vc-avatar][data-collapsed] .vc-stage,
 [data-vc-avatar][data-collapsed] .vc-bubble,
 [data-vc-avatar][data-collapsed] .vc-partial,
 [data-vc-avatar][data-collapsed] .vc-picker,
 [data-vc-avatar][data-collapsed] .vc-mode,
-[data-vc-avatar][data-collapsed] .vc-actions{display:none}
-[data-vc-avatar][data-collapsed] .vc-head{min-height:20px;gap:7px}
-[data-vc-avatar][data-collapsed] .vc-label{white-space:nowrap}
-[data-vc-avatar] .vc-btn{appearance:none;border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:5px 11px;font:600 11px/1.2 inherit;color:#eef3ff;background:rgba(255,255,255,.08);cursor:pointer;transition:transform .12s ease,filter .15s ease,background .15s ease}
+[data-vc-avatar][data-collapsed] .vc-actions,
+[data-vc-avatar][data-collapsed] .vc-label,
+[data-vc-avatar][data-collapsed] .vc-min{display:none}
+[data-vc-avatar] .vc-btn{appearance:none;border:1px solid var(--vc-btn-border, rgba(255,255,255,.16));border-radius:var(--vc-btn-radius, 999px);padding:var(--vc-btn-padding, 5px 11px);font:600 var(--vc-btn-font-size, 11px)/1.2 inherit;
+color:var(--vc-btn-color, #eef3ff);background:var(--vc-btn-bg, rgba(255,255,255,.08));cursor:pointer;transition:transform .12s ease,filter .15s ease,background .15s ease}
 [data-vc-avatar] .vc-btn:hover{filter:brightness(1.08)}
 [data-vc-avatar] .vc-btn:active{transform:translateY(1px)}
-[data-vc-avatar] .vc-btn:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar] .vc-start{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(190,210,255,.4);color:#ffffff}
-[data-vc-avatar] .vc-end{background:rgba(255,104,104,.16);border-color:rgba(255,128,128,.38);color:#ffc4c4}
+[data-vc-avatar] .vc-btn:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-start{background:linear-gradient(180deg,var(--vc-start-from, #7d95ff),var(--vc-start-to, #4d6bfe));border-color:rgba(190,210,255,.4);color:#ffffff}
+[data-vc-avatar] .vc-end{background:var(--vc-end-bg, rgba(255,104,104,.16));border-color:var(--vc-end-border, rgba(255,128,128,.38));color:var(--vc-end-color, #ffc4c4)}
 [data-vc-avatar] .vc-start,[data-vc-avatar] .vc-end{display:none}
 [data-vc-avatar][data-state="idle"] .vc-start,[data-vc-avatar][data-state="error"] .vc-start{display:inline-flex}
 [data-vc-avatar][data-state="listening"] .vc-end,[data-vc-avatar][data-state="thinking"] .vc-end,[data-vc-avatar][data-state="speaking"] .vc-end{display:inline-flex}
-[data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:118px;display:grid;place-items:center;overflow:hidden;border-radius:14px}
+[data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:var(--vc-stage-height, 152px);display:grid;place-items:center;overflow:hidden;background:var(--vc-stage-bg, transparent);border-radius:var(--vc-stage-radius, 14px)}
 [data-vc-avatar] .vc-fish{position:relative;display:grid;place-items:center;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35));transition:filter .3s ease,transform .3s ease}
 [data-vc-avatar] .vc-fish-svg{display:block;width:186px;height:155px;overflow:visible}
 [data-vc-avatar] .vc-fish-img{display:block;width:186px;height:155px;object-fit:contain;border-radius:18px;transition:transform .3s ease,filter .3s ease}
+[data-vc-avatar] .vc-core-layer{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+[data-vc-avatar] .vc-core-layer[data-hidden="1"]{display:none}
+[data-vc-avatar] .vc-core-slot{display:block}
 [data-vc-avatar] .vc-file{display:none}
 /* Settings drawer: an overlay inside the panel, closed by backdrop or Escape.
    Built from plain elements on purpose so the offline DOM stub can drive it. */
 [data-vc-avatar] .vc-gear{appearance:none;flex:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 12px/1 system-ui,sans-serif;cursor:pointer;display:grid;place-items:center;transition:background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-gear:hover{background:rgba(255,255,255,.14)}
-[data-vc-avatar] .vc-gear:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar] .vc-gear[aria-expanded="true"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(200,216,255,.55);color:#fff}
-[data-vc-avatar] .vc-sheet{position:absolute;inset:0;z-index:6;display:none;padding:10px;border-radius:18px;background:linear-gradient(165deg,rgba(15,24,50,.97),rgba(6,11,24,.98));overflow:auto}
+[data-vc-avatar] .vc-gear:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-gear[aria-expanded="true"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(200,216,255,.55);color:#fff}
+[data-vc-avatar] .vc-sheet{position:absolute;inset:0;z-index:6;display:none;padding:10px;border-radius:var(--vc-sheet-radius, 18px);background:linear-gradient(165deg,var(--vc-sheet-bg-from, rgba(15,24,50,.97)),var(--vc-sheet-bg-to, rgba(6,11,24,.98)));overflow:auto}
 [data-vc-avatar] .vc-sheet[data-open="1"]{display:block}
-[data-vc-avatar] .vc-sheet-backdrop{position:absolute;inset:0;border-radius:18px;cursor:pointer}
+[data-vc-avatar] .vc-sheet-backdrop{position:absolute;inset:0;border-radius:var(--vc-sheet-radius, 18px);cursor:pointer}
 [data-vc-avatar] .vc-sheet-card{position:relative;display:flex;flex-direction:column;gap:6px}
 [data-vc-avatar] .vc-sheet-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#dbe4ff;letter-spacing:.02em;margin-bottom:1px}
 [data-vc-avatar] .vc-sheet-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -117,31 +149,35 @@ const STYLE_TEXT = `
 [data-vc-avatar] .vc-sheet-close:hover{background:rgba(255,255,255,.14)}
 [data-vc-avatar] .vc-field{display:flex;align-items:center;gap:7px;font-size:11px;color:#a9b8dd;min-height:22px}
 [data-vc-avatar] .vc-field-label{flex:none;width:52px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-[data-vc-avatar] .vc-slot{appearance:none;flex:1 1 auto;min-width:0;height:22px;padding:0 6px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#e8eeff;font:600 11px/1 system-ui,sans-serif;cursor:pointer}
-[data-vc-avatar] .vc-slot:focus-visible{outline:2px solid #9db4ff;outline-offset:1px}
-[data-vc-avatar] .vc-speed{flex:1 1 auto;min-width:0;height:22px;margin:0;accent-color:#7d95ff;cursor:pointer}
+[data-vc-avatar] .vc-slot{appearance:none;flex:1 1 auto;min-width:0;height:22px;padding:0 6px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:600 11px/1 system-ui,sans-serif;cursor:pointer}
+[data-vc-avatar] .vc-slot:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:1px}
+[data-vc-avatar] .vc-speed{flex:1 1 auto;min-width:0;height:22px;margin:0;accent-color:var(--vc-accent-soft, #7d95ff);cursor:pointer}
 [data-vc-avatar] .vc-speed-value{flex:none;width:38px;text-align:right;font-variant-numeric:tabular-nums;color:#dbe4ff}
-[data-vc-avatar] .vc-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
 [data-vc-avatar] .vc-name[readonly]{opacity:.65;cursor:default}
 [data-vc-avatar] .vc-name:focus{outline:none;border-color:rgba(157,180,255,.7)}
 [data-vc-avatar] .vc-sheet-actions{display:flex;gap:6px;margin-top:2px}
 [data-vc-avatar] .vc-sheet-actions .vc-btn{flex:1 1 0;padding:5px 0;text-align:center}
-[data-vc-avatar] .vc-sheet-btn[data-kind="major"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(190,210,255,.4);color:#fff}
-[data-vc-avatar] .vc-sheet-btn[data-kind="quiet"]{background:rgba(255,255,255,.04);color:#9fb0d6}
+[data-vc-avatar] .vc-sheet-btn[data-kind="major"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(190,210,255,.4);color:#fff}
+[data-vc-avatar] .vc-sheet-btn[data-kind="quiet"]{background:rgba(255,255,255,.04);color:var(--vc-text-muted, #9fb0d6)}
 [data-vc-avatar][data-collapsed] .vc-gear{display:none}
 [data-vc-avatar] .vc-chip.vc-add{font-size:15px;line-height:1}
 [data-vc-avatar] .vc-swap{animation:vc-swap .32s ease-out}
-[data-vc-avatar] .vc-ripple{position:absolute;left:50%;top:50%;width:196px;height:196px;margin:-98px 0 0 -98px;border-radius:50%;border:2px solid rgba(107,133,255,.55);opacity:0;display:none;pointer-events:none}
-[data-vc-avatar][data-state="listening"] .vc-ripple{display:block;animation:vc-ripple 2.6s ease-out infinite}
+[data-vc-avatar] .vc-ripple{position:absolute;left:50%;top:50%;width:var(--vc-ripple-size, 196px);height:var(--vc-ripple-size, 196px);margin:-98px 0 0 -98px;border-radius:50%;border:2px solid var(--vc-ripple-color, rgba(107,133,255,.55));opacity:0;display:none;pointer-events:none}
+[data-vc-avatar][data-state="listening"] .vc-ripple{display:block;animation:vc-ripple var(--vc-ripple-duration, 2.6s) ease-out infinite}
 [data-vc-avatar][data-state="listening"] .vc-ripple-2{animation-delay:1.3s}
 [data-vc-avatar] .vc-dots{position:absolute;top:0;left:56%;transform:translateX(-50%);display:none;gap:5px}
 [data-vc-avatar][data-state="thinking"] .vc-dots{display:flex}
-[data-vc-avatar] .vc-dots i{display:block;width:6px;height:6px;border-radius:50%;background:#93a9ff;animation:vc-think 1s ease-in-out infinite}
+[data-vc-avatar] .vc-dots i{display:block;width:var(--vc-dot-size, 6px);height:var(--vc-dot-size, 6px);border-radius:50%;background:var(--vc-think-color, #93a9ff);animation:vc-think var(--vc-think-duration, 1s) ease-in-out infinite}
 [data-vc-avatar] .vc-dots i:nth-child(2){animation-delay:.15s}
 [data-vc-avatar] .vc-dots i:nth-child(3){animation-delay:.3s}
-[data-vc-avatar] .vc-bubble{flex:none;min-height:30px;max-height:34px;padding:6px 9px;border-radius:12px;border:1px solid rgba(140,170,255,.14);background:rgba(120,150,255,.10);font-size:12px;line-height:1.4;color:#e8eeff;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;transition:background .2s ease}
-[data-vc-avatar] .vc-bubble[data-role="user"]{background:rgba(140,170,255,.06);color:#9fb0d6;font-style:italic}
-[data-vc-avatar] .vc-partial{flex:none;height:16px;font-size:11px;color:#9db4ff;opacity:0;transition:opacity .2s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-vc-avatar] .vc-bubble{flex:none;min-height:30px;max-height:34px;padding:6px 9px;border-radius:var(--vc-bubble-radius, 12px);border:1px solid var(--vc-bubble-border, rgba(140,170,255,.14));background:var(--vc-bubble-bg, rgba(120,150,255,.10));font-size:var(--vc-bubble-font-size, 12px);
+line-height:1.4;color:var(--vc-bubble-color, #e8eeff);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;transition:background .2s ease}
+[data-vc-avatar] .vc-bubble[data-role="user"]{background:var(--vc-bubble-user-bg, rgba(140,170,255,.06));color:var(--vc-text-muted, #9fb0d6);font-style:italic}
+/* Keep the slot measured but invisible while there is no subtitle, so the stage
+   never jumps when the first line arrives. */
+[data-vc-avatar] .vc-bubble:empty{visibility:hidden}
+[data-vc-avatar] .vc-partial{flex:none;height:16px;font-size:11px;color:var(--vc-partial-color, #9db4ff);opacity:0;transition:opacity .2s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-vc-avatar] .vc-partial[data-visible="1"]{opacity:.9}
 [data-vc-avatar] .vc-eye{transform-box:fill-box;transform-origin:center;transition:transform .1s ease}
 [data-vc-avatar] .vc-pupil{transition:transform .25s ease}
@@ -166,10 +202,10 @@ const STYLE_TEXT = `
 [data-vc-avatar][data-state="speaking"] .vc-fish{animation:vc-bob .4s ease-in-out infinite alternate}
 [data-vc-avatar][data-state="error"] .vc-panel{transform:translateY(2px)}
 [data-vc-avatar][data-state="error"] .vc-fish{filter:grayscale(.6) brightness(.82) drop-shadow(0 8px 14px rgba(0,0,0,.4))}
-[data-vc-avatar][data-state="listening"] .vc-dot{background:#7fe3a8;box-shadow:0 0 8px rgba(127,227,168,.7)}
-[data-vc-avatar][data-state="thinking"] .vc-dot{background:#9db4ff;box-shadow:0 0 8px rgba(157,180,255,.7)}
-[data-vc-avatar][data-state="speaking"] .vc-dot{background:#8fa6ff;box-shadow:0 0 8px rgba(143,166,255,.7)}
-[data-vc-avatar][data-state="error"] .vc-dot{background:#ff7676;box-shadow:0 0 8px rgba(255,118,118,.6)}
+[data-vc-avatar][data-state="listening"] .vc-dot{background:var(--vc-dot-listening, #7fe3a8);box-shadow:0 0 8px rgba(127,227,168,.7)}
+[data-vc-avatar][data-state="thinking"] .vc-dot{background:var(--vc-dot-thinking, #9db4ff);box-shadow:0 0 8px rgba(157,180,255,.7)}
+[data-vc-avatar][data-state="speaking"] .vc-dot{background:var(--vc-dot-speaking, #8fa6ff);box-shadow:0 0 8px rgba(143,166,255,.7)}
+[data-vc-avatar][data-state="error"] .vc-dot{background:var(--vc-dot-error, #ff7676);box-shadow:0 0 8px rgba(255,118,118,.6)}
 @keyframes vc-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
 @keyframes vc-bob{from{transform:translateY(0)}to{transform:translateY(-3px)}}
 @keyframes vc-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
@@ -177,6 +213,21 @@ const STYLE_TEXT = `
 @keyframes vc-spout{0%{opacity:0;transform:translateY(9px) scale(.55)}30%{opacity:.95}100%{opacity:0;transform:translateY(-13px) scale(1.1)}}
 @keyframes vc-ripple{0%{opacity:.55;transform:scale(.72)}70%{opacity:0;transform:scale(1.35)}100%{opacity:0;transform:scale(1.35)}}
 @keyframes vc-think{0%,100%{transform:translateY(0);opacity:.55}40%{transform:translateY(-6px);opacity:1}}
+[data-vc-avatar] .vc-theme-section{display:flex;flex-direction:column;gap:6px;margin-top:6px;padding-top:7px;border-top:1px solid rgba(255,255,255,.12)}
+[data-vc-avatar] .vc-theme-chips{display:flex;flex-wrap:wrap;gap:5px;min-height:22px}
+[data-vc-avatar] .vc-theme-chip{display:inline-flex;width:auto;height:22px;padding:0 9px;border-radius:11px;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-vc-avatar] .vc-theme-chip[data-active="1"]{border-color:var(--vc-accent-base, #8fa6ff);background:rgba(143,166,255,.22);color:#fff}
+[data-vc-avatar] .vc-theme-form{display:flex;align-items:center;gap:6px}
+[data-vc-avatar] .vc-theme-input{flex:1 1 auto;min-width:0;height:22px;padding:0 8px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-theme-input::placeholder{color:#7f8cab}
+[data-vc-avatar] .vc-theme-message{min-height:13px;font-size:10.5px;line-height:1.3;color:#a9b8dd}
+[data-vc-avatar] .vc-theme-namerow{display:flex;align-items:center;gap:7px}
+[data-vc-avatar] .vc-theme-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-theme-name[readonly]{opacity:.6}
+[data-vc-avatar] .vc-theme-file{display:none}
+[data-vc-avatar] .vc-theme-actions{display:flex;gap:5px}
+[data-vc-avatar] .vc-theme-actions .vc-btn{flex:1 1 0;min-width:0;padding:5px 0}
+[data-vc-avatar] .vc-theme-actions .vc-btn[disabled]{opacity:.45;cursor:default}
 @media (prefers-reduced-motion:reduce){[data-vc-avatar],[data-vc-avatar] *{animation:none!important;transition:none!important}}
 `;
 
@@ -203,6 +254,7 @@ function cancel(handle) {
 const styledDocuments = new WeakSet();
 
 function ensureStyles(doc) {
+  ensureThemeStyle(doc);
   if (styledDocuments.has(doc)) return;
   styledDocuments.add(doc);
   const style = doc.createElement('style');
@@ -245,7 +297,8 @@ export function createAvatar(options = {}) {
   let face = readFace();
   let faceChip = null;
 
-  const initial = resolveCharacter(options.character, face);
+  // Keep the widget's own default on the whale; the product passes 'core' explicitly.
+  const initial = resolveCharacter(options.character === undefined || options.character === null ? 'whale' : options.character, face);
 
   const root = element(doc, 'div', {
     'data-vc-avatar': '',
@@ -364,8 +417,15 @@ export function createAvatar(options = {}) {
   const actions = element(doc, 'div', { class: 'vc-actions' });
   const startButton = element(doc, 'button', { class: 'vc-btn vc-start', type: 'button' }, '开始通话');
   const endButton = element(doc, 'button', { class: 'vc-btn vc-end', type: 'button' }, '结束');
+  const receipt = element(doc, 'div', {
+    class: 'vc-receipt',
+    'data-state': 'idle',
+    role: 'status',
+    'aria-live': 'polite',
+  });
   actions.appendChild(startButton);
   actions.appendChild(endButton);
+  actions.appendChild(receipt);
   head.appendChild(dot);
   head.appendChild(label);
   head.appendChild(picker);
@@ -383,10 +443,12 @@ export function createAvatar(options = {}) {
   dots.appendChild(element(doc, 'i'));
 
   const fishWrap = element(doc, 'div', { class: 'vc-fish' });
+  const coreLayer = element(doc, 'div', { class: 'vc-core-layer', 'data-hidden': '1', 'aria-hidden': 'true' });
 
   stage.appendChild(ripple1);
   stage.appendChild(ripple2);
   stage.appendChild(dots);
+  stage.appendChild(coreLayer);
   stage.appendChild(fishWrap);
 
   const bubble = element(doc, 'div', { class: 'vc-bubble', 'data-role': 'assistant', 'aria-live': 'polite' });
@@ -496,6 +558,93 @@ export function createAvatar(options = {}) {
   sheetActions.appendChild(resetButton);
   sheetCard.appendChild(sheetActions);
 
+  // 外观：主题 chip 行 + 一句话生成 + 预览/保存/删除/导入导出。
+  // 生成只预览（applyTheme 不落盘），点「保存主题」才写进主题库。
+  const themeSection = element(doc, 'div', {
+    class: 'vc-theme-section',
+    'data-role': 'theme',
+  });
+  themeSection.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '外观'));
+
+  const themeChips = element(doc, 'div', {
+    class: 'vc-theme-chips',
+    role: 'group',
+    'aria-label': '主题',
+  });
+  themeSection.appendChild(themeChips);
+
+  const themeForm = element(doc, 'div', { class: 'vc-theme-form' });
+  const themePrompt = element(doc, 'input', {
+    class: 'vc-theme-input',
+    type: 'text',
+    maxlength: '40',
+    placeholder: THEME_PROMPT_PLACEHOLDER,
+    'aria-label': '一句话改样式',
+  });
+  const themeGenerate = element(doc, 'button', {
+    class: 'vc-btn vc-theme-generate',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '生成');
+  themeForm.appendChild(themePrompt);
+  themeForm.appendChild(themeGenerate);
+  themeSection.appendChild(themeForm);
+
+  const themeMessage = element(doc, 'div', {
+    class: 'vc-theme-message',
+    'data-role': 'status',
+    'aria-live': 'polite',
+  });
+  themeSection.appendChild(themeMessage);
+
+  const themeNameRow = element(doc, 'div', { class: 'vc-theme-namerow' });
+  themeNameRow.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '主题名'));
+  const themeName = element(doc, 'input', {
+    class: 'vc-theme-name',
+    type: 'text',
+    maxlength: String(THEME_NAME_LIMIT),
+    'aria-label': '主题名字',
+  });
+  themeNameRow.appendChild(themeName);
+  themeSection.appendChild(themeNameRow);
+
+  const themeActions = element(doc, 'div', { class: 'vc-theme-actions' });
+  const themeSave = element(doc, 'button', {
+    class: 'vc-btn vc-theme-save',
+    type: 'button',
+    'data-kind': 'major',
+  }, '保存主题');
+  const themeDelete = element(doc, 'button', {
+    class: 'vc-btn vc-theme-delete',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '删除');
+  const themeExport = element(doc, 'button', {
+    class: 'vc-btn vc-theme-export',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '导出');
+  const themeImport = element(doc, 'button', {
+    class: 'vc-btn vc-theme-import',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '导入');
+  themeActions.appendChild(themeSave);
+  themeActions.appendChild(themeDelete);
+  themeActions.appendChild(themeExport);
+  themeActions.appendChild(themeImport);
+  themeSection.appendChild(themeActions);
+
+  // 隐藏的导入 input；只给 .vc-theme-file，避免和形象上传那个 .vc-file 抢选择器。
+  const themeFileInput = element(doc, 'input', {
+    class: 'vc-theme-file',
+    type: 'file',
+    accept: '.json,application/json',
+    'aria-hidden': 'true',
+  });
+  themeSection.appendChild(themeFileInput);
+  sheetCard.appendChild(themeSection);
+
   sheet.appendChild(backdrop);
   sheet.appendChild(sheetCard);
 
@@ -514,10 +663,28 @@ export function createAvatar(options = {}) {
   }
   mount.appendChild(root);
 
+  // The 3D core mounts after the stage is in the DOM so it can measure. It is
+  // created defensively: a headless DOM or blocked WebGL just downgrades.
+  let core3d = null;
+  try {
+    const reducedMotion = !!(win && typeof win.matchMedia === 'function'
+      && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    core3d = createCore3D({
+      doc,
+      win,
+      mount: coreLayer,
+      quality: 'auto',
+      reducedMotion,
+    });
+  } catch (_error) {
+    core3d = null;
+  }
+
   let state = 'idle';
   let blinkTimer = null;
   let disposed = false;
   let art = null;
+  let receiptTitle = '';
 
   function clearStage() {
     while (fishWrap.children.length > 0) fishWrap.removeChild(fishWrap.children[0]);
@@ -539,6 +706,10 @@ export function createAvatar(options = {}) {
     }
     fishWrap.appendChild(next.svg);
     art = next;
+    const isCore = next.id === 'core';
+    fishWrap.style.display = isCore ? 'none' : '';
+    coreLayer.setAttribute('data-hidden', isCore ? '0' : '1');
+    if (isCore && core3d) core3d.resize();
     root.setAttribute('data-character', next.id);
     root.setAttribute('aria-label', next.name + '语音管家');
     label.textContent = next.labels[state];
@@ -836,12 +1007,38 @@ export function createAvatar(options = {}) {
     place(drag.left + dx, drag.top + dy);
   }
 
+  // Snap a dropped panel to the nearest edge. Only edges still inside the
+  // viewport count: an overflowed panel keeps its dragged position.
+  function snapToEdges(left, top) {
+    const box = viewport();
+    const size = measure();
+    const width = size.width || 340;
+    const height = size.height || 316;
+    let nextLeft = left;
+    let nextTop = top;
+    const rightGap = box.width - (left + width);
+    if (left >= 0 && left < 24) nextLeft = 12;
+    else if (rightGap >= 0 && rightGap < 24) nextLeft = box.width - width - 12;
+    const bottomGap = box.height - (top + height);
+    if (top >= 0 && top < 24) nextTop = 12;
+    else if (bottomGap >= 0 && bottomGap < 24) nextTop = box.height - height - 12;
+    return { left: nextLeft, top: nextTop };
+  }
+
   function onDragEnd() {
     if (!drag) return;
     drag = null;
     root.removeAttribute('data-dragging');
-    const left = px(root.style.left);
-    const top = px(root.style.top);
+    let left = px(root.style.left);
+    let top = px(root.style.top);
+    if (dragged && left !== null && top !== null) {
+      const snapped = snapToEdges(left, top);
+      if (snapped.left !== left || snapped.top !== top) {
+        const placed = place(snapped.left, snapped.top);
+        left = placed.left;
+        top = placed.top;
+      }
+    }
     if (left !== null && top !== null) writeStore(POS_KEY, JSON.stringify({ left, top }));
     unbindDrag();
     // A tap on the folded pill (no movement) opens it again.
@@ -951,11 +1148,41 @@ export function createAvatar(options = {}) {
     if (wanted !== 'speaking') setMouth(0);
     stopBlink();
     if (wanted === 'idle') scheduleBlink();
+    if (core3d) core3d.setState(wanted);
   }
 
   function setLevel(level) {
-    if (disposed || state !== 'speaking') return;
+    if (disposed) return;
+    // Forward first: the core keeps its own level even while idle, and the
+    // legacy mouth path still only moves during speaking.
+    if (core3d) core3d.setLevel(level);
+    if (state !== 'speaking') return;
     setMouth(level);
+  }
+
+  // 派发回执：task 只在 /turn 真的派给后台任务时存在。
+  function setReceipt(task) {
+    if (disposed) return '';
+    if (!task || !task.sessionId) {
+      receiptTitle = '';
+      receipt.textContent = '';
+      receipt.setAttribute('data-state', 'idle');
+      return '';
+    }
+    receiptTitle = String(task.title || '新任务').slice(0, 12);
+    receipt.textContent = '已派发 · ' + receiptTitle;
+    receipt.setAttribute('data-state', 'pending');
+    return receipt.textContent;
+  }
+
+  function setReceiptState(next) {
+    if (disposed) return '';
+    const wanted = next === 'done' || next === 'failed' ? next : 'pending';
+    receipt.setAttribute('data-state', wanted);
+    if (wanted === 'done') receipt.textContent = '✓ ' + (receiptTitle || '完成');
+    else if (wanted === 'failed') receipt.textContent = '✕ ' + (receiptTitle || '失败');
+    else receipt.textContent = receiptTitle ? '已派发 · ' + receiptTitle : '已派发';
+    return receipt.textContent;
   }
 
   function setSubtitle(text, config = {}) {
@@ -1073,10 +1300,202 @@ export function createAvatar(options = {}) {
       faceChip = null;
     }
     if (characterId() === CUSTOM_CHARACTER_ID) {
-      selectCharacter(listCharacters()[0].id, true);
+      selectCharacter(resolveCharacter(CUSTOM_CHARACTER_ID, null).id, true);
     }
     syncSheet();
     saveButton.textContent = '保存';
+  }
+
+  // ------------------------------------------------------------------ 外观
+  // 生成结果先是「预览」：立刻生效但不进库，点「保存主题」才落盘。
+  let themePreview = null;
+  let themeBusy = false;
+
+  function paintTheme(theme) {
+    const applied = applyTheme(doc, theme);
+    if (core3d) core3d.setTheme(applied && applied.theme ? applied.theme : theme);
+    return applied;
+  }
+
+  function themeEntry(id) {
+    const all = listThemes();
+    return all.find((entry) => entry.id === id) || all[0] || { id: 'default', name: '默认', builtin: true };
+  }
+
+  function syncThemeFields() {
+    if (disposed) return;
+    const entry = themeEntry(getActiveId());
+    themeName.value = themePreview ? themePreview.name : entry.name;
+    if (themePreview) themeName.removeAttribute('readonly');
+    else themeName.setAttribute('readonly', 'readonly');
+    themeSave.textContent = '保存主题';
+    themeSave.disabled = !themePreview;
+    themeDelete.disabled = !!themePreview || entry.builtin;
+  }
+
+  function syncThemeChips() {
+    if (disposed) return;
+    while (themeChips.children && themeChips.children.length) themeChips.removeChild(themeChips.children[0]);
+    const active = getActiveId();
+    for (const entry of listThemes()) {
+      const chip = element(doc, 'button', { class: 'vc-chip vc-theme-chip', type: 'button', 'data-theme': entry.id, 'aria-pressed': entry.id === active ? 'true' : 'false', title: entry.name }, entry.name);
+      if (entry.id === active) chip.setAttribute('data-active', '1');
+      if (typeof chip.addEventListener === 'function') chip.addEventListener('click', () => activateTheme(entry.id));
+      themeChips.appendChild(chip);
+    }
+  }
+
+  function syncThemeSection() {
+    syncThemeChips();
+    syncThemeFields();
+  }
+
+  function activateTheme(id) {
+    if (disposed) return;
+    // 切换主题等于放弃当前预览。
+    themePreview = null;
+    const theme = setActiveId(id);
+    paintTheme(theme);
+    syncThemeSection();
+    themeSay('已换成「' + theme.name + '」');
+    if (onAction) onAction('theme', { id: getActiveId(), theme });
+  }
+
+  function themeSay(text) {
+    themeMessage.textContent = text || '';
+  }
+
+  function themeDesigning(on) {
+    themeBusy = !!on;
+    themeGenerate.disabled = !!on;
+    themeGenerate.textContent = on ? '生成中' : '生成';
+  }
+
+  // index.js 拿到模型结果后回灌这里：{ ok, theme, message }。
+  function settleThemeDesign(payload) {
+    themeDesigning(false);
+    if (disposed) return null;
+    if (!payload || payload.ok !== true) {
+      themeSay(payload && payload.message ? payload.message : '这次没改出来，再试一次');
+      return null;
+    }
+    const source = payload.theme || payload;
+    // 模型只给增量：叠在当前主题上，相对指令才不会把别的 token 抹回默认。
+    const current = resolveTheme(getActiveId());
+    themePreview = {
+      v: 1,
+      name: String(source.name || THEME_FALLBACK_NAME).slice(0, THEME_NAME_LIMIT),
+      tokens: Object.assign({}, current.tokens, source.tokens || {}),
+      css: Object.assign({}, current.css, source.css || {}),
+    };
+    paintTheme(themePreview);
+    syncThemeFields();
+    themeSay(payload.message || '预览中，点「保存主题」才会记住');
+    return themePreview;
+  }
+
+  function handleThemeGenerate() {
+    if (disposed || themeBusy) return;
+    const utterance = String(themePrompt.value || '').trim().slice(0, 200);
+    if (!utterance) return themeSay('先写一句想要的样子');
+    themeDesigning(true);
+    themeSay('正在让模型改样式…');
+    // base 必须是当前合并后的完整主题，否则「边框再亮一点」没有基准。
+    if (onAction) onAction('theme-design', { utterance, base: resolveTheme(getActiveId()) });
+    else settleThemeDesign({ ok: false, message: '这个环境连不上模型' });
+  }
+
+  function handleThemeSave() {
+    if (disposed) return;
+    if (!themePreview) return themeSay('先用一句话生成一套，再保存');
+    const name = String(themeName.value || '').trim().slice(0, THEME_NAME_LIMIT);
+    const result = saveTheme({ name: name || themePreview.name, tokens: themePreview.tokens, css: themePreview.css });
+    if (!result.ok) return themeSay(result.error);
+    themePreview = null;
+    const theme = resolveTheme(result.id);
+    paintTheme(theme);
+    syncThemeSection();
+    themeSay('已保存「' + result.name + '」');
+    if (onAction) onAction('theme', { id: result.id, theme });
+  }
+
+  function handleThemeDelete() {
+    if (disposed) return;
+    const result = deleteTheme(getActiveId());
+    if (!result.ok) return themeSay(result.error);
+    paintTheme(result.theme);
+    syncThemeSection();
+    themeSay(result.fellBack ? '已删除，回到默认主题' : '已删除');
+    if (onAction) onAction('theme', { id: result.active, theme: result.theme });
+  }
+
+  function themeFileName(name) {
+    const safe = String(name || 'theme').replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '');
+    return 'vc-theme-' + (safe || 'theme').slice(0, 40) + '.json';
+  }
+
+  function handleThemeExport() {
+    if (disposed) return;
+    const active = getActiveId();
+    const text = exportTheme(active);
+    if (!text) return themeSay('这个主题导不出来');
+    const BlobCtor = (win && win.Blob) || (typeof Blob === 'function' ? Blob : null);
+    const urlApi = win && win.URL;
+    if (!BlobCtor || !urlApi || typeof urlApi.createObjectURL !== 'function') return themeSay('这个环境不能下载文件');
+    const fileName = themeFileName(themeEntry(active).name);
+    const href = urlApi.createObjectURL(new BlobCtor([text], { type: 'application/json' }));
+    const link = doc.createElement('a');
+    link.setAttribute('href', href);
+    link.setAttribute('download', fileName);
+    link.setAttribute('hidden', 'hidden');
+    const host = doc.body || doc.documentElement;
+    if (host && typeof host.appendChild === 'function') host.appendChild(link);
+    if (typeof link.click === 'function') link.click();
+    later(() => {
+      const parent = link.parentNode;
+      if (parent && typeof parent.removeChild === 'function') parent.removeChild(link);
+      if (typeof urlApi.revokeObjectURL === 'function') urlApi.revokeObjectURL(href);
+    }, 1000);
+    themeSay('已导出 ' + fileName);
+  }
+
+  function handleThemeImport() {
+    if (disposed) return;
+    if (typeof themeFileInput.click === 'function') themeFileInput.click();
+    else themeSay('这个环境不能选文件');
+  }
+
+  function handleThemeFile() {
+    if (disposed) return;
+    const file = themeFileInput.files && themeFileInput.files[0];
+    if (!file) return;
+    const ReaderCtor = (win && win.FileReader) || (typeof FileReader === 'function' ? FileReader : null);
+    if (!ReaderCtor) return themeSay('这个环境不能读文件');
+    const reader = new ReaderCtor();
+    reader.onload = () => {
+      if (disposed) return;
+      // 导入总是新条目（id 由库分配），不覆盖现有主题。
+      const result = importTheme(String(reader.result || ''));
+      if (!result.ok) {
+        themeSay(result.error);
+        syncThemeFields();
+        return;
+      }
+      themePreview = null;
+      const theme = resolveTheme(result.id);
+      paintTheme(theme);
+      syncThemeSection();
+      themeSay('已导入「' + result.name + '」');
+      if (onAction) onAction('theme', { id: result.id, theme });
+      // 清空 value，同一个文件还能再导入一次。
+      try {
+        themeFileInput.value = '';
+      } catch (_error) {
+        // 某些浏览器这个属性只读。
+      }
+    };
+    reader.onerror = () => themeSay('这个文件读不了');
+    reader.readAsText(file);
   }
 
   function setSheetOpen(next) {
@@ -1084,6 +1503,7 @@ export function createAvatar(options = {}) {
     const wanted = !!next;
     if (wanted) {
       syncSheet();
+      syncThemeSection();
     } else {
       // 关抽屉时把正在编辑的名字落盘，避免「输入了却没保存」。
       commitName();
@@ -1093,6 +1513,9 @@ export function createAvatar(options = {}) {
     }
     sheetOpen = wanted;
     sheet.setAttribute('data-open', wanted ? '1' : '0');
+    // 面板只有 316px 高，外观区加进来后内容会溢出；打开时回到顶部，
+    // 否则浏览器把焦点元素滚进视野会让「语速」那行被裁掉一半。
+    if (wanted) sheet.scrollTop = 0;
     sheet.setAttribute('aria-hidden', wanted ? 'false' : 'true');
     gearButton.setAttribute('aria-expanded', wanted ? 'true' : 'false');
     return wanted;
@@ -1176,6 +1599,32 @@ export function createAvatar(options = {}) {
   if (typeof removeFaceButton.addEventListener === 'function') {
     removeFaceButton.addEventListener('click', handleRemoveFace);
   }
+  if (typeof themeGenerate.addEventListener === 'function') {
+    themeGenerate.addEventListener('click', handleThemeGenerate);
+  }
+  if (typeof themePrompt.addEventListener === 'function') {
+    themePrompt.addEventListener('keydown', (event) => {
+      if (event && (event.key === 'Enter' || event.key === 'Return')) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        handleThemeGenerate();
+      }
+    });
+  }
+  if (typeof themeSave.addEventListener === 'function') {
+    themeSave.addEventListener('click', handleThemeSave);
+  }
+  if (typeof themeDelete.addEventListener === 'function') {
+    themeDelete.addEventListener('click', handleThemeDelete);
+  }
+  if (typeof themeExport.addEventListener === 'function') {
+    themeExport.addEventListener('click', handleThemeExport);
+  }
+  if (typeof themeImport.addEventListener === 'function') {
+    themeImport.addEventListener('click', handleThemeImport);
+  }
+  if (typeof themeFileInput.addEventListener === 'function') {
+    themeFileInput.addEventListener('change', handleThemeFile);
+  }
   const handleSheetKeydown = (event) => {
     if (!sheetOpen || !event) return;
     if (event.key === 'Escape' || event.key === 'Esc') {
@@ -1230,9 +1679,19 @@ export function createAvatar(options = {}) {
     unbind(resetButton, 'click', handleReset);
     unbind(changeFaceButton, 'click', handleChangeFace);
     unbind(removeFaceButton, 'click', handleRemoveFace);
+    unbind(themeGenerate, 'click', handleThemeGenerate);
+    unbind(themeSave, 'click', handleThemeSave);
+    unbind(themeDelete, 'click', handleThemeDelete);
+    unbind(themeExport, 'click', handleThemeExport);
+    unbind(themeImport, 'click', handleThemeImport);
+    unbind(themeFileInput, 'change', handleThemeFile);
     cancel(sheetTimer);
     sheetTimer = null;
     sheetOpen = false;
+    if (core3d) {
+      core3d.destroy();
+      core3d = null;
+    }
     if (fileInput.parentNode && typeof fileInput.parentNode.removeChild === 'function') {
       fileInput.parentNode.removeChild(fileInput);
     }
@@ -1251,6 +1710,8 @@ export function createAvatar(options = {}) {
     } catch (error) { /* corrupt value: keep the default corner */ }
   }
   setCollapsed(readStore(FOLD_KEY) === '1');
+  // 先把 chip 画出来，抽屉打开时只做同步，不会看到空行。
+  syncThemeSection();
 
   return {
     root,
@@ -1258,6 +1719,11 @@ export function createAvatar(options = {}) {
     setLevel,
     setSubtitle,
     setPartial,
+    setTheme: (theme) => paintTheme(theme),
+    // index.js 把 /theme/design 的结果回灌到这里，只预览不落盘。
+    themeDesign: (payload) => settleThemeDesign(payload),
+    setReceipt,
+    setReceiptState,
     setCharacter: (id) => selectCharacter(id, false),
     setCollapsed,
     toggleCollapsed,

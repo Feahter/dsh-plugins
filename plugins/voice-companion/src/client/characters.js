@@ -306,9 +306,31 @@ function buildChibi(doc) {
   return { svg, mouth, mouthPath: chibiMouthPath };
 }
 
+// The 3D core owns its own stage; this slot only reserves a mount point.
+function buildCore(doc) {
+  const slot = doc.createElement('div');
+  slot.setAttribute('class', 'vc-core-slot');
+  slot.setAttribute('aria-hidden', 'true');
+  return { svg: slot, mouth: null, mouthPath: null };
+}
+
 // ----------------------------------------------------------------- the cast
 
 const CHARACTERS = [
+  {
+    id: 'core',
+    name: '贾维斯',
+    tagline: '科幻核心',
+    voice: 'tide',
+    labels: {
+      idle: '待命中',
+      listening: '在听',
+      thinking: '在想',
+      speaking: '在说',
+      error: '信号不太好',
+    },
+    build: buildCore,
+  },
   {
     id: 'whale',
     name: '大肥鱼',
@@ -339,7 +361,10 @@ const CHARACTERS = [
   },
 ];
 
-const DEFAULT_CHARACTER = CHARACTERS[0].id;
+// The browser half defaults to the core explicitly (src/client/index.js). The
+// host-facing default stays the legacy whale so existing API consumers and
+// their contract tests keep the same cast shape.
+const DEFAULT_CHARACTER = 'whale';
 
 // 与 host/voice.js 的 VOICE_CATALOG 同义：浏览器端只需要 id 和中文名。
 const VOICE_OPTIONS = [
@@ -377,7 +402,9 @@ function buildCustomFace(doc, face) {
 }
 
 function listCharacters() {
-  return CHARACTERS.map((entry) => ({
+  // The core is a stage renderer, not a picker entry: it is resolved by id and
+  // set as the browser default, but keeps the legacy cast list unchanged.
+  return CHARACTERS.filter((entry) => entry.id !== 'core').map((entry) => ({
     id: entry.id,
     name: entry.name,
     tagline: entry.tagline,
@@ -396,8 +423,8 @@ function characterById(id) {
 function resolveCharacter(id, face) {
   if (String(id) === CUSTOM_CHARACTER_ID) {
     const custom = customFaceOf(face);
-    // 存了 custom 但没有可用图片时回落到默认内置形象。
-    if (!custom) return CHARACTERS[0];
+    // 存了 custom 但没有可用图片时回落到原默认内置形象（保持旧版行为）。
+    if (!custom) return characterById('whale') || CHARACTERS[0];
     return {
       id: CUSTOM_CHARACTER_ID,
       name: custom.name,

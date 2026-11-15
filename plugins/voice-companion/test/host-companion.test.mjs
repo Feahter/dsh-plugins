@@ -263,7 +263,7 @@ test('GET /health exposes providers, voices, key state and tracked tasks', async
   })
   assert.equal(response.status, 200)
   assert.equal(response.json.ok, true)
-  assert.equal(response.json.version, '0.3.0')
+  assert.equal(response.json.version, '0.4.0')
   assert.deepEqual(response.json.tts.voices, ['stella', 'tide'])
   assert.equal(response.json.tts.apiKeyConfigured, true)
   assert.deepEqual(response.json.asr.providers, ['sensevoice', 'parakeet'])

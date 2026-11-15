@@ -329,8 +329,10 @@ group('character picker (看板娘切换)');
 const builtinChips = () => chips().filter((c) => ['whale', 'chibi'].includes(c.getAttribute('data-character')));
 check('two builtin character chips rendered', builtinChips().length === 2, chips().map((c) => c.getAttribute('data-character')));
 check('custom-face add chip is present', chips().some((c) => hasClass(c, 'vc-add')));
-check('whale chip pressed at start', chipAt(0).getAttribute('aria-pressed') === 'true');
-check('stage starts on the whale', avatarRoot().getAttribute('data-character') === 'whale');
+// v0.4 contract change: the stage boots on the 3D core, which is a renderer
+// rather than a picker entry, so no builtin chip is pressed until the user picks.
+check('stage starts on the core', avatarRoot().getAttribute('data-character') === 'core');
+check('no builtin chip is pressed while the core renders', builtinChips().every((c) => c.getAttribute('aria-pressed') !== 'true'));
 chipAt(1).dispatch('click');
 check('clicking the chibi chip swaps the stage', avatarRoot().getAttribute('data-character') === 'chibi');
 check('chips stay mutually exclusive', chipAt(1).getAttribute('aria-pressed') === 'true' && chipAt(0).getAttribute('aria-pressed') === 'false');

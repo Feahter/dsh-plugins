@@ -1,8 +1,10 @@
-# 语音管家（voice-companion）v0.3
+# 语音管家（voice-companion）v0.4
 
-DSH 的「一个插件装完所有语音面」：**面板通话**、**输入框听写**、**全局热键指令**、**看板娘**、**自定义形象**、**自定义声音**都在这里，不再需要另外两个插件。
+DSH 的「一个插件装完所有语音面」：**面板通话**、**输入框听写**、**全局热键指令**、**3D 看板**、**自由换肤**、**自定义形象**、**自定义声音**都在这里，不再需要另外两个插件。
 
-v0.3 加了三件事：形象可以换成你自己的图、声音可以三槽自选并调语速、语音派出去的活默认拿完全权限 + high 推理，不用再手动点。
+v0.4 换了一张脸：默认形象是自研的 3D 科幻核心（不依赖 three.js、不加载贴图），整块看板的 **87 个样式 token** 全部可改，而且可以直接说一句话让模型改——「改成赛博朋克红黑，霓虹绿边框」——先预览，满意再存成自己的主题。同时把看板收窄回它唯一该做的事：**语音输入 + 把活派给 DSH**。
+
+v0.3 带来的是：形象可以换成你自己的图、声音可以三槽自选并调语速、语音派出去的活默认拿完全权限 + high 推理。
 
 原来拆成三个包，现在合了：
 
@@ -35,19 +37,25 @@ dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/dsh-plugi
 
 三种入口共用同一个看板娘面板、同一套人格和同一套音色选择。
 
-## 看板娘
+## 看板：默认是 3D 核心
 
-两个形象，面板右上角两个圆点切换，选择写进 `localStorage`，下次打开还是它：
+v0.4 默认形象是**自研的 3D 科幻核心**（`src/client/core3d.js`）：一颗 SDF 光线步进的发光球体，外面套两个倾斜的轨道环，五态各有一套调色板与脉动参数（`idle` 蓝白呼吸 / `listening` 青绿扩散 / `thinking` 蓝紫收缩 / `speaking` 亮白随音量起伏 / `error` 暗红降饱和）。
+
+- 渲染是手写 GLSL（WebGL2，40 步光线步进 + fresnel 边缘光 + 扫描线 + 体积辉光），帧耗时超过 22 ms 自动降到 24 步的 LITE 版本；没有 WebGL 时按 `webgl2 → webgl1 → canvas2d → 纯 CSS` 逐级降级，最低档仍是一个会呼吸的光球，不会白屏。
+- **不依赖 three.js**：插件打包后的运行期只认 11 个平台模块，three 不在其中；也没有外部贴图、没有网络请求。
+- 舞台 152 px 高，面板 340×316；拖动、贴边吸附（24 px 内吸到 12 px）、收起成 44×44 圆胶囊（胶囊里是核心的实时缩略）都还在。
+- 老的鲸鱼/看板娘仍留在 `characters.js`，宿主 `/characters` 照旧返回它们（`whale`/`chibi`），只是客户端不再默认选它们：
 
 | id | 名字 | 形象 | 默认音色 |
 | --- | --- | --- | --- |
+| `core` | 贾维斯 | 自研 3D 发光核心（**v0.4 默认**） | `tide`（男声） |
 | `whale` | 大肥鱼 | 官方 Logo 的萌化胖鲸鱼（`#4D6BFE` 蓝身、白腹、大眼、喷水孔） | `tide`（男声） |
 | `chibi` | 小肥鱼 | 二次元看板娘：蓝发、耳机、水手服、大眼睛 | `stella`（女声） |
 
-- 形象是**代码画的原创 SVG**（`src/client/characters.js`），不依赖任何外部贴图，没有版权问题，也不发网络请求。
+- 后两个是**代码画的原创 SVG**（`src/client/characters.js`），不依赖任何外部贴图，没有版权问题，也不发网络请求。
 - 五个状态都做了动画：`idle` 呼吸/眨眼/偶尔冒泡、`listening` 光晕与外圈波纹、`thinking` 眼睛上翻+三点、`speaking` 嘴随音量开合、`error` 灰化耷拉。
 - 面板能拖：按住头顶那条（光标变抓手）拖到任意位置，松手记住；`localStorage['dsh.voice-companion.pos']` 存 `{left,top}`，`dsh.voice-companion.collapsed` 存收起状态。位置会夹在视口内，至少留一截可抓。
-- 面板能收：右上「−」把整块折成一颗圆角胶囊（只剩状态点和名字），点胶囊或「＋」展开；收起时不影响通话和热键。
+- 面板能收：右上「−」把整块折成一颗 44×44 的圆胶囊，里面是 3D 核心的缩略 + 状态色，点胶囊展开；收起时不影响通话和热键。
 - 自查页：`assets/avatar-demo.html`（直接 `open` 就行，`?character=chibi` 换形象）。截图：`assets/screenshot-whale.png`、`assets/screenshot-chibi.png`。
 
 ### 换成你自己的形象
@@ -57,6 +65,24 @@ dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/dsh-plugi
 - 舞台上渲染的是 `<img class="vc-fish-img">`（`buildCustomFace`），呼吸/摆动/换形象动画照旧；没有嘴巴关节，所以 `speaking` 时不会开合。
 - 名字可以改（齿轮 → 形象 → 输入框，最长 12 字）；不想要了点「移除自定义形象」，回落到默认那条鲸鱼，`localStorage` 里那条记录也一起删掉。
 - 只有一张自定义形象；上传和缩放全在本地 `canvas` 里做，图片不出机器。
+
+## 外观：一句话换皮肤
+
+齿轮 → 抽屉底部的**外观**区。整块看板的样式被拆成 87 个 token、8 组（`board`/`type`/`text`/`accent`/`dot`/`button`/`stage`/`surface`），定义在 `src/client/theme.js` 的 `TOKEN_SCHEMA`；CSS 里写的是 `var(--vc-*, 原默认值)`，所以**不换主题时像素级和 v0.3 一样**。
+
+| 能力 | 怎么用 |
+| --- | --- |
+| 换主题 | 「外观」里的胶囊列表，内置「默认」+ 你存的主题，点一下即时生效并记住 |
+| 一句话改样式 | 输入「改成赛博朋克红黑，霓虹绿边框」→ 生成 → **先预览不落盘**，满意再点「保存主题」并命名 |
+| 删主题 | 选中自己的主题点「删除」（内置默认不可删，删当前项自动回落默认） |
+| 导出 | 把当前主题存成 `.json` 下载，可以发给别人 |
+| 导入 | 选一个 `.json` 读进来，自动消毒后存为自定义主题（名字重复自动加 ` (2)`） |
+
+- **主题库**存 `localStorage['dsh.voice-companion.themes']`（`{v:1, active, items:[{id,name,tokens,css,createdAt}]}`，上限 50 条），当前主题快照存 `dsh.voice-companion.theme.active`；JSON 损坏会先把原文另存到 `...themes.corrupt` 再重建空库，**不会因为一条坏数据把面板搞白**。
+- **模型链路**：客户端 `POST /api/voice-companion/theme/design`，宿主用 `host/theme.js` 的 `SYSTEM_PROMPT`（全 token 键表 + 只准改样式不准改结构与脚本）调一轮模型，`maxTokens:900` / `temperature:0.35` / 20 s 超时，回来过两层 `sanitizeTheme`（宿主一层、客户端再一层），非法键进 `dropped` 不报错。限流 8 次/分钟 + 60 次/小时。
+- 请求**必须带 `base`**（当前完整主题）：不带的话「边框再亮一点」这类相对指令模型没有参照物，会瞎猜一个颜色。实测带 base 时 `#39ff88 → #7dffb8` 正确变亮、字号整组 +1。
+- 真上游实测（`deepseek-flash`）：「改成赛博朋克红黑，霓虹绿边框」→ 12 个 token + 1 条 css、`dropped` 为空、约 2.9 s、945/389 tokens；「边框再亮一点，字大一号」带 base → 1.2 s、`#7dffb8` + 字号 +1。
+- 3D 核心的五个调色板也是 token（`core.palette.idle|listening|thinking|speaking|error`），改主题时核心颜色跟着变；`css` 那栏还能塞单条 CSS 补丁（如面板外发光），同样过白名单消毒。
 
 ## 音色
 
@@ -129,8 +155,22 @@ dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/dsh-plugi
 | POST | `/dispatch` | 直接派活（`/turn` 判定为任务时内部也走它），派活前先设完全权限 + high 推理 |
 | GET | `/events?since=` | 后台任务完成事件，游标语义 |
 | POST | `/transcribe` | ASR 回退通路：base64 WAV → 本机 SenseVoice 文本 |
+| POST | `/theme/design` | 一句话 → 模型 → 消毒后的主题补丁（`{utterance, base?, keep?}` → `{theme, changed, dropped, message, model, usage}`），限流 8/min + 60/h |
 
 ## 验收记录
+
+**v0.4** 这批：
+
+| 项 | 证据 |
+| --- | --- |
+| 单元测试 | `npm test` **151/151 通过** = v0.3 的 112 条 + `core3d` 13 + `theme` 11 + `theme-store` 15 |
+| 构建产物 | `client.js` **231,675 B**（v0.3 是 171,098），gzip **60,444 B**；11 个片段，`theme.js`/`theme-store.js`/`core3d.js` 各自行首 export、按 PARTS 顺序拼接 |
+| 客户端半片 | `test/client-harness.mjs` **23/23 checks + 15 passed**，其中两条断言按 v0.4 契约改写（`stage starts on the core`、`no builtin chip is pressed while the core renders`——默认形象从鲸鱼换成 3D 核心是产品决定，不是测试迁就） |
+| 看板娘 | `test/avatar-harness.mjs` **23/23**（含抽屉、槽位、改名、移除自定义形象） |
+| 3D 核心 | `test/core3d.test.mjs` **13/13**（后端选择五分支、环投影数值、五态、canvas2d 兜底、着色器编译失败回落、无 DOM 惰性、rAF 缺失走 setTimeout、清理幂等）；真 Chrome headless（SwiftShader）跑出 `kind=webgl2` |
+| 主题引擎 | 零 diff 校验：87 个 `var(--vc-*, fallback)` 里 86 个 fallback 与 v0.3 字面量逐字相同，剩下一个是新增的 `stage-bg: transparent`（不产生像素变化） |
+| 模型链路 | `test/theme.test.mjs` **11/11**（全假 fetch：围栏解析、非法键、空补丁、上游 500、超时、限流 429、无 key 503、输入校验 400 且不耗配额）；另有**真上游联调**两次，见上面「外观」章节 |
+| 视觉 | 真 Chrome headless 截图：默认 3D 待命态、listening 绿态、赛博主题（霓虹绿边框 + 红核心，证明 token 贯通到 3D）、44×44 收起胶囊、外观抽屉 |
 
 v0.1 那批（真接口 curl）见 git 历史。v0.2 的旧数字见下；**v0.3** 这批：
 
@@ -175,3 +215,5 @@ open assets/avatar-demo.html      # 形象自查页
 - TTS 目录只有两个音色：`stella`（明亮）/ `tide`（温柔），`/health` 和 `/characters` 都能看到。上游只认这两个 id、没有语速/音高/克隆参数，所以「自定义声音」是选槽 + 客户端变速，不是真音色克隆；想加音色只能改 `host/voice.js` 的 `VOICE_CATALOG` 与 `CHARACTER_VOICES`（前提是上游真支持新 id）。
 - 看板娘是 SVG 程序化绘制，细节不如贴图丰富；加新形象只需在 `characters.js` 里加一个 `build()` 与 `CHARACTERS` 条目。
 - 后台任务完成事件依赖 `agent/status`；Session 被别的客户端取消时走 `task-failed` 分支。
+- **没有 WebGL 的机器**（远程桌面、禁用硬件加速）会退到 Canvas2D 版核心：观感是发光球 + 两个环，没有体积辉光和立体光照；再退一档是纯 CSS 渐变球。降级是自动的，`/health` 不报告当前后端。
+- **模型改样式不保证每次都合心意**：它只输出 token 补丁，不能改布局结构与脚本，输出为空时宿主回 502 `model-empty-patch`；一句话改不理想时最多再改两轮（限流 8/min），别指望它一次做出一整套设计系统。

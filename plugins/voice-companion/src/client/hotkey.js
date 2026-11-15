@@ -26,14 +26,14 @@ const HOTKEY_LABELS = {
 };
 
 const HOTKEY_STYLE_TEXT = `
-.vc-hotkey-hud{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;gap:8px;max-width:min(78vw,560px);padding:8px 14px;border-radius:999px;background:rgba(22,24,29,.92);color:#f4f5f7;font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.22);pointer-events:none;transition:opacity .18s ease,visibility .18s ease}
+.vc-hotkey-hud{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:var(--vc-board-z, 2147483000);display:flex;align-items:center;gap:var(--vc-board-gap, 8px);max-width:min(78vw,560px);padding:var(--vc-btn-padding, 8px 14px);border-radius:var(--vc-btn-radius, 999px);background:var(--vc-board-bg-to, rgba(22,24,29,.92));color:var(--vc-text-primary, #f4f5f7);font:var(--vc-type-size, 12px)/var(--vc-type-line-height, 1.45) var(--vc-type-font, -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif);box-shadow:var(--vc-board-shadow, 0 8px 24px rgba(0,0,0,.22));pointer-events:none;transition:opacity .18s ease,visibility .18s ease}
 .vc-hotkey-hud[data-visible="0"]{opacity:0;visibility:hidden}
-.vc-hotkey-dot{width:7px;height:7px;border-radius:50%;background:#9aa0a6;flex:0 0 auto}
-.vc-hotkey-dot[data-phase="recording"]{background:#ff5f57;animation:vc-hotkey-pulse 1s ease-in-out infinite}
-.vc-hotkey-dot[data-phase="transcribing"]{background:#f5c451}
-.vc-hotkey-dot[data-phase="routing"]{background:#5b9dff}
-.vc-hotkey-dot[data-phase="done"]{background:#51c46a}
-.vc-hotkey-dot[data-phase="failed"]{background:#ff5f57}
+.vc-hotkey-dot{width:7px;height:7px;border-radius:50%;background:var(--vc-dot-idle, #9aa0a6);flex:0 0 auto}
+.vc-hotkey-dot[data-phase="recording"]{background:var(--vc-dot-error, #ff5f57);animation:vc-hotkey-pulse var(--vc-think-duration, 1s) ease-in-out infinite}
+.vc-hotkey-dot[data-phase="transcribing"]{background:var(--vc-dot-thinking, #f5c451)}
+.vc-hotkey-dot[data-phase="routing"]{background:var(--vc-dot-speaking, #5b9dff)}
+.vc-hotkey-dot[data-phase="done"]{background:var(--vc-dot-listening, #51c46a)}
+.vc-hotkey-dot[data-phase="failed"]{background:var(--vc-dot-error, #ff5f57)}
 .vc-hotkey-label{font-weight:600;white-space:nowrap}
 .vc-hotkey-detail{opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:42vw}
 @keyframes vc-hotkey-pulse{50%{opacity:.35}}

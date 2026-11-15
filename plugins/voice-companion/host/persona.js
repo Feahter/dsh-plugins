@@ -231,7 +231,91 @@ export function createBrain({
     return typeof value === 'string' ? value.trim() : ''
   }
 
+  /**
+   * One chat-completions round trip. `decide()` calls it with no options, so the
+   * defaults below are the contract two tests pin (`max_tokens: 300`,
+   * `temperature: 0.6`); the theme designer calls it with a longer output
+   * budget, a tighter temperature and its own timeout.
+   * @param {Array<{ role: string, content: string }>} messages
+   * @param {{ maxTokens?: number, temperature?: number, timeoutMs?: number }} [options]
+   * @returns {Promise<{ text: string, model: string, usage: { promptTokens: number, completionTokens: number } }>}
+   */
+  async function request(messages, { maxTokens = 300, temperature = 0.6, timeoutMs = 30_000 } = {}) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw brainError(400, 'invalid', 'messages 必须是非空数组')
+    }
+    const key = await readKey()
+    if (key === '') throw brainError(503, 'service-missing', '没有配置 DeepSeek API key')
+
+    const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
+    let response
+    try {
+      response = await fetchImpl(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: false,
+          temperature,
+          max_tokens: maxTokens,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw brainError(502, 'upstream', `连不上模型服务：${detail}`)
+    }
+
+    if (!response.ok) {
+      let detail = ''
+      try {
+        detail = (await response.text()).slice(0, 200)
+      } catch {
+        detail = ''
+      }
+      throw brainError(
+        502,
+        'upstream',
+        `模型服务返回 HTTP ${response.status}${detail === '' ? '' : `：${detail}`}`,
+      )
+    }
+
+    let payload
+    try {
+      payload = await response.json()
+    } catch {
+      throw brainError(502, 'upstream', '模型返回的不是 JSON')
+    }
+
+    const content = payload?.choices?.[0]?.message?.content
+    const raw =
+      typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+          ? content
+              .map((part) =>
+                typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '',
+              )
+              .join('')
+          : ''
+    if (raw.trim() === '') throw brainError(502, 'upstream', '模型返回了空回复')
+
+    return {
+      text: raw,
+      model: typeof payload?.model === 'string' && payload.model.trim() !== '' ? payload.model.trim() : model,
+      usage: {
+        promptTokens: Number.isFinite(payload?.usage?.prompt_tokens) ? payload.usage.prompt_tokens : 0,
+        completionTokens: Number.isFinite(payload?.usage?.completion_tokens) ? payload.usage.completion_tokens : 0,
+      },
+    }
+  }
+
   return {
+    request,
     /**
      * @param {{ utterance?: unknown, history?: unknown, sessionTitles?: unknown }} [input]
      * @returns {Promise<{ say: string, task: { title: string, text: string } | null }>}
@@ -239,67 +323,8 @@ export function createBrain({
     async decide({ utterance, history, sessionTitles } = {}) {
       const text = asTrimmedString(utterance)
       if (text === '') throw brainError(400, 'invalid', 'utterance 不能为空')
-      const key = await readKey()
-      if (key === '') throw brainError(503, 'service-missing', '没有配置 DeepSeek API key')
-
-      const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
-      let response
-      try {
-        response = await fetchImpl(url, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: buildMessages({ utterance: text, history, sessionTitles }),
-            stream: false,
-            temperature: 0.6,
-            max_tokens: 300,
-          }),
-          signal: AbortSignal.timeout(30_000),
-        })
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        throw brainError(502, 'upstream', `连不上模型服务：${detail}`)
-      }
-
-      if (!response.ok) {
-        let detail = ''
-        try {
-          detail = (await response.text()).slice(0, 200)
-        } catch {
-          detail = ''
-        }
-        throw brainError(
-          502,
-          'upstream',
-          `模型服务返回 HTTP ${response.status}${detail === '' ? '' : `：${detail}`}`,
-        )
-      }
-
-      let payload
-      try {
-        payload = await response.json()
-      } catch {
-        throw brainError(502, 'upstream', '模型返回的不是 JSON')
-      }
-
-      const content = payload?.choices?.[0]?.message?.content
-      const raw =
-        typeof content === 'string'
-          ? content
-          : Array.isArray(content)
-            ? content
-                .map((part) =>
-                  typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '',
-                )
-                .join('')
-            : ''
-      if (raw.trim() === '') throw brainError(502, 'upstream', '模型返回了空回复')
-
-      return parseDecision(raw)
+      const reply = await request(buildMessages({ utterance: text, history, sessionTitles }))
+      return parseDecision(reply.text)
     },
   }
 }

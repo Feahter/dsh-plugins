@@ -5,19 +5,6 @@ window.__ModuleLoader__.load({
   factory(require) {
     'use strict';
 // ---- src/client/characters.js ----
-// ---------------------------------------------------------------------------
-// characters.js — the cast of the voice companion.
-//
-// Every character owns its own artwork, its own name, its own spoken labels and
-// its own voice preference. avatar.js only knows this contract:
-//
-//   { id, name, tagline, voice, labels, build(doc) -> { svg, mouth, mouthPath } }
-//
-// `mouth` is a live <path>; `mouthPath(level)` returns the `d` for a 0..1 mouth
-// opening. Everything is built from live SVG nodes (no innerHTML) so the same
-// code runs in the browser, in the offline harness and in the bundler.
-// ---------------------------------------------------------------------------
-
 const ART_NS = 'http://www.w3.org/2000/svg';
 
 function artNode(doc, tag, attrs) {
@@ -92,16 +79,10 @@ function artMouthId(doc, path) {
 
 let artUid = 0;
 
-// --------------------------------------------------------------- 大肥鱼 whale
 
-// Official DeepSeek whale silhouette (favicon.svg), split into the outer body
-// and the white belly. Both are drawn inside one 50x50 -> 240x200 transform.
 const WHALE_BODY_PATH = 'M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479Z';
 const WHALE_BELLY_PATH = 'M24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398Z';
 
-// The face sits on the head (the big round end, on the left) and on the white
-// jaw. It used to sit at (141,101)/(163,130) — on the tail end of the body,
-// which is what the bug report called "eyes and mouth on the tail".
 const WHALE_EYE = { cx: 64, cy: 70 };
 const WHALE_PUPIL = { cx: 60.5, cy: 74, r: 8.2 };
 const WHALE_GLINT = { cx: 57, cy: 70, r: 3.2 };
@@ -140,7 +121,6 @@ function buildWhale(doc) {
   torso.appendChild(artPath(doc, WHALE_BELLY_PATH, { fill: '#f4f7ff' }));
   whale.appendChild(torso);
 
-  // Blowhole on the back, feeding the spout that only shows while speaking.
   whale.appendChild(artEllipse(doc, 102, 42, 7, 3.2, {
     transform: 'rotate(-20 102 42)',
     fill: '#22307a',
@@ -177,11 +157,7 @@ function buildWhale(doc) {
   return { svg, mouth, mouthPath: whaleMouthPath };
 }
 
-// ------------------------------------------------------------- 小肥鱼 chibi
 
-// An original anime "kanban girl": twin tails, sailor uniform, the same headset
-// the voice companion talks through. Drawn for the 240x200 stage at 186x155, so
-// every shape stays bold enough to read at panel size.
 const CHIBI_MOUTH = { cx: 120, cy: 137, half: 10 };
 
 function chibiMouthPath(level) {
@@ -201,7 +177,6 @@ function buildChibi(doc) {
   const glowId = uid + '-glow';
   const uniformId = uid + '-uniform';
   const { svg, defs, body } = artCanvas(doc, 'vc-fish-body');
-  // 半身像是竖构图，把取景框收到头肩，才不会在横构图的面板里显得只有一半大。
   svg.setAttribute('viewBox', '46 20 148 180');
 
   defs.appendChild(artGradient(doc, hairId, '0.15', '0', '0.85', '1', [
@@ -228,16 +203,13 @@ function buildChibi(doc) {
 
   chibi.appendChild(artEllipse(doc, 120, 110, 84, 78, { fill: 'url(#' + glowId + ')' }));
 
-  // Twin tails, then the hair mass behind the head.
   chibi.appendChild(artPath(doc, 'M60 116 C44 140 40 168 45 191 C46 198 56 198 58 191 C64 166 69 140 71 120 Z', { fill: hair }));
   chibi.appendChild(artPath(doc, 'M180 116 C196 140 200 168 195 191 C194 198 184 198 182 191 C176 166 171 140 169 120 Z', { fill: hair }));
   chibi.appendChild(artEllipse(doc, 120, 104, 57, 61, { fill: hair }));
 
-  // Neck is drawn before the face so the chin hides its top edge.
   chibi.appendChild(artPath(doc, 'M108 132 h24 v34 c0 5 -5 8 -12 8 s-12 -3 -12 -8 z', { fill: '#efc3b1' }));
   chibi.appendChild(artEllipse(doc, 120, 106, 47, 49, { fill: '#ffe7da' }));
 
-  // Sailor uniform and collar.
   chibi.appendChild(artPath(doc, 'M120 168 C98 168 74 176 62 189 C56 196 60 200 68 200 h104 c8 0 12 -4 6 -11 C166 176 142 168 120 168 Z', { fill: 'url(#' + uniformId + ')' }));
   chibi.appendChild(artPath(doc, 'M101 176 C92 182 85 190 82 200 h76 c-3 -10 -10 -18 -19 -24 z', { fill: '#f4f7ff' }));
   chibi.appendChild(artPath(doc, 'M101 180 C94 186 88 192 86 200 M139 180 C146 186 152 192 154 200', {
@@ -250,7 +222,6 @@ function buildChibi(doc) {
   chibi.appendChild(artPath(doc, 'M120 178 l11 -6 v12 z', { fill: '#4a63d8' }));
   chibi.appendChild(artCircle(doc, 120, 178, 3.6, { fill: '#8fb0ff' }));
 
-  // Bob fringe with five soft tips, plus the two locks framing the face.
   chibi.appendChild(artPath(doc, 'M63 100 C61 58 88 37 120 37 C152 37 179 58 177 100 Q170 94 164 98 Q158 88 153 88 Q147 94 142 98 Q136 88 131 88 Q125 94 120 98 Q114 88 109 88 Q103 94 98 98 Q92 88 87 88 Q81 94 76 98 Q69 92 63 100 Z', { fill: hair }));
   chibi.appendChild(artPath(doc, 'M70 88 C63 112 65 136 60 154', {
     fill: 'none', stroke: hair, 'stroke-width': '14', 'stroke-linecap': 'round',
@@ -262,7 +233,6 @@ function buildChibi(doc) {
     fill: 'none', stroke: '#d6e2ff', 'stroke-width': '3', 'stroke-linecap': 'round', opacity: '0.65',
   }));
 
-  // Headset: the band rides over the hair, the cups sit on the ears.
   chibi.appendChild(artPath(doc, 'M62 106 C62 34 178 34 178 106', {
     fill: 'none', stroke: '#26325e', 'stroke-width': '9', 'stroke-linecap': 'round',
   }));
@@ -277,7 +247,6 @@ function buildChibi(doc) {
     fill: 'none', stroke: '#6e8ff9', 'stroke-width': '4.5', 'stroke-linecap': 'round',
   }));
 
-  // Eyes: one group so the shared blink animation can squash both.
   const eyes = artGroup(doc, 'vc-eye');
   for (const cx of [100, 140]) {
     eyes.appendChild(artEllipse(doc, cx, 114, 13, 15, { fill: '#fff' }));
@@ -313,9 +282,29 @@ function buildChibi(doc) {
   return { svg, mouth, mouthPath: chibiMouthPath };
 }
 
-// ----------------------------------------------------------------- the cast
+function buildCore(doc) {
+  const slot = doc.createElement('div');
+  slot.setAttribute('class', 'vc-core-slot');
+  slot.setAttribute('aria-hidden', 'true');
+  return { svg: slot, mouth: null, mouthPath: null };
+}
+
 
 const CHARACTERS = [
+  {
+    id: 'core',
+    name: '贾维斯',
+    tagline: '科幻核心',
+    voice: 'tide',
+    labels: {
+      idle: '待命中',
+      listening: '在听',
+      thinking: '在想',
+      speaking: '在说',
+      error: '信号不太好',
+    },
+    build: buildCore,
+  },
   {
     id: 'whale',
     name: '大肥鱼',
@@ -346,9 +335,8 @@ const CHARACTERS = [
   },
 ];
 
-const DEFAULT_CHARACTER = CHARACTERS[0].id;
+const DEFAULT_CHARACTER = 'whale';
 
-// 与 host/voice.js 的 VOICE_CATALOG 同义：浏览器端只需要 id 和中文名。
 const VOICE_OPTIONS = [
   { id: 'stella', label: '明亮' },
   { id: 'tide', label: '温柔' },
@@ -356,7 +344,6 @@ const VOICE_OPTIONS = [
 
 const CUSTOM_CHARACTER_ID = 'custom';
 const CUSTOM_FACE_NAME = '我的形象';
-// 自定义形象不知道名字，文案就不拼名字，只描述状态。
 const CUSTOM_LABELS = {
   idle: '待命中',
   listening: '在听',
@@ -365,7 +352,6 @@ const CUSTOM_LABELS = {
   error: '信号不太好',
 };
 
-// 只接受 dataURL，挡掉 javascript: 之类的 src。
 function customFaceOf(face) {
   if (!face || typeof face !== 'object') return null;
   const src = typeof face.src === 'string' ? face.src.trim() : '';
@@ -384,7 +370,7 @@ function buildCustomFace(doc, face) {
 }
 
 function listCharacters() {
-  return CHARACTERS.map((entry) => ({
+  return CHARACTERS.filter((entry) => entry.id !== 'core').map((entry) => ({
     id: entry.id,
     name: entry.name,
     tagline: entry.tagline,
@@ -403,8 +389,7 @@ function characterById(id) {
 function resolveCharacter(id, face) {
   if (String(id) === CUSTOM_CHARACTER_ID) {
     const custom = customFaceOf(face);
-    // 存了 custom 但没有可用图片时回落到默认内置形象。
-    if (!custom) return CHARACTERS[0];
+    if (!custom) return characterById('whale') || CHARACTERS[0];
     return {
       id: CUSTOM_CHARACTER_ID,
       name: custom.name,
@@ -422,8 +407,6 @@ function nextCharacterId(id) {
   return CHARACTERS[(index + 1) % CHARACTERS.length].id;
 }
 
-// Pure mouth geometry, no DOM: used by the offline tests to assert that the
-// live <path> follows the audio level.
 function mouthPathFor(id, level) {
   const character = resolveCharacter(id);
   return character.id === 'chibi' ? chibiMouthPath(level) : whaleMouthPath(level);
@@ -443,12 +426,1171 @@ function renderCharacter(doc, id, face) {
   };
 }
 
-// ---- src/client/voice-profile.js ----
-// Voice profile: which TTS voice fills each slot, plus playback speed.
-//
-// This is a Browser module (no imports) so it also loads in node tests: the
-// storage calls are guarded and fall back to the defaults outside a window.
+// ---- src/client/core3d.js ----
+const TAU = Math.PI * 2;
+const FALLBACK = {
+  idle: ['#dfe9ff', '#8fb4ff', '#6b85ff'],
+  listening: ['#d8ffe9', '#7fe3a8', '#2fbf86'],
+  thinking: ['#e2ecff', '#9db4ff', '#6b85ff'],
+  speaking: ['#eef4ff', '#a9c0ff', '#7d95ff'],
+  error: ['#ffd9d9', '#ff7676', '#7a2020'],
+};
+const KIND = { webgl2: 'webgl2', webgl1: 'webgl', canvas2d: '2d' };
+const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const RGB = /^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)/i;
 
+function pickCoreBackend(env) {
+  const e = env || {};
+  if (e.quality === 'off' || e.dom === false) return 'none';
+  if (e.webgl2) return 'webgl2';
+  if (e.webgl1) return 'webgl1';
+  if (e.canvas2d) return 'canvas2d';
+  return 'css';
+}
+
+const CORE_STATE_STYLE = {
+  idle: { spin: 1.0, ring: 1.0, glow: 0.55, jitter: 0, desat: 0, pulse: 0.10 },
+  listening: { spin: 1.4, ring: 1.35, glow: 0.70, jitter: 0, desat: 0, pulse: 0.18 },
+  thinking: { spin: 2.6, ring: 1.15, glow: 0.62, jitter: 0, desat: 0, pulse: 0.22 },
+  speaking: { spin: 1.8, ring: 1.10, glow: 0.85, jitter: 0, desat: 0, pulse: 0.40 },
+  error: { spin: 0.6, ring: 0.80, glow: 0.35, jitter: 1, desat: 0.85, pulse: 0.05 },
+};
+
+function projectRing(angle, radius, squash, phase, count) {
+  const n = Number(count);
+  const total = Number.isFinite(n) && n >= 1 ? Math.min(512, Math.floor(n)) : 48;
+  const r = Number.isFinite(Number(radius)) ? Number(radius) : 0;
+  const sq = Number.isFinite(Number(squash)) ? Number(squash) : 1;
+  const a0 = (Number.isFinite(Number(angle)) ? Number(angle) : 0) + (Number.isFinite(Number(phase)) ? Number(phase) : 0);
+  const out = [];
+  for (let i = 0; i < total; i += 1) {
+    const a = a0 + (i / total) * TAU;
+    const depth = (Math.sin(a) + 1) / 2;
+    out.push({ angle: a, x: Math.cos(a) * r, y: Math.sin(a) * r * sq, depth, scale: 0.65 + 0.35 * depth });
+  }
+  return out;
+}
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const nowMs = (win) => {
+  try {
+    const p = win && win.performance;
+    return p && typeof p.now === 'function' ? p.now() : Date.now();
+  } catch (_) { return Date.now(); }
+};
+const pixelRatio = (win) => {
+  try {
+    const n = Number(win && win.devicePixelRatio);
+    return Number.isFinite(n) && n > 0 ? Math.min(2, Math.max(1, n)) : 1;
+  } catch (_) { return 1; }
+};
+function setAttr(node, name, value) {
+  try { if (node && typeof node.setAttribute === 'function') node.setAttribute(name, String(value)); } catch (_) { /* ignore */ }
+}
+function styleSet(node, prop, value) {
+  if (!node || !node.style) return;
+  try {
+    if (typeof node.style.setProperty === 'function') node.style.setProperty(prop, String(value));
+    else node.style[prop] = String(value);
+  } catch (_) { /* ignore */ }
+}
+function makeEl(doc, tag, cls) {
+  try {
+    if (!doc || typeof doc.createElement !== 'function') return null;
+    const el = doc.createElement(tag);
+    if (el && cls) setAttr(el, 'class', cls);
+    return el || null;
+  } catch (_) { return null; }
+}
+function clearKids(node) {
+  if (!node || !Array.isArray(node.children) || typeof node.removeChild !== 'function') return;
+  for (const kid of node.children.slice()) {
+    try { node.removeChild(kid); } catch (_) { /* ignore */ }
+  }
+}
+function parseColor(value) {
+  if (Array.isArray(value)) {
+    const nums = value.slice(0, 3).map(Number);
+    return nums.every(Number.isFinite) ? nums.map((v) => clamp01(v > 1 ? v / 255 : v)) : null;
+  }
+  const text = typeof value === 'string' ? value.trim() : '';
+  const hex = HEX.exec(text);
+  if (hex) {
+    const body = hex[1].length === 3 ? hex[1].replace(/./g, '$&$&') : hex[1];
+    const n = parseInt(body, 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  }
+  const rgb = RGB.exec(text);
+  return rgb ? [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255].map(clamp01) : null;
+}
+function toHex(rgb) {
+  let out = '#';
+  for (let i = 0; i < 3; i += 1) {
+    const part = Math.round(clamp01(rgb[i]) * 255).toString(16);
+    out += part.length < 2 ? '0' + part : part;
+  }
+  return out;
+}
+function rgba(entry, alpha) {
+  const c = (entry && entry.rgb) || [1, 1, 1];
+  const a = clamp01(alpha == null ? 1 : Number(alpha) || 0);
+  return 'rgba(' + Math.round(c[0] * 255) + ',' + Math.round(c[1] * 255) + ',' + Math.round(c[2] * 255) + ',' + a + ')';
+}
+function paletteFor(theme, state) {
+  const fb = FALLBACK[state] || FALLBACK.idle;
+  const fromTokens = theme && theme.tokens ? theme.tokens['core.palette.' + state] : undefined;
+  const legacy = theme && theme.core && theme.core.palette ? theme.core.palette[state] : undefined;
+  const raw = fromTokens !== undefined ? fromTokens : legacy;
+  const own = Array.isArray(raw) ? raw.map(String).filter(Boolean)
+    : (typeof raw === 'string' ? raw.split(',').map((s) => s.trim()).filter(Boolean) : []);
+  const out = [];
+  for (let i = 0; i < 3; i += 1) {
+    const rgb = parseColor(own[i]) || parseColor(fb[i]) || [1, 1, 1];
+    out.push({ rgb, hex: toHex(rgb) });
+  }
+  return out;
+}
+function makeClock(win) {
+  const c = { raf: 0, timer: 0 };
+  c.schedule = (fn) => {
+    if (c.raf || c.timer) return;
+    try {
+      if (win && typeof win.requestAnimationFrame === 'function') {
+        c.raf = win.requestAnimationFrame((ts) => { c.raf = 0; fn(ts); });
+        if (c.raf) return;
+      }
+    } catch (_) { c.raf = 0; }
+    try {
+      if (win && typeof win.setTimeout === 'function') c.timer = win.setTimeout(() => { c.timer = 0; fn(nowMs(win)); }, 33);
+    } catch (_) { c.timer = 0; }
+  };
+  c.cancel = () => {
+    try { if (c.raf && win && typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(c.raf); } catch (_) { /* ignore */ }
+    try { if (c.timer && win && typeof win.clearTimeout === 'function') win.clearTimeout(c.timer); } catch (_) { /* ignore */ }
+    c.raf = 0;
+    c.timer = 0;
+  };
+  return c;
+}
+
+const VERT = 'attribute vec2 aPos;\nvarying vec2 vUv;\nvoid main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }';
+function frag(steps) {
+  return `precision highp float;
+varying vec2 vUv;
+uniform vec2 uRes; uniform float uTime, uSpin, uRing, uGlow, uJitter, uDesat, uLevel, uPulse;
+uniform vec3 uInner, uRim, uGlowColor;
+mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+float sdTorus(vec3 p, vec2 t) { vec2 q = vec2(length(p.xz) - t.x, p.y); return length(q) - t.y; }
+float sdScene(vec3 p) {
+  float core = length(p) - (0.52 + 0.05 * sin(uTime * 1.7) + 0.14 * uLevel);
+  // Two orbital planes that do not share an axis: the second ring is tilted out
+  // of the first one's plane, so the projection reads as crossing orbits instead
+  // of two concentric ovals.
+  vec3 a = p; a.yz = rot2(0.62 + uTime * 0.45 * uSpin) * a.yz;
+  vec3 b = p; b.xz = rot2(0.62) * b.xz; b.yz = rot2(-0.48 + uTime * 0.30 * uSpin) * b.yz;
+  return min(core, min(sdTorus(a, vec2(0.80 * uRing, 0.012)), sdTorus(b, vec2(0.66 * uRing, 0.010))));
+}
+vec3 calcNormal(vec3 p) { vec2 e = vec2(0.0015, -0.0015);
+  return normalize(e.xyy * sdScene(p + e.xyy) + e.yyx * sdScene(p + e.yyx) + e.yxy * sdScene(p + e.yxy) + e.xxx * sdScene(p + e.xxx)); }
+void main() {
+  vec2 uv = vUv; uv.x += uJitter * sin(uTime * 91.0) * 0.004;
+  vec2 q = uv * 2.0 - 1.0; q.x *= uRes.x / max(uRes.y, 1.0);
+  vec3 ro = vec3(0.0, 0.0, 2.55), rd = normalize(vec3(q, -1.6));
+  float t = 0.0, glow = 0.0, hit = 0.0;
+  for (int i = 0; i < ${steps}; i++) {
+    float d = sdScene(ro + rd * t);
+    glow += 0.013 / (0.05 + abs(d));
+    if (d < 0.0015) { hit = 1.0; break; }
+    t += max(d * 0.8, 0.002); if (t > 6.0) break;
+  }
+  vec3 col = vec3(0.0); float alpha = 0.0;
+  if (hit > 0.5) {
+    vec3 n = calcNormal(ro + rd * t);
+    float fres = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+    float beat = 1.0 + uPulse * sin(uTime * 4.2);
+    // A soft key light from the upper left keeps the sphere from reading as a
+    // flat white disc once the volumetric glow is added on top.
+    float key = 0.42 + 0.58 * smoothstep(-0.45, 0.85, dot(n, normalize(vec3(-0.55, 0.75, 0.65))));
+    col = mix(uInner, uRim, fres) * (0.55 + 0.65 * fres) * beat * key + uRim * 0.12;
+    alpha = clamp(0.65 + fres * 0.35, 0.0, 1.0);
+  }
+  float g = min(glow, 1.5);
+  col += uGlowColor * g * uGlow * 0.13;
+  alpha = clamp(alpha + g * uGlow * 0.12, 0.0, 1.0);
+  col += vec3(sin(vUv.y * 220.0 + uTime * 6.0) * 0.02);
+  float luma = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(col, vec3(luma), uDesat) * (1.0 - 0.25 * uDesat); alpha *= 1.0 - 0.35 * uDesat;
+  gl_FragColor = vec4(col, alpha);
+}`;
+}
+
+let cssSeq = 0;
+
+function createCore3D(options) {
+  const o = options || {};
+  const doc = o.doc || (typeof document === 'undefined' ? null : document);
+  const win = o.win || (doc && doc.defaultView) || (typeof window === 'undefined' ? null : window);
+  const quality = o.quality === 'high' || o.quality === 'low' || o.quality === 'off' ? o.quality : 'auto';
+  const reduced = !!o.reducedMotion;
+  const onError = typeof o.onError === 'function' ? o.onError : null;
+  const stats = { kind: 'none', state: 'idle', frames: 0, avgMs: 0, downgrades: 0, reason: '', lite: false, quality, disposed: false };
+  const root = makeEl(doc, 'div', 'vc-core3d');
+
+  if (!root) {
+    let dead = false;
+    const inert = {
+      root: null, kind: 'none',
+      setState(next) { return Object.prototype.hasOwnProperty.call(CORE_STATE_STYLE, next) ? next : 'idle'; },
+      setLevel() { return 0; },
+      setTheme(value) { return value || null; },
+      resize() {},
+      frameStats() { return { kind: 'none', state: 'idle', frames: 0, avgMs: 0, downgrades: 0, reason: 'no-doc', lite: false, quality, disposed: dead }; },
+      dispose() { if (dead) return false; dead = true; return true; },
+    };
+    inert.destroy = inert.dispose;
+    return inert;
+  }
+
+  for (const [prop, value] of [['position', 'relative'], ['display', 'block'], ['width', '100%'], ['height', '100%'], ['pointer-events', 'none']]) styleSet(root, prop, value);
+  setAttr(root, 'data-kind', 'pending');
+  setAttr(root, 'data-state', 'idle');
+  setAttr(root, 'aria-hidden', 'true');
+
+  let state = 'idle';
+  let level = 0;
+  let theme = o.theme || null;
+  let palette = paletteFor(theme, state);
+  let disposed = false;
+  let backend = null;
+  let chain = [];
+  let at = -1;
+  let elapsed = 0;
+  let last = 0;
+  let lastDraw = -Infinity;
+  let autoFrames = 0;
+  let running = false;
+  let notice = '';
+  let observer = null;
+  const probes = Object.create(null);
+  const clock = makeClock(win);
+
+  if (o.mount && typeof o.mount.appendChild === 'function') {
+    try { o.mount.appendChild(root); } catch (_) { /* ignore */ }
+  }
+
+  function report(reason) {
+    notice = String(reason == null ? '' : reason);
+    stats.reason = notice;
+    if (onError && notice) {
+      try { onError(notice); } catch (_) { /* ignore */ }
+    }
+  }
+  function measure() {
+    const host = o.mount || root;
+    let w = 0;
+    let h = 0;
+    try { w = Number(host && (host.clientWidth || host.offsetWidth)); h = Number(host && (host.clientHeight || host.offsetHeight)); } catch (_) { /* ignore */ }
+    return { w: Number.isFinite(w) && w > 0 ? w : 220, h: Number.isFinite(h) && h > 0 ? h : 220 };
+  }
+  function view() {
+    return { state, style: CORE_STATE_STYLE[state] || CORE_STATE_STYLE.idle, level, palette, time: elapsed / 1000 };
+  }
+  function probe(kind) {
+    if (kind in probes) return probes[kind];
+    let found = null;
+    try {
+      const canvas = typeof doc.createElement === 'function' ? doc.createElement('canvas') : null;
+      if (canvas && typeof canvas.getContext === 'function') {
+        const ctx = canvas.getContext(KIND[kind]);
+        if (ctx) found = { canvas, ctx };
+      }
+    } catch (_) { found = null; }
+    probes[kind] = found;
+    return found;
+  }
+  function detect() {
+    if (quality === 'off') return 'none';
+    const webgl2 = !!probe('webgl2');
+    const webgl1 = webgl2 ? false : !!probe('webgl1');
+    const canvas2d = webgl2 || webgl1 ? false : !!probe('canvas2d');
+    if (!webgl2 && !webgl1 && !canvas2d) return 'css';
+    return pickCoreBackend({ webgl2, webgl1, canvas2d, quality, dom: true });
+  }
+
+  function buildGL(entry, kind) {
+    const canvas = entry.canvas;
+    const gl = entry.ctx;
+    if (!gl || typeof gl.createShader !== 'function') return null;
+    let program = null;
+    let buffer = null;
+    let u = null;
+    let lite = quality === 'low';
+    const names = ['uRes', 'uTime', 'uSpin', 'uRing', 'uGlow', 'uJitter', 'uDesat', 'uLevel', 'uPulse', 'uInner', 'uRim', 'uGlowColor'];
+    function fail(err) {
+      try {
+        if (buffer) gl.deleteBuffer(buffer);
+        if (program) gl.deleteProgram(program);
+      } catch (_) { /* ignore */ }
+      program = null;
+      buffer = null;
+      if (err) report(err.message || err);
+      return null;
+    }
+    function compile(type, source) {
+      const sh = gl.createShader(type);
+      if (!sh) return null;
+      gl.shaderSource(sh, source);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        gl.deleteShader(sh);
+        return null;
+      }
+      return sh;
+    }
+    function link(count) {
+      const vs = compile(gl.VERTEX_SHADER, VERT);
+      const fs = compile(gl.FRAGMENT_SHADER, frag(count));
+      if (!vs || !fs) {
+        if (vs) gl.deleteShader(vs);
+        if (fs) gl.deleteShader(fs);
+        return null;
+      }
+      const prog = gl.createProgram();
+      if (!prog) return null;
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        gl.deleteProgram(prog);
+        return null;
+      }
+      return prog;
+    }
+    function bind(prog) {
+      const map = Object.create(null);
+      for (const name of names) map[name] = gl.getUniformLocation(prog, name);
+      return map;
+    }
+    function setup() {
+      gl.useProgram(program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      const slot = gl.getAttribLocation(program, 'aPos');
+      if (slot >= 0) {
+        gl.enableVertexAttribArray(slot);
+        gl.vertexAttribPointer(slot, 2, gl.FLOAT, false, 0, 0);
+      }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    }
+    function set1(name, value) { const loc = u[name]; if (loc != null) gl.uniform1f(loc, Number(value) || 0); }
+    function set3(name, rgb) { const loc = u[name]; if (loc != null) gl.uniform3f(loc, rgb[0], rgb[1], rgb[2]); }
+    try {
+      program = link(40);
+      if (!program) return fail('shader');
+      buffer = gl.createBuffer();
+      if (!buffer) return fail('buffer');
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      u = bind(program);
+      setup();
+    } catch (err) {
+      return fail(err);
+    }
+    function resize(w, h) {
+      const dpr = pixelRatio(win);
+      try {
+        canvas.width = Math.max(1, Math.round(w * dpr));
+        canvas.height = Math.max(1, Math.round(h * dpr));
+      } catch (_) { /* ignore */ }
+      styleSet(canvas, 'width', w + 'px');
+      styleSet(canvas, 'height', h + 'px');
+      styleSet(canvas, 'display', 'block');
+    }
+    function draw(v) {
+      if (!program) return;
+      const s = v.style;
+      gl.useProgram(program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      set1('uTime', v.time);
+      set1('uSpin', s.spin);
+      set1('uRing', s.ring);
+      set1('uGlow', s.glow + v.level * 0.4);
+      set1('uJitter', s.jitter);
+      set1('uDesat', s.desat);
+      set1('uLevel', v.level);
+      set1('uPulse', s.pulse);
+      set3('uInner', v.palette[0].rgb);
+      set3('uRim', v.palette[1].rgb);
+      set3('uGlowColor', v.palette[2].rgb);
+      if (u.uRes != null && typeof gl.uniform2f === 'function') gl.uniform2f(u.uRes, canvas.width || 1, canvas.height || 1);
+      gl.viewport(0, 0, canvas.width || 1, canvas.height || 1);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    function setLite() {
+      if (lite) return true;
+      const next = link(24);
+      if (!next) return false;
+      if (program) gl.deleteProgram(program);
+      program = next;
+      u = bind(next);
+      setup();
+      lite = true;
+      return true;
+    }
+    function onLost(event) {
+      try { if (event && typeof event.preventDefault === 'function') event.preventDefault(); } catch (_) { /* ignore */ }
+      if (!disposed) advance('contextlost');
+    }
+    if (typeof canvas.addEventListener === 'function') {
+      try { canvas.addEventListener('webglcontextlost', onLost, false); } catch (_) { /* ignore */ }
+    }
+    return {
+      kind, node: canvas, animate: true, get lite() { return lite; }, resize, draw, setLite,
+      dispose() {
+        if (typeof canvas.removeEventListener === 'function') {
+          try { canvas.removeEventListener('webglcontextlost', onLost, false); } catch (_) { /* ignore */ }
+        }
+        try {
+          if (buffer) gl.deleteBuffer(buffer);
+          if (program) gl.deleteProgram(program);
+        } catch (_) { /* ignore */ }
+        program = null;
+        buffer = null;
+      },
+    };
+  }
+
+  function build2D(entry) {
+    const canvas = entry.canvas;
+    const ctx = entry.ctx;
+    if (!ctx || typeof ctx.clearRect !== 'function' || typeof ctx.beginPath !== 'function') return null;
+    let w = 220;
+    let h = 220;
+    function resize(nw, nh) {
+      w = Math.max(1, nw);
+      h = Math.max(1, nh);
+      const dpr = pixelRatio(win);
+      try {
+        canvas.width = Math.max(1, Math.round(w * dpr));
+        canvas.height = Math.max(1, Math.round(h * dpr));
+      } catch (_) { /* ignore */ }
+      styleSet(canvas, 'width', w + 'px');
+      styleSet(canvas, 'height', h + 'px');
+      styleSet(canvas, 'display', 'block');
+    }
+    function ring(cx, cy, radius, squash, phase, count, entry2, glow) {
+      const pts = projectRing(0, radius, squash, phase, count);
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i += 1) {
+        const x = cx + pts[i].x;
+        const y = cy + pts[i].y;
+        if (i === 0 && typeof ctx.moveTo === 'function') ctx.moveTo(x, y);
+        else if (typeof ctx.lineTo === 'function') ctx.lineTo(x, y);
+      }
+      if (typeof ctx.closePath === 'function') ctx.closePath();
+      ctx.strokeStyle = rgba(entry2, 0.16 + 0.62 * clamp01(glow));
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+    }
+    function draw(v) {
+      const s = v.style;
+      const t = v.time;
+      const dpr = pixelRatio(win);
+      if (typeof ctx.setTransform === 'function') ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const cx = w / 2;
+      const cy = h / 2;
+      const r = Math.min(w, h) * 0.30 * (1 + 0.05 * Math.sin(t * 1.7) + 0.14 * v.level) * (1 + s.pulse * Math.sin(t * 4.2));
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 1;
+      if (typeof ctx.createRadialGradient === 'function') {
+        const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.1);
+        if (halo && typeof halo.addColorStop === 'function') {
+          halo.addColorStop(0, rgba(v.palette[2], 0.30 * (0.4 + s.glow)));
+          halo.addColorStop(0.45, rgba(v.palette[1], 0.14 * s.glow));
+          halo.addColorStop(1, rgba(v.palette[2], 0));
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * 2.1, 0, TAU);
+          ctx.fill();
+        }
+        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, r));
+        if (core && typeof core.addColorStop === 'function') {
+          core.addColorStop(0, rgba(v.palette[0], 0.95));
+          core.addColorStop(0.5, rgba(v.palette[1], 0.55));
+          core.addColorStop(1, rgba(v.palette[2], 0));
+          ctx.fillStyle = core;
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.max(1, r), 0, TAU);
+          ctx.fill();
+        }
+      }
+      ring(cx, cy, Math.min(w, h) * 0.38 * s.ring, 0.44, t * 0.45 * s.spin, 64, v.palette[1], s.glow);
+      ring(cx, cy, Math.min(w, h) * 0.31 * s.ring, 0.30, -t * 0.30 * s.spin, 56, v.palette[2], s.glow * 0.8);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    return { node: canvas, kind: 'canvas2d', animate: true, lite: false, resize, draw, dispose() {} };
+  }
+
+  function buildCSS() {
+    cssSeq += 1;
+    const id = cssSeq;
+    const cls = 'vc-core-css-' + id;
+    const kf = 'vc-core-kf-' + id;
+    const frame = makeEl(doc, 'div', cls);
+    const halo = makeEl(doc, 'div', cls + '-halo');
+    const core = makeEl(doc, 'div', cls + '-core');
+    const ringA = makeEl(doc, 'div', cls + '-ring');
+    const ringB = makeEl(doc, 'div', cls + '-ring ' + cls + '-ring-b');
+    const sheet = makeEl(doc, 'style', null);
+    if (!frame || !halo || !core || !ringA || !ringB || !sheet) return null;
+    const s = CORE_STATE_STYLE[state] || CORE_STATE_STYLE.idle;
+    styleSet(frame, '--vc-inner', palette[0].hex);
+    styleSet(frame, '--vc-rim', palette[1].hex);
+    styleSet(frame, '--vc-glow', palette[2].hex);
+    styleSet(frame, '--vc-spin', (8 / Math.max(0.2, s.spin)).toFixed(2) + 's');
+    for (const node of [halo, core, ringA, ringB]) {
+      if (node && typeof frame.appendChild === 'function') frame.appendChild(node);
+    }
+    const css = [
+      '.' + cls + '{position:absolute;inset:0;overflow:hidden;pointer-events:none}',
+      '.' + cls + '-halo{position:absolute;left:50%;top:50%;width:84%;height:84%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,var(--vc-rim),var(--vc-glow) 34%,transparent 70%);opacity:.2;animation:' + kf + '-b 2.6s ease-in-out infinite}',
+      '.' + cls + '-core{position:absolute;left:50%;top:50%;width:52%;height:52%;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle at 42% 38%,#fff,var(--vc-inner) 24%,var(--vc-rim) 58%,transparent 78%);box-shadow:0 0 22px var(--vc-glow),0 0 58px var(--vc-glow);animation:' + kf + '-b 2.6s ease-in-out infinite}',
+      '.' + cls + '-ring{position:absolute;left:8%;top:38%;width:84%;height:24%;border-radius:50%;border:1px solid var(--vc-rim);box-shadow:0 0 12px var(--vc-glow);opacity:.75;animation:' + kf + '-s var(--vc-spin) linear infinite}',
+      '.' + cls + '-ring-b{left:15%;top:29%;width:70%;height:18%;border-color:var(--vc-glow);opacity:.45;animation-direction:reverse}',
+      '.vc-core3d[data-state="error"] .' + cls + '-core{filter:saturate(.15)}',
+      '@keyframes ' + kf + '-b{0%,100%{transform:translate(-50%,-50%) scale(.97);opacity:.82}50%{transform:translate(-50%,-50%) scale(1.04);opacity:1}}',
+      '@keyframes ' + kf + '-s{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
+    ].join('\n');
+    try { sheet.textContent = css; } catch (_) { /* ignore */ }
+    const host = doc.head || doc.body || null;
+    if (host && typeof host.appendChild === 'function') {
+      try { host.appendChild(sheet); } catch (_) { /* ignore */ }
+    }
+    if (reduced) {
+      for (const node of [halo, core, ringA, ringB]) styleSet(node, 'animation', 'none');
+    }
+    return {
+      node: frame, kind: 'css', animate: false, resize() {},
+      applyPalette(pal) {
+        styleSet(frame, '--vc-inner', pal[0].hex);
+        styleSet(frame, '--vc-rim', pal[1].hex);
+        styleSet(frame, '--vc-glow', pal[2].hex);
+      },
+      setState(next, st) {
+        setAttr(frame, 'data-state', next);
+        styleSet(frame, '--vc-spin', (8 / Math.max(0.2, st.spin)).toFixed(2) + 's');
+        styleSet(frame, 'filter', st.desat > 0 ? 'saturate(' + (1 - st.desat * 0.85).toFixed(2) + ')' : 'none');
+      },
+      dispose() {
+        if (sheet.parentNode && typeof sheet.parentNode.removeChild === 'function') {
+          try { sheet.parentNode.removeChild(sheet); } catch (_) { /* ignore */ }
+        }
+      },
+    };
+  }
+
+  function build(kind) {
+    try {
+      if (kind === 'webgl2' || kind === 'webgl1') {
+        const entry = probe(kind);
+        return entry ? buildGL(entry, kind) : null;
+      }
+      if (kind === 'canvas2d') {
+        const entry = probe('canvas2d');
+        return entry ? build2D(entry) : null;
+      }
+      if (kind === 'css') return buildCSS();
+    } catch (err) {
+      report(err && err.message ? err.message : String(err));
+    }
+    return null;
+  }
+  function teardown() {
+    if (!backend) return;
+    const dying = backend;
+    backend = null;
+    try { dying.dispose(); } catch (_) { /* ignore */ }
+    clearKids(root);
+  }
+  function repaint() {
+    if (disposed || !backend || typeof backend.draw !== 'function') return;
+    try {
+      backend.draw(view());
+      stats.frames += 1;
+    } catch (_) { /* ignore */ }
+  }
+  function frame(ts) {
+    if (disposed || !running || !backend) return;
+    if (doc && doc.hidden) { stopLoop(); return; }
+    const stamp = Number.isFinite(Number(ts)) ? Number(ts) : nowMs(win);
+    elapsed += (last ? Math.min(96, Math.max(0, stamp - last)) : 16.67);
+    last = stamp;
+    if (state === 'idle' && !reduced && stamp - lastDraw < 32) {
+      if (running) clock.schedule(frame);
+      return;
+    }
+    lastDraw = stamp;
+    const started = nowMs(win);
+    try { backend.draw(view()); } catch (err) { advance(err && err.message ? err.message : 'draw'); return; }
+    const cost = Math.max(0, nowMs(win) - started);
+    stats.frames += 1;
+    stats.avgMs = stats.avgMs ? stats.avgMs * 0.85 + cost * 0.15 : cost;
+    stats.lite = backend.lite === true;
+    if (quality === 'auto' && backend.animate && backend.kind !== 'canvas2d') {
+      autoFrames += 1;
+      if (autoFrames >= 30) {
+        autoFrames = 0;
+        if (stats.avgMs > 28) { advance('slow'); return; }
+        if (stats.avgMs > 22 && typeof backend.setLite === 'function' && backend.lite !== true) {
+          backend.setLite();
+          stats.lite = backend.lite === true;
+        }
+      }
+    }
+    if (running) clock.schedule(frame);
+  }
+  function startLoop() {
+    if (running || disposed || reduced || !backend || !backend.animate || (doc && doc.hidden)) return;
+    running = true;
+    last = 0;
+    clock.schedule(frame);
+  }
+  function stopLoop() {
+    running = false;
+    clock.cancel();
+  }
+  function activate(index, reason) {
+    teardown();
+    at = index;
+    const kind = chain[index];
+    const built = build(kind);
+    if (!built) {
+      if (reason) report(reason);
+      else if (!notice) report('unavailable:' + kind);
+      return false;
+    }
+    backend = built;
+    stats.kind = kind;
+    if (built.node && typeof root.appendChild === 'function') {
+      try { root.appendChild(built.node); } catch (_) { /* ignore */ }
+    }
+    setAttr(root, 'data-kind', kind);
+    setAttr(root, 'data-state', state);
+    if (typeof built.applyPalette === 'function') {
+      try { built.applyPalette(palette); } catch (_) { /* ignore */ }
+    }
+    if (typeof built.setState === 'function') {
+      try { built.setState(state, CORE_STATE_STYLE[state] || CORE_STATE_STYLE.idle); } catch (_) { /* ignore */ }
+    }
+    try { built.resize(measure().w, measure().h); } catch (_) { /* ignore */ }
+    if (reduced) repaint();
+    else startLoop();
+    return true;
+  }
+  function boot() {
+    const first = detect();
+    if (first === 'none') {
+      stats.kind = 'none';
+      setAttr(root, 'data-kind', 'none');
+      return;
+    }
+    const ladder = ['webgl2', 'webgl1', 'canvas2d', 'css'];
+    chain = ladder.slice(Math.max(0, ladder.indexOf(first)));
+    for (let i = 0; i < chain.length; i += 1) {
+      if (activate(i, null)) { stats.kind = chain[i]; return; }
+      stats.downgrades += 1;
+    }
+    stats.kind = 'none';
+    setAttr(root, 'data-kind', 'none');
+  }
+  function advance(reason) {
+    if (disposed) return;
+    report(reason);
+    stopLoop();
+    for (let i = (at < 0 ? 0 : at + 1); i < chain.length; i += 1) {
+      stats.downgrades += 1;
+      if (activate(i, reason)) { stats.kind = chain[i]; return; }
+    }
+    stats.kind = 'none';
+    setAttr(root, 'data-kind', 'none');
+  }
+  function setState(next) {
+    if (disposed) return state;
+    state = Object.prototype.hasOwnProperty.call(CORE_STATE_STYLE, next) ? next : 'idle';
+    stats.state = state;
+    palette = paletteFor(theme, state);
+    setAttr(root, 'data-state', state);
+    if (backend && typeof backend.setState === 'function') {
+      try { backend.setState(state, CORE_STATE_STYLE[state]); } catch (_) { /* ignore */ }
+    }
+    if (reduced) repaint();
+    return state;
+  }
+  function setLevel(value) {
+    if (disposed) return level;
+    const n = Number(value);
+    level = Number.isFinite(n) ? clamp01(n) : 0;
+    if (reduced) repaint();
+    return level;
+  }
+  function setTheme(next) {
+    if (disposed) return theme;
+    theme = next || null;
+    palette = paletteFor(theme, state);
+    if (backend && typeof backend.applyPalette === 'function') {
+      try { backend.applyPalette(palette); } catch (_) { /* ignore */ }
+    }
+    if (reduced) repaint();
+    return theme;
+  }
+  function resize() {
+    if (disposed) return;
+    const box = measure();
+    if (backend && typeof backend.resize === 'function') {
+      try { backend.resize(box.w, box.h); } catch (_) { /* ignore */ }
+    }
+    if (reduced) repaint();
+  }
+  function frameStats() {
+    return { kind: stats.kind, state, frames: stats.frames, avgMs: Math.round(stats.avgMs * 100) / 100, downgrades: stats.downgrades, reason: stats.reason, lite: backend ? backend.lite === true : false, quality, disposed };
+  }
+  function destroy() {
+    if (disposed) return false;
+    disposed = true;
+    running = false;
+    clock.cancel();
+    if (observer) {
+      try { observer.disconnect(); } catch (_) { /* ignore */ }
+      observer = null;
+    }
+    if (win && typeof win.removeEventListener === 'function') {
+      try { win.removeEventListener('resize', onResize); } catch (_) { /* ignore */ }
+    }
+    if (doc && typeof doc.removeEventListener === 'function') {
+      try { doc.removeEventListener('visibilitychange', onVisibility); } catch (_) { /* ignore */ }
+    }
+    teardown();
+    clearKids(root);
+    if (root.parentNode && typeof root.parentNode.removeChild === 'function') {
+      try { root.parentNode.removeChild(root); } catch (_) { /* ignore */ }
+    }
+    setAttr(root, 'data-kind', 'none');
+    stats.kind = 'none';
+    stats.disposed = true;
+    stats.lite = false;
+    return true;
+  }
+  function onResize() { resize(); }
+  function onVisibility() {
+    if (disposed) return;
+    if (doc && doc.hidden) stopLoop();
+    else startLoop();
+  }
+  if (win && typeof win.addEventListener === 'function') {
+    try { win.addEventListener('resize', onResize); } catch (_) { /* ignore */ }
+  }
+  if (doc && typeof doc.addEventListener === 'function') {
+    try { doc.addEventListener('visibilitychange', onVisibility); } catch (_) { /* ignore */ }
+  }
+  if (o.mount) {
+    const RO = (win && typeof win.ResizeObserver === 'function') ? win.ResizeObserver
+      : (typeof ResizeObserver === 'undefined' ? null : ResizeObserver);
+    if (RO) {
+      try {
+        observer = new RO(() => resize());
+        observer.observe(o.mount);
+      } catch (_) { observer = null; }
+    }
+  }
+
+  boot();
+
+  return {
+    root,
+    get kind() { return stats.kind; },
+    setState, setLevel, setTheme, resize, frameStats,
+    dispose: destroy,
+    destroy,
+  };
+}
+
+// ---- src/client/theme.js ----
+const THEME_VERSION = 1;
+const FONT_STACKS = {
+  system: 'system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif',
+  serif: 'Georgia,serif',
+  mono: 'ui-monospace,monospace',
+  rounded: '"SF Pro Rounded","PingFang SC",system-ui,sans-serif',
+};
+const TOKEN_GROUPS = [
+  ['board', ['board.bgFrom','color','rgba(20,32,66,.88)'],['board.bgTo','color','rgba(8,14,30,.94)'],
+    ['board.bgAngle','length','160deg'],['board.borderColor','color','rgba(120,150,255,.18)'],
+    ['board.borderWidth','length','1px'],['board.radius','length','20px'],['board.blur','length','14px'],
+    ['board.saturate','length','140%'],['board.shadow','shadow','0 18px 44px rgba(2,7,16,.5)'],
+    ['board.innerLight','color','rgba(255,255,255,.08)'],['board.padding','css','9px 12px 8px'],
+    ['board.gap','length','6px'],['board.width','length','340px'],['board.height','length','316px'],
+    ['board.z','number', 2147483000, { min: 0, max: 2147483647 }]],
+  ['type', ['type.font','enum','system', { options: ['system','serif','mono','rounded'] }],
+    ['type.size','length','13px'],['type.lineHeight','number', 1.45, { min: 0.8, max: 3 }]],
+  ['text', ['text.primary','color','#edf2ff'],['text.secondary','color','#cfd9f5'],
+    ['text.muted','color','#9fb0d6'],['text.onAccent','color','#04241b']],
+  ['accent', ['accent.base','color','#6b85ff'],['accent.strong','color','#4d6bfe'],['accent.soft','color','#7d95ff']],
+  ['dot', ['dot.size','length','6px'],['dot.idle','color','#8b93a7'],['dot.listening','color','#7fe3a8'],
+    ['dot.thinking','color','#9db4ff'],['dot.speaking','color','#8fa6ff'],['dot.error','color','#ff7676'],
+    ['chip.size','length','21px'],['chip.bg','color','rgba(255,255,255,.06)']],
+  ['button', ['btn.bg','color','rgba(255,255,255,.08)'],['btn.border','color','rgba(255,255,255,.16)'],
+    ['btn.color','color','#eef3ff'],['btn.radius','length','999px'],['btn.padding','css','5px 11px'],
+    ['btn.fontSize','length','11px'],['btn.focusRing','color','#9db4ff'],
+    ['start.from','color','#7d95ff'],['start.to','color','#4d6bfe'],
+    ['end.bg','color','rgba(255,104,104,.16)'],['end.border','color','rgba(255,128,128,.38)'],
+    ['end.color','color','#ffc4c4'],['mode.dictationFrom','color','#5fd0a8'],['mode.dictationTo','color','#22a37a']],
+  ['stage', ['stage.height','length','152px'],['stage.radius','length','14px'],['stage.bg','color','transparent'],
+    ['core.width','length','264px'],['core.height','length','140px'],['core.spin','duration','8s'],
+    ['core.glow','number', 0.55, { min: 0, max: 1 }],['core.displace','number', 0.18, { min: 0, max: 1 }],
+    ['core.rim','color','#8fb4ff'],['core.quality','enum','auto', { options: ['auto','high','low','off'] }],
+    ['core.palette.idle','css','#dfe9ff,#8fb4ff,#6b85ff', { parts: 3 }],
+    ['core.palette.listening','css','#d8ffe9,#7fe3a8,#2fbf86', { parts: 3 }],
+    ['core.palette.thinking','css','#e2ecff,#9db4ff,#6b85ff', { parts: 3 }],
+    ['core.palette.speaking','css','#eef4ff,#a9c0ff,#7d95ff', { parts: 3 }],
+    ['core.palette.error','css','#ffd9d9,#ff7676,#7a2020', { parts: 3 }]],
+  ['surface', ['bubble.bg','color','rgba(120,150,255,.10)'],['bubble.border','color','rgba(140,170,255,.14)'],
+    ['bubble.color','color','#e8eeff'],['bubble.radius','length','12px'],['bubble.fontSize','length','12px'],
+    ['bubble.userBg','color','rgba(140,170,255,.06)'],['partial.color','color','#9db4ff'],
+    ['receipt.bg','color','rgba(103,226,166,.12)'],['receipt.color','color','#8ff0c4'],
+    ['sheet.bgFrom','color','rgba(15,24,50,.97)'],['sheet.bgTo','color','rgba(6,11,24,.98)'],
+    ['sheet.radius','length','18px'],['sheet.scrim','color','rgba(2,5,12,.55)'],
+    ['field.bg','color','rgba(255,255,255,.06)'],['field.border','color','rgba(255,255,255,.14)'],
+    ['field.color','color','#dfe8ff'],['ripple.color','color','rgba(107,133,255,.55)'],
+    ['ripple.size','length','196px'],['ripple.duration','duration','2.6s'],
+    ['think.color','color','#93a9ff'],['think.duration','duration','1s'],
+    ['motion.speed','number', 1, { min: 0.1, max: 4 }],['motion.easing','easing','cubic-bezier(.2,.8,.2,1)'],
+    ['motion.idleFps','number', 30, { min: 1, max: 240 }],
+    ['motion.reducedMotion','enum','respect', { options: ['respect','static','off'] }]],
+];
+const TOKEN_SCHEMA = {};
+for (const [group, ...entries] of TOKEN_GROUPS) for (const [key, type, def, extra] of entries) TOKEN_SCHEMA[key] = { key, group, type, default: def, ...(extra || {}) };
+const tokenDefaults = () => { const out = {}; for (const key in TOKEN_SCHEMA) out[key] = TOKEN_SCHEMA[key].default; return out; };
+const DEFAULT_THEME = Object.freeze({ v: THEME_VERSION, name: '默认', tokens: Object.freeze(tokenDefaults()), css: Object.freeze({}) });
+
+const P = {
+  color: /^(?:#[0-9a-f]{3,8}|(?:rgb|rgba|hsl|hsla)\([-+0-9.%\s,/a-z]*\)|[a-z]{3,20})$/i,
+  length: /^(?:0|-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|%|em|rem|vh|vw|vmin|vmax|ch|ex|pt|cm|mm|deg|rad|turn|s|ms))$/,
+  number: /^-?(?:\d+(?:\.\d+)?|\.\d+)$/,
+  easing: /^(?:linear|ease(-in|-out|-in-out)?|step-start|step-end|cubic-bezier\([-\d.,\s]+\)|steps\([^)]*\))$/,
+  value: /^[-0-9a-zA-Z#.,%()/'"\s_+:]+$/,
+};
+P.shadow = P.value;
+const FORBIDDEN = ['@','url(','expression(','javascript:','behavior:','-moz-binding','/*','*/','<','>','{','}',';','\\','!important'];
+const clean = (v) => String(v).trim().replace(/\s+/g, ' ');
+const safe = (text) => { const lower = String(text).toLowerCase(); return FORBIDDEN.every((bad) => !lower.includes(bad)); };
+const plain = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
+function normalize(schema, raw) {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+  const text = clean(raw);
+  if (!text || text.length > 200 || !safe(text)) return null;
+  if (schema.type === 'number') {
+    if (!P.number.test(text)) return null;
+    const n = Number(text);
+    return (schema.min === undefined || n >= schema.min) && (schema.max === undefined || n <= schema.max) ? n : null;
+  }
+  if (schema.type === 'css') {
+    if (!P.value.test(text)) return null;
+    if (!schema.parts) return text;
+    const parts = text.split(',').map((part) => part.trim());
+    return parts.length === schema.parts && parts.every((part) => P.color.test(part)) ? parts.join(',') : null;
+  }
+  if (schema.type === 'font') return FONT_STACKS[text] !== undefined ? text : null;
+  if (schema.type === 'enum') return (schema.options || []).includes(text) ? text : null;
+  return (P[schema.type] || P.value).test(text) ? text : null;
+}
+
+const CSS_PARTS = 'root panel head dot label chip mode gear min start end stage bubble partial receipt sheet field ripple thinkDots core'.split(' ');
+const BLOCKED_PROP = /^(?:position|inset|top|right|bottom|left|z-index|display|pointer-events|content|visibility|float|cursor|user-select|min-width|min-height|max-width|max-height|width|height|margin|overflow|flex|grid)(?:-|$)/;
+const ALLOWED_PROP = /^(?:color|background|border|box-shadow|text-shadow|font|letter-spacing|line-height|opacity|filter|backdrop-filter|mix-blend-mode|transform|animation|transition|padding|gap|outline)(?:-|$)/;
+function sanitizePart(part, source, dropped) {
+  const keep = [];
+  for (const raw of String(source).split(';')) {
+    const piece = raw.trim();
+    if (!piece) continue;
+    const at = piece.indexOf(':');
+    if (at < 0) { dropped.push(`css:${part}:syntax`); continue; }
+    const prop = piece.slice(0, at).trim().toLowerCase();
+    const value = clean(piece.slice(at + 1));
+    if (!prop || !value || value.length > 160 || !safe(value) || BLOCKED_PROP.test(prop) || !ALLOWED_PROP.test(prop)
+      || !P.value.test(value) || value.replace(/var\(--vc-[a-z0-9-]+\)/g, '').includes('var(')) {
+      dropped.push(`css:${part}:${prop}`);
+      continue;
+    }
+    keep.push(`${prop}:${value}`);
+  }
+  const out = keep.slice(0, 12).join(';');
+  if (keep.length > 12) dropped.push(`css:${part}:count`);
+  if (out.length > 300) { dropped.push(`css:${part}:length`); return ''; }
+  return out;
+}
+
+function cssVarName(name) {
+  const kebab = String(name == null ? '' : name).replace(/\./g, '-').replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return kebab ? `--vc-${kebab}` : '';
+}
+
+function sanitizeTheme(input) {
+  const dropped = [];
+  const theme = { v: THEME_VERSION, name: '默认', tokens: tokenDefaults(), css: {} };
+  if (!plain(input)) { dropped.push('theme:not-an-object'); return { theme, dropped }; }
+  if (input.v !== undefined && input.v !== THEME_VERSION) dropped.push('theme:v');
+  if (typeof input.name === 'string' && input.name.trim()) theme.name = input.name.trim().slice(0, 40);
+  else if (input.name !== undefined) dropped.push('theme:name');
+  if (input.tokens !== undefined) {
+    if (!plain(input.tokens)) dropped.push('theme:tokens');
+    else for (const key of Object.keys(input.tokens)) {
+      const value = TOKEN_SCHEMA[key] ? normalize(TOKEN_SCHEMA[key], input.tokens[key]) : null;
+      if (value == null) dropped.push(`token:${key}`); else theme.tokens[key] = value;
+    }
+  }
+  if (input.css !== undefined) {
+    if (!plain(input.css)) dropped.push('css:not-an-object');
+    else {
+      let total = 0;
+      for (const part of CSS_PARTS) {
+        const source = input.css[part];
+        if (source == null) continue;
+        if (typeof source !== 'string') { dropped.push(`css:${part}:not-a-string`); continue; }
+        const block = sanitizePart(part, source, dropped);
+        if (!block) continue;
+        if (total + block.length > 3000) { dropped.push(`css:${part}:budget`); continue; }
+        total += block.length;
+        theme.css[part] = block;
+      }
+    }
+  }
+  return { theme, dropped };
+}
+
+const HUD_TOKENS = 'board.z board.bgTo board.gap board.shadow text.primary type.size type.lineHeight type.font btn.radius btn.padding dot.idle dot.error dot.thinking dot.speaking dot.listening think.duration'.split(' ');
+function decls(keys, tokens) {
+  return keys.map((key) => `${cssVarName(key)}:${TOKEN_SCHEMA[key] && TOKEN_SCHEMA[key].type === 'font' ? FONT_STACKS[tokens[key]] || FONT_STACKS.system : tokens[key]}`).join(';');
+}
+function themeToCss(input) {
+  const { theme } = sanitizeTheme(input == null ? DEFAULT_THEME : input);
+  const blocks = [`[data-vc-avatar]{${decls(Object.keys(TOKEN_SCHEMA), theme.tokens)}}`];
+  for (const part of CSS_PARTS) {
+    const block = theme.css[part];
+    if (!block) continue;
+    blocks.push(part === 'root' ? `[data-vc-avatar]{${block}}` : `[data-vc-avatar] .vc-${part === 'thinkDots' ? 'dots' : part}{${block}}`);
+  }
+  const hud = HUD_TOKENS.filter((key) => String(theme.tokens[key]) !== String(DEFAULT_THEME.tokens[key]));
+  if (hud.length) blocks.push(`.vc-hotkey-hud{${decls(hud, theme.tokens)}}`);
+  return blocks.join('\n');
+}
+
+function ensureThemeStyle(doc) {
+  if (!doc || typeof doc.createElement !== 'function') return null;
+  for (const root of [doc.head, doc.body]) for (const node of (root && root.children) || []) if (node && typeof node.getAttribute === 'function' && node.getAttribute('data-vc-theme-style') !== null) return node;
+  const parent = doc.head || doc.body;
+  if (!parent || typeof parent.appendChild !== 'function') return null;
+  const style = doc.createElement('style');
+  style.setAttribute('data-vc-theme-style', '');
+  parent.appendChild(style);
+  return style;
+}
+function applyTheme(doc, theme) {
+  const result = sanitizeTheme(theme == null ? DEFAULT_THEME : theme);
+  const css = themeToCss(result.theme);
+  const node = ensureThemeStyle(doc);
+  if (node) node.textContent = css;
+  return { theme: result.theme, css, dropped: result.dropped };
+}
+
+const LOCAL_STYLE_LEXICON = [
+  {id:'cyberpunk', kw: ['赛博朋克'],t: { 'accent.base': '#ff2a4d','board.bgFrom': '#12040a' } },
+  {id:'neon', kw: ['霓虹'],t: { 'accent.base': '#00e5ff','board.bgFrom': '#0b1020' } },
+  {id:'minimal', kw: ['极简'],t: { 'board.bgFrom': 'rgba(255,255,255,.92)','text.primary': '#1b2230' } },
+  {id:'glass', kw: ['玻璃'],t: { 'board.bgFrom': 'rgba(255,255,255,.16)','board.blur': '22px' } },
+  {id:'dark', kw: ['暗黑'],t: { 'board.bgFrom': 'rgba(14,14,18,.94)','text.primary': '#eceff4' } },
+  {id:'redblack', kw: ['红黑'],t: { 'board.bgFrom': 'rgba(26,6,10,.94)','accent.base': '#e0243f' } },
+  {id:'warm', kw: ['暖色'],t: { 'board.bgFrom': 'rgba(46,28,16,.90)','accent.base': '#ff9a4d' } },
+  {id:'cool', kw: ['冷色'],t: { 'board.bgFrom': 'rgba(12,28,44,.90)','accent.base': '#4dd0e1' } },
+  {id:'large-type', kw: ['大字号'],t: { 'type.size': '15px','bubble.fontSize': '14px' } },
+  {id:'small-radius', kw: ['小圆角'],t: { 'board.radius': '8px','bubble.radius': '6px' } },
+  {id:'borderless', kw: ['无边框'],t: { 'board.borderWidth': '0px','bubble.border': 'rgba(0,0,0,0)' } },
+  {id:'high-contrast', kw: ['高对比'],t: { 'board.bgFrom': 'rgba(0,0,0,.98)','text.primary': '#ffffff' } },
+];
+
+// ---- src/client/theme-store.js ----
+const LIB = 'dsh.voice-companion.themes', SNAP = 'dsh.voice-companion.theme.active';
+const CORRUPT = 'dsh.voice-companion.themes.corrupt', DEFAULT_ID = 'default';
+const LIMIT = 50, NAME_MAX = 16, LIB_BYTES = 204800, IMPORT_BYTES = 8192;
+const NEW_NAME = '自定义主题', ID_RE = /^t_[a-z0-9]{1,32}$/;
+
+function themeStorage() {
+  try { return typeof window === 'undefined' || !window ? null : window.localStorage || null; } catch (_error) { return null; }
+}
+function themeGuard(run, fallback) {
+  try { return run(); } catch (_error) { return fallback; }
+}
+function themeEmpty() { return { v: 1, active: DEFAULT_ID, items: [] }; }
+function themeClean(input) { return sanitizeTheme(input).theme; }
+function themeItem(raw) {
+  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !ID_RE.test(raw.id)) return null;
+  const theme = themeClean({ name: raw.name, tokens: raw.tokens, css: raw.css });
+  return { id: raw.id, name: theme.name, tokens: theme.tokens, css: theme.css, createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : 0 };
+}
+function themeRead() {
+  const storage = themeStorage();
+  if (!storage) return themeEmpty();
+  const raw = themeGuard(() => storage.getItem(LIB), '') || '';
+  if (!raw) return themeEmpty();
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_error) { parsed = null; }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) {
+    themeGuard(() => { storage.setItem(CORRUPT, String(raw).slice(0, 32768)); storage.removeItem(LIB); }, null);
+    return themeEmpty();
+  }
+  const items = [], seen = new Set();
+  for (const entry of parsed.items) {
+    const item = themeItem(entry);
+    if (!item || seen.has(item.id) || items.length >= LIMIT) continue;
+    seen.add(item.id); items.push(item);
+  }
+  const active = typeof parsed.active === 'string' && (parsed.active === DEFAULT_ID || seen.has(parsed.active)) ? parsed.active : DEFAULT_ID;
+  return { v: 1, active, items };
+}
+function themeFor(library, id) {
+  for (const item of library.items) if (item.id === id) return themeClean({ v: 1, name: item.name, tokens: item.tokens, css: item.css });
+  return themeClean(DEFAULT_THEME);
+}
+function themeSnapshot(theme) {
+  const storage = themeStorage();
+  if (!storage) return;
+  themeGuard(() => storage.setItem(SNAP, JSON.stringify({ v: 1, name: theme.name, tokens: theme.tokens, css: theme.css })), null);
+}
+function themePersist(library) {
+  const storage = themeStorage();
+  if (!storage) return null;
+  let work = { v: 1, active: library.active, items: library.items.slice() };
+  for (let attempt = 0; attempt <= LIMIT; attempt += 1) {
+    const text = JSON.stringify(work);
+    if (text.length <= LIB_BYTES && themeGuard(() => { storage.setItem(LIB, text); return true; }, false)) return work;
+    const victims = work.items.filter((item) => item.id !== work.active).sort((a, b) => a.createdAt - b.createdAt);
+    if (!victims.length) return null;
+    work = { v: 1, active: work.active, items: work.items.filter((item) => item.id !== victims[0].id) };
+  }
+  return null;
+}
+function themeUniqueName(library, name, skipId) {
+  const base = (String(name == null ? '' : name).trim() || NEW_NAME).slice(0, NAME_MAX);
+  const taken = new Set([DEFAULT_THEME.name]);
+  for (const item of library.items) if (item.id !== skipId) taken.add(item.name);
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 100; n += 1) {
+    const candidate = (base + ' (' + n + ')').slice(0, NAME_MAX);
+    if (!taken.has(candidate)) return candidate;
+  }
+  return (base + ' (' + Date.now().toString(36) + ')').slice(0, NAME_MAX);
+}
+function themeNextId(library) {
+  let id = '';
+  do { id = 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); } while (library.items.some((item) => item.id === id));
+  return id;
+}
+
+function listThemes() {
+  return themeGuard(() => {
+    const out = [{ id: DEFAULT_ID, name: DEFAULT_THEME.name, builtin: true }];
+    for (const item of themeRead().items) out.push({ id: item.id, name: item.name, builtin: false });
+    return out;
+  }, [{ id: DEFAULT_ID, name: DEFAULT_THEME.name, builtin: true }]);
+}
+function getActiveId() {
+  return themeGuard(() => themeRead().active, DEFAULT_ID);
+}
+function resolveTheme(id) {
+  return themeGuard(() => {
+    const library = themeRead();
+    return themeFor(library, typeof id === 'string' && id ? id : library.active);
+  }, themeClean(DEFAULT_THEME));
+}
+function setActiveId(id) {
+  return themeGuard(() => {
+    const library = themeRead();
+    const wanted = id === DEFAULT_ID || library.items.some((item) => item.id === id) ? id : DEFAULT_ID;
+    const theme = themeFor(library, wanted);
+    themePersist({ v: 1, active: wanted, items: library.items });
+    themeSnapshot(theme);
+    return theme;
+  }, themeClean(DEFAULT_THEME));
+}
+function saveTheme(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  if (!themeStorage()) return { ok: false, error: '当前环境不能保存主题' };
+  const library = themeRead();
+  if (library.items.length >= LIMIT) return { ok: false, error: '主题太多了' };
+  const theme = themeClean({ name: source.name, tokens: source.tokens, css: source.css });
+  const item = { id: themeNextId(library), name: themeUniqueName(library, theme.name), tokens: theme.tokens, css: theme.css, createdAt: Date.now() };
+  const saved = themePersist({ v: 1, active: item.id, items: library.items.concat([item]) });
+  if (!saved) return { ok: false, error: '主题库已满，请导出后删除' };
+  const kept = saved.items[saved.items.length - 1] || item;
+  themeSnapshot(themeFor(saved, kept.id));
+  return { ok: true, id: kept.id, name: kept.name, tokens: kept.tokens, css: kept.css, createdAt: kept.createdAt };
+}
+function renameTheme(id, name) {
+  const library = themeRead();
+  if (!library.items.some((entry) => entry.id === id)) return { ok: false, error: id === DEFAULT_ID ? '内置主题不能改名' : '没有这个主题' };
+  if (!String(name == null ? '' : name).trim()) return { ok: false, error: '名字不能为空' };
+  const nextName = themeUniqueName(library, name, id);
+  const next = { v: 1, active: library.active, items: library.items.map((entry) => (entry.id === id ? Object.assign({}, entry, { name: nextName }) : entry)) };
+  if (!themePersist(next)) return { ok: false, error: '主题库已满，请导出后删除' };
+  return { ok: true, id, name: nextName, theme: themeFor(next, id) };
+}
+function deleteTheme(id) {
+  const library = themeRead();
+  if (!library.items.some((entry) => entry.id === id)) return { ok: false, error: id === DEFAULT_ID ? '内置主题不能删除' : '没有这个主题' };
+  const fellBack = library.active === id, active = fellBack ? DEFAULT_ID : library.active;
+  const next = { v: 1, active, items: library.items.filter((entry) => entry.id !== id) };
+  if (!themePersist(next)) return { ok: false, error: '主题库已满，请导出后删除' };
+  const theme = themeFor(next, active);
+  themeSnapshot(theme);
+  return { ok: true, active, fellBack, theme };
+}
+function exportTheme(id) {
+  return themeGuard(() => {
+    const library = themeRead();
+    const wanted = typeof id === 'string' && id ? id : library.active;
+    if (wanted !== DEFAULT_ID && !library.items.some((entry) => entry.id === wanted)) return '';
+    const theme = themeFor(library, wanted);
+    return JSON.stringify({ v: 1, name: theme.name, tokens: theme.tokens, css: theme.css }, null, 2);
+  }, '');
+}
+function importTheme(text) {
+  const raw = typeof text === 'string' ? text : '';
+  if (!raw.trim()) return { ok: false, error: '主题文件是空的' };
+  if (raw.length > IMPORT_BYTES) return { ok: false, error: '主题文件太大' };
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_error) { return { ok: false, error: '不是有效的主题文件' }; }
+  if (!parsed || typeof parsed !== 'object' || (!parsed.tokens && !parsed.css)) return { ok: false, error: '不是有效的主题文件' };
+  if (parsed.v !== undefined && parsed.v !== 1) return { ok: false, error: '这个主题文件版本不认识' };
+  return saveTheme(parsed);
+}
+
+const __storeTest = {
+  libraryKey: LIB, snapshotKey: SNAP, corruptKey: CORRUPT, limit: LIMIT, nameMax: NAME_MAX,
+  clear() {
+    const storage = themeStorage();
+    if (!storage) return;
+    themeGuard(() => { storage.removeItem(LIB); storage.removeItem(SNAP); storage.removeItem(CORRUPT); }, null);
+  },
+};
+
+// ---- src/client/voice-profile.js ----
 /** localStorage key holding the profile. */
 const VOICE_KEY = 'dsh.voice-companion.voice';
 
@@ -519,24 +1661,14 @@ function writeVoiceProfile(profile) {
   try {
     window.localStorage.setItem(VOICE_KEY, JSON.stringify(normalized));
   } catch (_error) {
-    // Storage is best-effort; the caller keeps the returned profile in memory.
   }
   return normalized;
 }
 
 // ---- src/client/avatar.js ----
-// Voice companion avatar: the character stage inside a fixed glass HUD panel.
-//
-// Pure ESM, zero dependencies, no build step. Everything (styles, headers, the
-// picker) is created from code so the component works from HTTP, from an
-// Electron app, or from a file:// page without fetching an asset.
-//
-// The artwork itself lives in characters.js — this file only knows the cast
-// contract: pick one, swap the stage, keep the mouth in sync with the audio
-// level. assets/fish.svg is the canonical static art of the whale; keep the two
-// in sync when the silhouette changes.
-
-
+const THEME_PROMPT_PLACEHOLDER = '一句话改样式，例如：赛博朋克红黑';
+const THEME_NAME_LIMIT = 16;
+const THEME_FALLBACK_NAME = '自定义主题';
 
 const SUBTITLE_MAX = 60;
 const BLINK_MIN_MS = 3000;
@@ -550,33 +1682,38 @@ const FACE_QUALITY = 0.85;
 const FACE_NAME = '我的形象';
 const FACE_TOO_BIG = '图片太大了，换一张小一点的吧（上限 800KB）';
 
-// 抽屉里的中文文案与保存反馈时长。
 const SHEET_TITLE = '声音与形象';
 const SHEET_SAVED_MS = 800;
 const SLOT_LABELS = { base: '基础声音', bright: '开心时', soft: '温柔时' };
 const VOICE_FALLBACK = 'tide';
 
 
-// ------------------------------------------------------------------- styling
 
 const STYLE_TEXT = `
-[data-vc-avatar]{--vc-accent:#6b85ff;position:fixed;right:18px;bottom:18px;z-index:2147483000;width:320px;box-sizing:border-box;color:#edf2ff;font:13px/1.45 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-user-select:none;user-select:none;text-align:left}
+[data-vc-avatar]{--vc-accent:var(--vc-accent-base, #6b85ff);position:fixed;right:18px;bottom:18px;z-index:var(--vc-board-z, 2147483000);width:var(--vc-board-width, 340px);
+box-sizing:border-box;color:var(--vc-text-primary, #edf2ff);font:var(--vc-type-size, 13px)/var(--vc-type-line-height, 1.45) var(--vc-type-font, system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif);-webkit-user-select:none;user-select:none;text-align:left}
 [data-vc-avatar] *{box-sizing:border-box}
-[data-vc-avatar] .vc-panel{position:relative;height:260px;padding:9px 12px 8px;display:flex;flex-direction:column;gap:6px;border-radius:20px;border:1px solid rgba(120,150,255,.18);background:linear-gradient(160deg,rgba(20,32,66,.88),rgba(8,14,30,.94));box-shadow:0 18px 44px rgba(2,7,16,.5),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);overflow:hidden;transition:transform .18s ease,box-shadow .3s ease}
-[data-vc-avatar] .vc-head{display:flex;align-items:center;gap:6px;min-height:22px;flex:none;font-size:11px;letter-spacing:.02em;color:#cfd9f5}
-[data-vc-avatar] .vc-dot{width:6px;height:6px;border-radius:50%;background:#8b93a7;flex:none;transition:background .2s ease,box-shadow .2s ease}
+[data-vc-avatar] .vc-panel{position:relative;height:var(--vc-board-height, 316px);padding:var(--vc-board-padding, 9px 12px 8px);display:flex;flex-direction:column;gap:var(--vc-board-gap, 6px);border-radius:var(--vc-board-radius, 20px);
+border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba(120,150,255,.18));background:linear-gradient(var(--vc-board-bg-angle, 160deg),var(--vc-board-bg-from, rgba(20,32,66,.88)),var(--vc-board-bg-to, rgba(8,14,30,.94)));box-shadow:var(--vc-board-shadow, 0 18px 44px rgba(2,7,16,.5)),inset 0 1px 0 var(--vc-board-inner-light, rgba(255,255,255,.08));backdrop-filter:blur(var(--vc-board-blur, 14px)) saturate(var(--vc-board-saturate, 140%));-webkit-backdrop-filter:blur(var(--vc-board-blur, 14px)) saturate(var(--vc-board-saturate, 140%));overflow:hidden;transition:transform .18s ease,box-shadow .3s ease}
+[data-vc-avatar] .vc-head{display:flex;align-items:center;gap:var(--vc-board-gap, 6px);min-height:22px;flex:none;font-size:11px;letter-spacing:.02em;color:var(--vc-text-secondary, #cfd9f5)}
+[data-vc-avatar] .vc-dot{width:var(--vc-dot-size, 6px);height:var(--vc-dot-size, 6px);border-radius:50%;background:var(--vc-dot-idle, #8b93a7);flex:none;transition:background .2s ease,box-shadow .2s ease}
 [data-vc-avatar] .vc-label{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-[data-vc-avatar] .vc-picker{display:flex;gap:4px;flex:none}
-[data-vc-avatar] .vc-chip{appearance:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;display:grid;place-items:center;transition:transform .12s ease,background .15s ease,border-color .15s ease}
+[data-vc-avatar] .vc-picker{display:none;gap:4px;flex:none}
+[data-vc-avatar] .vc-chip{appearance:none;width:var(--vc-chip-size, 21px);height:var(--vc-chip-size, 21px);padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:var(--vc-chip-bg, rgba(255,255,255,.06));color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;display:grid;place-items:center;transition:transform .12s ease,background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-chip:hover{background:rgba(255,255,255,.12)}
 [data-vc-avatar] .vc-chip:active{transform:translateY(1px)}
-[data-vc-avatar] .vc-chip:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar] .vc-chip[aria-pressed="true"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(200,216,255,.55);color:#fff;box-shadow:0 0 0 1px rgba(120,150,255,.35)}
+[data-vc-avatar] .vc-chip:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-chip[aria-pressed="true"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(200,216,255,.55);color:#fff;box-shadow:0 0 0 1px rgba(120,150,255,.35)}
 [data-vc-avatar] .vc-mode{appearance:none;flex:none;height:21px;padding:0 8px;border-radius:11px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;letter-spacing:.02em;transition:background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-mode:hover{background:rgba(255,255,255,.12)}
-[data-vc-avatar] .vc-mode[data-mode="dictation"]{background:linear-gradient(180deg,#5fd0a8,#22a37a);border-color:rgba(180,255,224,.5);color:#04241b}
-[data-vc-avatar] .vc-mode:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
+[data-vc-avatar] .vc-mode[data-mode="dictation"]{background:linear-gradient(180deg,var(--vc-mode-dictation-from, #5fd0a8),var(--vc-mode-dictation-to, #22a37a));border-color:rgba(180,255,224,.5);color:var(--vc-text-on-accent, #04241b)}
+[data-vc-avatar] .vc-mode:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
 [data-vc-avatar] .vc-actions{margin-left:auto;display:flex;gap:6px;flex:none}
+[data-vc-avatar] .vc-receipt{display:none;align-items:center;max-width:132px;height:20px;padding:0 8px;border-radius:999px;border:1px solid rgba(103,226,166,.24);background:var(--vc-receipt-bg, rgba(103,226,166,.12));color:var(--vc-receipt-color, #8ff0c4);font:600 10px/1 "PingFang SC","Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+[data-vc-avatar] .vc-receipt[data-state="pending"]{display:inline-flex}
+[data-vc-avatar] .vc-receipt[data-state="done"]{display:inline-flex;border-color:rgba(103,226,166,.34);background:var(--vc-receipt-bg, rgba(103,226,166,.12));color:var(--vc-receipt-color, #8ff0c4)}
+[data-vc-avatar] .vc-receipt[data-state="failed"]{display:inline-flex;border-color:rgba(255,118,118,.34);background:rgba(255,118,118,.10);color:var(--vc-dot-error, #ff7676)}
+[data-vc-avatar] .vc-receipt[data-state="idle"]{display:none}
 
 /* The panel floats above the app, so it must never become a roadblock: the head
    is a drag handle, the top-right button folds the whole thing into a pill. */
@@ -585,41 +1722,47 @@ const STYLE_TEXT = `
 [data-vc-avatar][data-dragging] .vc-panel{transition:none}
 [data-vc-avatar] .vc-min{appearance:none;flex:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 13px/1 system-ui,sans-serif;cursor:pointer;display:grid;place-items:center;transition:background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-min:hover{background:rgba(255,255,255,.14)}
-[data-vc-avatar] .vc-min:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar][data-collapsed]{width:max-content;max-width:min(320px,calc(100vw - 36px))}
-[data-vc-avatar][data-collapsed] .vc-panel{height:auto;width:auto;padding:6px 10px;border-radius:999px}
-[data-vc-avatar][data-collapsed] .vc-head{width:auto}
+[data-vc-avatar] .vc-min:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar][data-collapsed]{width:44px;height:44px;max-width:44px}
+[data-vc-avatar][data-collapsed] .vc-panel{height:44px;width:44px;padding:0;border-radius:50%;display:grid;place-items:center}
+[data-vc-avatar][data-collapsed] .vc-panel::before{content:'';width:28px;height:28px;border-radius:50%;background:conic-gradient(from 210deg,var(--vc-core-rim, #8fb4ff),rgba(143,180,255,.08) 38%,var(--vc-core-rim, #8fb4ff) 62%,rgba(143,180,255,.28) 82%,var(--vc-core-rim, #8fb4ff));box-shadow:0 0 14px rgba(143,180,255,.35);pointer-events:none}
+[data-vc-avatar][data-collapsed] .vc-head{position:absolute;inset:0;width:44px;height:44px;min-height:0;gap:0;justify-content:flex-start}
+[data-vc-avatar][data-collapsed] .vc-dot{position:absolute;top:6px;right:6px;z-index:2;width:7px;height:7px}
 [data-vc-avatar][data-collapsed] .vc-stage,
 [data-vc-avatar][data-collapsed] .vc-bubble,
 [data-vc-avatar][data-collapsed] .vc-partial,
 [data-vc-avatar][data-collapsed] .vc-picker,
 [data-vc-avatar][data-collapsed] .vc-mode,
-[data-vc-avatar][data-collapsed] .vc-actions{display:none}
-[data-vc-avatar][data-collapsed] .vc-head{min-height:20px;gap:7px}
-[data-vc-avatar][data-collapsed] .vc-label{white-space:nowrap}
-[data-vc-avatar] .vc-btn{appearance:none;border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:5px 11px;font:600 11px/1.2 inherit;color:#eef3ff;background:rgba(255,255,255,.08);cursor:pointer;transition:transform .12s ease,filter .15s ease,background .15s ease}
+[data-vc-avatar][data-collapsed] .vc-actions,
+[data-vc-avatar][data-collapsed] .vc-label,
+[data-vc-avatar][data-collapsed] .vc-min{display:none}
+[data-vc-avatar] .vc-btn{appearance:none;border:1px solid var(--vc-btn-border, rgba(255,255,255,.16));border-radius:var(--vc-btn-radius, 999px);padding:var(--vc-btn-padding, 5px 11px);font:600 var(--vc-btn-font-size, 11px)/1.2 inherit;
+color:var(--vc-btn-color, #eef3ff);background:var(--vc-btn-bg, rgba(255,255,255,.08));cursor:pointer;transition:transform .12s ease,filter .15s ease,background .15s ease}
 [data-vc-avatar] .vc-btn:hover{filter:brightness(1.08)}
 [data-vc-avatar] .vc-btn:active{transform:translateY(1px)}
-[data-vc-avatar] .vc-btn:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar] .vc-start{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(190,210,255,.4);color:#ffffff}
-[data-vc-avatar] .vc-end{background:rgba(255,104,104,.16);border-color:rgba(255,128,128,.38);color:#ffc4c4}
+[data-vc-avatar] .vc-btn:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-start{background:linear-gradient(180deg,var(--vc-start-from, #7d95ff),var(--vc-start-to, #4d6bfe));border-color:rgba(190,210,255,.4);color:#ffffff}
+[data-vc-avatar] .vc-end{background:var(--vc-end-bg, rgba(255,104,104,.16));border-color:var(--vc-end-border, rgba(255,128,128,.38));color:var(--vc-end-color, #ffc4c4)}
 [data-vc-avatar] .vc-start,[data-vc-avatar] .vc-end{display:none}
 [data-vc-avatar][data-state="idle"] .vc-start,[data-vc-avatar][data-state="error"] .vc-start{display:inline-flex}
 [data-vc-avatar][data-state="listening"] .vc-end,[data-vc-avatar][data-state="thinking"] .vc-end,[data-vc-avatar][data-state="speaking"] .vc-end{display:inline-flex}
-[data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:118px;display:grid;place-items:center;overflow:hidden;border-radius:14px}
+[data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:var(--vc-stage-height, 152px);display:grid;place-items:center;overflow:hidden;background:var(--vc-stage-bg, transparent);border-radius:var(--vc-stage-radius, 14px)}
 [data-vc-avatar] .vc-fish{position:relative;display:grid;place-items:center;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35));transition:filter .3s ease,transform .3s ease}
 [data-vc-avatar] .vc-fish-svg{display:block;width:186px;height:155px;overflow:visible}
 [data-vc-avatar] .vc-fish-img{display:block;width:186px;height:155px;object-fit:contain;border-radius:18px;transition:transform .3s ease,filter .3s ease}
+[data-vc-avatar] .vc-core-layer{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+[data-vc-avatar] .vc-core-layer[data-hidden="1"]{display:none}
+[data-vc-avatar] .vc-core-slot{display:block}
 [data-vc-avatar] .vc-file{display:none}
 /* Settings drawer: an overlay inside the panel, closed by backdrop or Escape.
    Built from plain elements on purpose so the offline DOM stub can drive it. */
 [data-vc-avatar] .vc-gear{appearance:none;flex:none;width:21px;height:21px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#c3d0f7;font:600 12px/1 system-ui,sans-serif;cursor:pointer;display:grid;place-items:center;transition:background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-gear:hover{background:rgba(255,255,255,.14)}
-[data-vc-avatar] .vc-gear:focus-visible{outline:2px solid #9db4ff;outline-offset:2px}
-[data-vc-avatar] .vc-gear[aria-expanded="true"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(200,216,255,.55);color:#fff}
-[data-vc-avatar] .vc-sheet{position:absolute;inset:0;z-index:6;display:none;padding:10px;border-radius:18px;background:linear-gradient(165deg,rgba(15,24,50,.97),rgba(6,11,24,.98));overflow:auto}
+[data-vc-avatar] .vc-gear:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-gear[aria-expanded="true"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(200,216,255,.55);color:#fff}
+[data-vc-avatar] .vc-sheet{position:absolute;inset:0;z-index:6;display:none;padding:10px;border-radius:var(--vc-sheet-radius, 18px);background:linear-gradient(165deg,var(--vc-sheet-bg-from, rgba(15,24,50,.97)),var(--vc-sheet-bg-to, rgba(6,11,24,.98)));overflow:auto}
 [data-vc-avatar] .vc-sheet[data-open="1"]{display:block}
-[data-vc-avatar] .vc-sheet-backdrop{position:absolute;inset:0;border-radius:18px;cursor:pointer}
+[data-vc-avatar] .vc-sheet-backdrop{position:absolute;inset:0;border-radius:var(--vc-sheet-radius, 18px);cursor:pointer}
 [data-vc-avatar] .vc-sheet-card{position:relative;display:flex;flex-direction:column;gap:6px}
 [data-vc-avatar] .vc-sheet-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#dbe4ff;letter-spacing:.02em;margin-bottom:1px}
 [data-vc-avatar] .vc-sheet-title{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -627,31 +1770,35 @@ const STYLE_TEXT = `
 [data-vc-avatar] .vc-sheet-close:hover{background:rgba(255,255,255,.14)}
 [data-vc-avatar] .vc-field{display:flex;align-items:center;gap:7px;font-size:11px;color:#a9b8dd;min-height:22px}
 [data-vc-avatar] .vc-field-label{flex:none;width:52px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-[data-vc-avatar] .vc-slot{appearance:none;flex:1 1 auto;min-width:0;height:22px;padding:0 6px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#e8eeff;font:600 11px/1 system-ui,sans-serif;cursor:pointer}
-[data-vc-avatar] .vc-slot:focus-visible{outline:2px solid #9db4ff;outline-offset:1px}
-[data-vc-avatar] .vc-speed{flex:1 1 auto;min-width:0;height:22px;margin:0;accent-color:#7d95ff;cursor:pointer}
+[data-vc-avatar] .vc-slot{appearance:none;flex:1 1 auto;min-width:0;height:22px;padding:0 6px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:600 11px/1 system-ui,sans-serif;cursor:pointer}
+[data-vc-avatar] .vc-slot:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:1px}
+[data-vc-avatar] .vc-speed{flex:1 1 auto;min-width:0;height:22px;margin:0;accent-color:var(--vc-accent-soft, #7d95ff);cursor:pointer}
 [data-vc-avatar] .vc-speed-value{flex:none;width:38px;text-align:right;font-variant-numeric:tabular-nums;color:#dbe4ff}
-[data-vc-avatar] .vc-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
 [data-vc-avatar] .vc-name[readonly]{opacity:.65;cursor:default}
 [data-vc-avatar] .vc-name:focus{outline:none;border-color:rgba(157,180,255,.7)}
 [data-vc-avatar] .vc-sheet-actions{display:flex;gap:6px;margin-top:2px}
 [data-vc-avatar] .vc-sheet-actions .vc-btn{flex:1 1 0;padding:5px 0;text-align:center}
-[data-vc-avatar] .vc-sheet-btn[data-kind="major"]{background:linear-gradient(180deg,#7d95ff,#4d6bfe);border-color:rgba(190,210,255,.4);color:#fff}
-[data-vc-avatar] .vc-sheet-btn[data-kind="quiet"]{background:rgba(255,255,255,.04);color:#9fb0d6}
+[data-vc-avatar] .vc-sheet-btn[data-kind="major"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(190,210,255,.4);color:#fff}
+[data-vc-avatar] .vc-sheet-btn[data-kind="quiet"]{background:rgba(255,255,255,.04);color:var(--vc-text-muted, #9fb0d6)}
 [data-vc-avatar][data-collapsed] .vc-gear{display:none}
 [data-vc-avatar] .vc-chip.vc-add{font-size:15px;line-height:1}
 [data-vc-avatar] .vc-swap{animation:vc-swap .32s ease-out}
-[data-vc-avatar] .vc-ripple{position:absolute;left:50%;top:50%;width:196px;height:196px;margin:-98px 0 0 -98px;border-radius:50%;border:2px solid rgba(107,133,255,.55);opacity:0;display:none;pointer-events:none}
-[data-vc-avatar][data-state="listening"] .vc-ripple{display:block;animation:vc-ripple 2.6s ease-out infinite}
+[data-vc-avatar] .vc-ripple{position:absolute;left:50%;top:50%;width:var(--vc-ripple-size, 196px);height:var(--vc-ripple-size, 196px);margin:-98px 0 0 -98px;border-radius:50%;border:2px solid var(--vc-ripple-color, rgba(107,133,255,.55));opacity:0;display:none;pointer-events:none}
+[data-vc-avatar][data-state="listening"] .vc-ripple{display:block;animation:vc-ripple var(--vc-ripple-duration, 2.6s) ease-out infinite}
 [data-vc-avatar][data-state="listening"] .vc-ripple-2{animation-delay:1.3s}
 [data-vc-avatar] .vc-dots{position:absolute;top:0;left:56%;transform:translateX(-50%);display:none;gap:5px}
 [data-vc-avatar][data-state="thinking"] .vc-dots{display:flex}
-[data-vc-avatar] .vc-dots i{display:block;width:6px;height:6px;border-radius:50%;background:#93a9ff;animation:vc-think 1s ease-in-out infinite}
+[data-vc-avatar] .vc-dots i{display:block;width:var(--vc-dot-size, 6px);height:var(--vc-dot-size, 6px);border-radius:50%;background:var(--vc-think-color, #93a9ff);animation:vc-think var(--vc-think-duration, 1s) ease-in-out infinite}
 [data-vc-avatar] .vc-dots i:nth-child(2){animation-delay:.15s}
 [data-vc-avatar] .vc-dots i:nth-child(3){animation-delay:.3s}
-[data-vc-avatar] .vc-bubble{flex:none;min-height:30px;max-height:34px;padding:6px 9px;border-radius:12px;border:1px solid rgba(140,170,255,.14);background:rgba(120,150,255,.10);font-size:12px;line-height:1.4;color:#e8eeff;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;transition:background .2s ease}
-[data-vc-avatar] .vc-bubble[data-role="user"]{background:rgba(140,170,255,.06);color:#9fb0d6;font-style:italic}
-[data-vc-avatar] .vc-partial{flex:none;height:16px;font-size:11px;color:#9db4ff;opacity:0;transition:opacity .2s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-vc-avatar] .vc-bubble{flex:none;min-height:30px;max-height:34px;padding:6px 9px;border-radius:var(--vc-bubble-radius, 12px);border:1px solid var(--vc-bubble-border, rgba(140,170,255,.14));background:var(--vc-bubble-bg, rgba(120,150,255,.10));font-size:var(--vc-bubble-font-size, 12px);
+line-height:1.4;color:var(--vc-bubble-color, #e8eeff);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;transition:background .2s ease}
+[data-vc-avatar] .vc-bubble[data-role="user"]{background:var(--vc-bubble-user-bg, rgba(140,170,255,.06));color:var(--vc-text-muted, #9fb0d6);font-style:italic}
+/* Keep the slot measured but invisible while there is no subtitle, so the stage
+   never jumps when the first line arrives. */
+[data-vc-avatar] .vc-bubble:empty{visibility:hidden}
+[data-vc-avatar] .vc-partial{flex:none;height:16px;font-size:11px;color:var(--vc-partial-color, #9db4ff);opacity:0;transition:opacity .2s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-vc-avatar] .vc-partial[data-visible="1"]{opacity:.9}
 [data-vc-avatar] .vc-eye{transform-box:fill-box;transform-origin:center;transition:transform .1s ease}
 [data-vc-avatar] .vc-pupil{transition:transform .25s ease}
@@ -676,10 +1823,10 @@ const STYLE_TEXT = `
 [data-vc-avatar][data-state="speaking"] .vc-fish{animation:vc-bob .4s ease-in-out infinite alternate}
 [data-vc-avatar][data-state="error"] .vc-panel{transform:translateY(2px)}
 [data-vc-avatar][data-state="error"] .vc-fish{filter:grayscale(.6) brightness(.82) drop-shadow(0 8px 14px rgba(0,0,0,.4))}
-[data-vc-avatar][data-state="listening"] .vc-dot{background:#7fe3a8;box-shadow:0 0 8px rgba(127,227,168,.7)}
-[data-vc-avatar][data-state="thinking"] .vc-dot{background:#9db4ff;box-shadow:0 0 8px rgba(157,180,255,.7)}
-[data-vc-avatar][data-state="speaking"] .vc-dot{background:#8fa6ff;box-shadow:0 0 8px rgba(143,166,255,.7)}
-[data-vc-avatar][data-state="error"] .vc-dot{background:#ff7676;box-shadow:0 0 8px rgba(255,118,118,.6)}
+[data-vc-avatar][data-state="listening"] .vc-dot{background:var(--vc-dot-listening, #7fe3a8);box-shadow:0 0 8px rgba(127,227,168,.7)}
+[data-vc-avatar][data-state="thinking"] .vc-dot{background:var(--vc-dot-thinking, #9db4ff);box-shadow:0 0 8px rgba(157,180,255,.7)}
+[data-vc-avatar][data-state="speaking"] .vc-dot{background:var(--vc-dot-speaking, #8fa6ff);box-shadow:0 0 8px rgba(143,166,255,.7)}
+[data-vc-avatar][data-state="error"] .vc-dot{background:var(--vc-dot-error, #ff7676);box-shadow:0 0 8px rgba(255,118,118,.6)}
 @keyframes vc-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
 @keyframes vc-bob{from{transform:translateY(0)}to{transform:translateY(-3px)}}
 @keyframes vc-sway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
@@ -687,12 +1834,25 @@ const STYLE_TEXT = `
 @keyframes vc-spout{0%{opacity:0;transform:translateY(9px) scale(.55)}30%{opacity:.95}100%{opacity:0;transform:translateY(-13px) scale(1.1)}}
 @keyframes vc-ripple{0%{opacity:.55;transform:scale(.72)}70%{opacity:0;transform:scale(1.35)}100%{opacity:0;transform:scale(1.35)}}
 @keyframes vc-think{0%,100%{transform:translateY(0);opacity:.55}40%{transform:translateY(-6px);opacity:1}}
+[data-vc-avatar] .vc-theme-section{display:flex;flex-direction:column;gap:6px;margin-top:6px;padding-top:7px;border-top:1px solid rgba(255,255,255,.12)}
+[data-vc-avatar] .vc-theme-chips{display:flex;flex-wrap:wrap;gap:5px;min-height:22px}
+[data-vc-avatar] .vc-theme-chip{display:inline-flex;width:auto;height:22px;padding:0 9px;border-radius:11px;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-vc-avatar] .vc-theme-chip[data-active="1"]{border-color:var(--vc-accent-base, #8fa6ff);background:rgba(143,166,255,.22);color:#fff}
+[data-vc-avatar] .vc-theme-form{display:flex;align-items:center;gap:6px}
+[data-vc-avatar] .vc-theme-input{flex:1 1 auto;min-width:0;height:22px;padding:0 8px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-theme-input::placeholder{color:#7f8cab}
+[data-vc-avatar] .vc-theme-message{min-height:13px;font-size:10.5px;line-height:1.3;color:#a9b8dd}
+[data-vc-avatar] .vc-theme-namerow{display:flex;align-items:center;gap:7px}
+[data-vc-avatar] .vc-theme-name{flex:1 1 auto;min-width:0;height:22px;padding:0 7px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:var(--vc-field-bg, rgba(255,255,255,.06));color:#e8eeff;font:500 11px/1 system-ui,sans-serif}
+[data-vc-avatar] .vc-theme-name[readonly]{opacity:.6}
+[data-vc-avatar] .vc-theme-file{display:none}
+[data-vc-avatar] .vc-theme-actions{display:flex;gap:5px}
+[data-vc-avatar] .vc-theme-actions .vc-btn{flex:1 1 0;min-width:0;padding:5px 0}
+[data-vc-avatar] .vc-theme-actions .vc-btn[disabled]{opacity:.45;cursor:default}
 @media (prefers-reduced-motion:reduce){[data-vc-avatar],[data-vc-avatar] *{animation:none!important;transition:none!important}}
 `;
 
-// -------------------------------------------------------------------- timers
 
-// Kept module-wide so the test harness can assert that dispose() drains them.
 const activeTimers = new Set();
 
 function later(fn, ms) {
@@ -713,6 +1873,7 @@ function cancel(handle) {
 const styledDocuments = new WeakSet();
 
 function ensureStyles(doc) {
+  ensureThemeStyle(doc);
   if (styledDocuments.has(doc)) return;
   styledDocuments.add(doc);
   const style = doc.createElement('style');
@@ -722,7 +1883,6 @@ function ensureStyles(doc) {
   if (host && typeof host.appendChild === 'function') host.appendChild(style);
 }
 
-// ---------------------------------------------------------------- component
 
 function element(doc, tag, attrs, text) {
   const node = doc.createElement(tag);
@@ -750,12 +1910,11 @@ function createAvatar(options = {}) {
 
   ensureStyles(doc);
 
-  // readStore 依赖 win；形象要在 picker 里出现，所以提前取。
   const win = (doc && doc.defaultView) || null;
   let face = readFace();
   let faceChip = null;
 
-  const initial = resolveCharacter(options.character, face);
+  const initial = resolveCharacter(options.character === undefined || options.character === null ? 'whale' : options.character, face);
 
   const root = element(doc, 'div', {
     'data-vc-avatar': '',
@@ -770,8 +1929,6 @@ function createAvatar(options = {}) {
   const dot = element(doc, 'span', { class: 'vc-dot', 'aria-hidden': 'true' });
   const label = element(doc, 'span', { class: 'vc-label' }, initial.labels.idle);
 
-  // The cast picker: one round chip per character, first letter on the chip and
-  // the full name in the accessible label.
   const picker = element(doc, 'div', { class: 'vc-picker', role: 'group', 'aria-label': '切换看板娘' });
   const chips = listCharacters().map((entry) => {
     const chip = element(doc, 'button', {
@@ -808,7 +1965,6 @@ function createAvatar(options = {}) {
     tabindex: '-1',
   });
 
-  // 自定义形象 chip 排在 ＋ 前；卸载/重排不依赖 insertBefore，离线 stub 也能用。
   function mountFaceChip() {
     if (!face) return;
     if (!faceChip) {
@@ -838,8 +1994,6 @@ function createAvatar(options = {}) {
   }
   if (face) mountFaceChip();
 
-  // 对话 / 听写: one microphone feed, two destinations. The switch is a button rather
-  // than a setting so the current mode is always on screen.
   const modeButton = element(doc, 'button', {
     class: 'vc-mode',
     type: 'button',
@@ -853,7 +2007,6 @@ function createAvatar(options = {}) {
     });
   }
 
-  // 设置抽屉的入口：一个齿轮，放在模式按钮和收起按钮之间。
   const gearButton = element(doc, 'button', {
     class: 'vc-gear',
     type: 'button',
@@ -862,7 +2015,6 @@ function createAvatar(options = {}) {
     title: '声音与形象设置',
   }, '\u2699');
 
-  // Fold / unfold. Kept in the head so the same gesture that drags also hides it.
   const minButton = element(doc, 'button', {
     class: 'vc-min',
     type: 'button',
@@ -874,8 +2026,15 @@ function createAvatar(options = {}) {
   const actions = element(doc, 'div', { class: 'vc-actions' });
   const startButton = element(doc, 'button', { class: 'vc-btn vc-start', type: 'button' }, '开始通话');
   const endButton = element(doc, 'button', { class: 'vc-btn vc-end', type: 'button' }, '结束');
+  const receipt = element(doc, 'div', {
+    class: 'vc-receipt',
+    'data-state': 'idle',
+    role: 'status',
+    'aria-live': 'polite',
+  });
   actions.appendChild(startButton);
   actions.appendChild(endButton);
+  actions.appendChild(receipt);
   head.appendChild(dot);
   head.appendChild(label);
   head.appendChild(picker);
@@ -893,17 +2052,17 @@ function createAvatar(options = {}) {
   dots.appendChild(element(doc, 'i'));
 
   const fishWrap = element(doc, 'div', { class: 'vc-fish' });
+  const coreLayer = element(doc, 'div', { class: 'vc-core-layer', 'data-hidden': '1', 'aria-hidden': 'true' });
 
   stage.appendChild(ripple1);
   stage.appendChild(ripple2);
   stage.appendChild(dots);
+  stage.appendChild(coreLayer);
   stage.appendChild(fishWrap);
 
   const bubble = element(doc, 'div', { class: 'vc-bubble', 'data-role': 'assistant', 'aria-live': 'polite' });
   const partial = element(doc, 'div', { class: 'vc-partial', 'aria-live': 'polite' });
 
-  // 设置抽屉：声音槽、语速、名字、换图/移除。纯 createElement + setAttribute，
-  // 不碰 innerHTML / querySelector，离线 stub 与真实浏览器走同一条路径。
   const sheet = element(doc, 'div', {
     class: 'vc-sheet',
     'data-open': '0',
@@ -1006,6 +2165,90 @@ function createAvatar(options = {}) {
   sheetActions.appendChild(resetButton);
   sheetCard.appendChild(sheetActions);
 
+  const themeSection = element(doc, 'div', {
+    class: 'vc-theme-section',
+    'data-role': 'theme',
+  });
+  themeSection.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '外观'));
+
+  const themeChips = element(doc, 'div', {
+    class: 'vc-theme-chips',
+    role: 'group',
+    'aria-label': '主题',
+  });
+  themeSection.appendChild(themeChips);
+
+  const themeForm = element(doc, 'div', { class: 'vc-theme-form' });
+  const themePrompt = element(doc, 'input', {
+    class: 'vc-theme-input',
+    type: 'text',
+    maxlength: '40',
+    placeholder: THEME_PROMPT_PLACEHOLDER,
+    'aria-label': '一句话改样式',
+  });
+  const themeGenerate = element(doc, 'button', {
+    class: 'vc-btn vc-theme-generate',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '生成');
+  themeForm.appendChild(themePrompt);
+  themeForm.appendChild(themeGenerate);
+  themeSection.appendChild(themeForm);
+
+  const themeMessage = element(doc, 'div', {
+    class: 'vc-theme-message',
+    'data-role': 'status',
+    'aria-live': 'polite',
+  });
+  themeSection.appendChild(themeMessage);
+
+  const themeNameRow = element(doc, 'div', { class: 'vc-theme-namerow' });
+  themeNameRow.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '主题名'));
+  const themeName = element(doc, 'input', {
+    class: 'vc-theme-name',
+    type: 'text',
+    maxlength: String(THEME_NAME_LIMIT),
+    'aria-label': '主题名字',
+  });
+  themeNameRow.appendChild(themeName);
+  themeSection.appendChild(themeNameRow);
+
+  const themeActions = element(doc, 'div', { class: 'vc-theme-actions' });
+  const themeSave = element(doc, 'button', {
+    class: 'vc-btn vc-theme-save',
+    type: 'button',
+    'data-kind': 'major',
+  }, '保存主题');
+  const themeDelete = element(doc, 'button', {
+    class: 'vc-btn vc-theme-delete',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '删除');
+  const themeExport = element(doc, 'button', {
+    class: 'vc-btn vc-theme-export',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '导出');
+  const themeImport = element(doc, 'button', {
+    class: 'vc-btn vc-theme-import',
+    type: 'button',
+    'data-kind': 'quiet',
+  }, '导入');
+  themeActions.appendChild(themeSave);
+  themeActions.appendChild(themeDelete);
+  themeActions.appendChild(themeExport);
+  themeActions.appendChild(themeImport);
+  themeSection.appendChild(themeActions);
+
+  const themeFileInput = element(doc, 'input', {
+    class: 'vc-theme-file',
+    type: 'file',
+    accept: '.json,application/json',
+    'aria-hidden': 'true',
+  });
+  themeSection.appendChild(themeFileInput);
+  sheetCard.appendChild(themeSection);
+
   sheet.appendChild(backdrop);
   sheet.appendChild(sheetCard);
 
@@ -1024,10 +2267,26 @@ function createAvatar(options = {}) {
   }
   mount.appendChild(root);
 
+  let core3d = null;
+  try {
+    const reducedMotion = !!(win && typeof win.matchMedia === 'function'
+      && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    core3d = createCore3D({
+      doc,
+      win,
+      mount: coreLayer,
+      quality: 'auto',
+      reducedMotion,
+    });
+  } catch (_error) {
+    core3d = null;
+  }
+
   let state = 'idle';
   let blinkTimer = null;
   let disposed = false;
   let art = null;
+  let receiptTitle = '';
 
   function clearStage() {
     while (fishWrap.children.length > 0) fishWrap.removeChild(fishWrap.children[0]);
@@ -1039,7 +2298,6 @@ function createAvatar(options = {}) {
     if (animate) {
       const base = next.svg.getAttribute('class') || '';
       next.svg.setAttribute('class', base + ' vc-swap');
-      // 一次性动画结束后摘掉 class，否则它会压住 idle 的呼吸/摇摆。
       if (typeof next.svg.addEventListener === 'function') {
         next.svg.addEventListener('animationend', () => {
           const current = next.svg.getAttribute('class') || '';
@@ -1049,6 +2307,10 @@ function createAvatar(options = {}) {
     }
     fishWrap.appendChild(next.svg);
     art = next;
+    const isCore = next.id === 'core';
+    fishWrap.style.display = isCore ? 'none' : '';
+    coreLayer.setAttribute('data-hidden', isCore ? '0' : '1');
+    if (isCore && core3d) core3d.resize();
     root.setAttribute('data-character', next.id);
     root.setAttribute('aria-label', next.name + '语音管家');
     label.textContent = next.labels[state];
@@ -1063,8 +2325,6 @@ function createAvatar(options = {}) {
     return art ? art.id : initial.id;
   }
 
-  // Swaps the stage to another character. `notify` is only true for a real user
-  // click, so restoring a saved character never fires onAction.
   function selectCharacter(id, notify) {
     if (disposed) return characterId();
     const wanted = resolveCharacter(id, face).id;
@@ -1092,9 +2352,6 @@ function createAvatar(options = {}) {
     endButton.addEventListener('click', handleEnd);
   }
 
-  // ------------------------------------------------------------ window state
-  // The panel sits on top of the app, so it has to get out of the way: drag it by
-  // the head, fold it to a pill, and remember both facts for next launch.
   const POS_KEY = 'dsh.voice-companion.pos';
   const FOLD_KEY = 'dsh.voice-companion.collapsed';
 
@@ -1113,8 +2370,6 @@ function createAvatar(options = {}) {
     } catch (error) { /* ignore */ }
   }
 
-  // ------------------------------------------------------------- custom face
-  // face 存 localStorage：{name, src}。src 只收 dataURL，挡掉远程和脚本 URL。
   function parseFace(raw) {
     if (!raw) return null;
     try {
@@ -1172,7 +2427,6 @@ function createAvatar(options = {}) {
     return null;
   }
 
-  // 没有 canvas/Image（测试 stub、极端隐私模式）时保留原图，由调用方统一查体积。
   function shrinkImage(dataUrl, done) {
     let canvas = null;
     let ctx = null;
@@ -1235,7 +2489,6 @@ function createAvatar(options = {}) {
         face = { name: FACE_NAME, src };
         writeStore(FACE_KEY, JSON.stringify(face));
         mountFaceChip();
-        // 换图时 id 仍是 'custom'，selectCharacter 会跳过，所以直接重绘舞台。
         applyCharacter(CUSTOM_CHARACTER_ID, true);
         if (state !== 'speaking') setMouth(0);
         if (sheetOpen) syncSheet();
@@ -1251,7 +2504,6 @@ function createAvatar(options = {}) {
     if (disposed) return;
     const target = event && event.target;
     const file = target && target.files && target.files[0];
-    // 同一个文件选第二次不会再触发 change，先清 value。
     if (target) {
       try { target.value = ''; } catch (error) { /* stub 里可能只读 */ }
     }
@@ -1269,8 +2521,6 @@ function createAvatar(options = {}) {
     return Number.isFinite(n) ? n : null;
   }
 
-  // Where the panel currently is, in viewport pixels. Falls back to the CSS corner
-  // (right/bottom 18px) when nothing has been measured yet.
   function measure() {
     if (typeof root.getBoundingClientRect === 'function') {
       const rect = root.getBoundingClientRect();
@@ -1287,7 +2537,6 @@ function createAvatar(options = {}) {
     return { left: box.width - 18 - 320, top: box.height - 18 - 260, width: 320, height: 260 };
   }
 
-  // Absolute left/top, clamped so at least a strip of the panel stays reachable.
   function place(left, top) {
     const box = viewport();
     const size = measure();
@@ -1305,7 +2554,6 @@ function createAvatar(options = {}) {
   let drag = null;
   let dragged = false;
 
-  // Chips and buttons live inside the head; pressing them must not start a drag.
   function isControl(node) {
     let current = node;
     while (current && current !== root) {
@@ -1346,15 +2594,38 @@ function createAvatar(options = {}) {
     place(drag.left + dx, drag.top + dy);
   }
 
+  function snapToEdges(left, top) {
+    const box = viewport();
+    const size = measure();
+    const width = size.width || 340;
+    const height = size.height || 316;
+    let nextLeft = left;
+    let nextTop = top;
+    const rightGap = box.width - (left + width);
+    if (left >= 0 && left < 24) nextLeft = 12;
+    else if (rightGap >= 0 && rightGap < 24) nextLeft = box.width - width - 12;
+    const bottomGap = box.height - (top + height);
+    if (top >= 0 && top < 24) nextTop = 12;
+    else if (bottomGap >= 0 && bottomGap < 24) nextTop = box.height - height - 12;
+    return { left: nextLeft, top: nextTop };
+  }
+
   function onDragEnd() {
     if (!drag) return;
     drag = null;
     root.removeAttribute('data-dragging');
-    const left = px(root.style.left);
-    const top = px(root.style.top);
+    let left = px(root.style.left);
+    let top = px(root.style.top);
+    if (dragged && left !== null && top !== null) {
+      const snapped = snapToEdges(left, top);
+      if (snapped.left !== left || snapped.top !== top) {
+        const placed = place(snapped.left, snapped.top);
+        left = placed.left;
+        top = placed.top;
+      }
+    }
     if (left !== null && top !== null) writeStore(POS_KEY, JSON.stringify({ left, top }));
     unbindDrag();
-    // A tap on the folded pill (no movement) opens it again.
     if (!dragged && isCollapsed()) setCollapsed(false);
   }
 
@@ -1428,8 +2699,6 @@ function createAvatar(options = {}) {
 
   function scheduleBlink() {
     if (disposed || state !== 'idle') return;
-    // Re-arming (state bounce, unfold) must not stack a second chain behind the
-    // first: only one handle is ever tracked, so an extra one would leak.
     cancel(blinkTimer);
     blinkTimer = null;
     const delay = BLINK_MIN_MS + Math.random() * (BLINK_MAX_MS - BLINK_MIN_MS);
@@ -1446,7 +2715,6 @@ function createAvatar(options = {}) {
   }
 
   function setMouth(level) {
-    // 自定义形象没有嘴部 path，静音即可。
     if (!art || !art.mouth || typeof art.mouthPath !== 'function') return;
     art.mouth.setAttribute('d', art.mouthPath(level));
   }
@@ -1461,11 +2729,38 @@ function createAvatar(options = {}) {
     if (wanted !== 'speaking') setMouth(0);
     stopBlink();
     if (wanted === 'idle') scheduleBlink();
+    if (core3d) core3d.setState(wanted);
   }
 
   function setLevel(level) {
-    if (disposed || state !== 'speaking') return;
+    if (disposed) return;
+    if (core3d) core3d.setLevel(level);
+    if (state !== 'speaking') return;
     setMouth(level);
+  }
+
+  function setReceipt(task) {
+    if (disposed) return '';
+    if (!task || !task.sessionId) {
+      receiptTitle = '';
+      receipt.textContent = '';
+      receipt.setAttribute('data-state', 'idle');
+      return '';
+    }
+    receiptTitle = String(task.title || '新任务').slice(0, 12);
+    receipt.textContent = '已派发 · ' + receiptTitle;
+    receipt.setAttribute('data-state', 'pending');
+    return receipt.textContent;
+  }
+
+  function setReceiptState(next) {
+    if (disposed) return '';
+    const wanted = next === 'done' || next === 'failed' ? next : 'pending';
+    receipt.setAttribute('data-state', wanted);
+    if (wanted === 'done') receipt.textContent = '✓ ' + (receiptTitle || '完成');
+    else if (wanted === 'failed') receipt.textContent = '✕ ' + (receiptTitle || '失败');
+    else receipt.textContent = receiptTitle ? '已派发 · ' + receiptTitle : '已派发';
+    return receipt.textContent;
   }
 
   function setSubtitle(text, config = {}) {
@@ -1483,8 +2778,6 @@ function createAvatar(options = {}) {
     else partial.removeAttribute('data-visible');
   }
 
-  // ------------------------------------------------------------ settings sheet
-  // 角色 -> 槽位默认声音。custom 没有自己的映射时按鲸鱼的默认值走；chibi 全是 stella。
   function voiceDefaults(id) {
     if (id === 'chibi') return { base: 'stella', bright: 'stella', soft: 'stella' };
     return { base: 'tide', bright: 'stella', soft: 'tide' };
@@ -1511,8 +2804,6 @@ function createAvatar(options = {}) {
     return list;
   }
 
-  // Sets both the option flags and select.value; the offline stub has no
-  // native <select> behaviour, so the component cannot rely on the browser here.
   function setSelectValue(select, options, voiceId) {
     let chosen = voiceId;
     const known = options.map((option) => option.getAttribute('value'));
@@ -1548,7 +2839,6 @@ function createAvatar(options = {}) {
     syncFaceFields();
   }
 
-  // 自定义形象改名：回车/失焦落盘，并同步 chip 文案与无障碍标签。
   function commitName() {
     if (disposed || !face || characterId() !== CUSTOM_CHARACTER_ID) return;
     const next = String(nameInput.value || '').trim().slice(0, 12);
@@ -1583,10 +2873,193 @@ function createAvatar(options = {}) {
       faceChip = null;
     }
     if (characterId() === CUSTOM_CHARACTER_ID) {
-      selectCharacter(listCharacters()[0].id, true);
+      selectCharacter(resolveCharacter(CUSTOM_CHARACTER_ID, null).id, true);
     }
     syncSheet();
     saveButton.textContent = '保存';
+  }
+
+  let themePreview = null;
+  let themeBusy = false;
+
+  function paintTheme(theme) {
+    const applied = applyTheme(doc, theme);
+    if (core3d) core3d.setTheme(applied && applied.theme ? applied.theme : theme);
+    return applied;
+  }
+
+  function themeEntry(id) {
+    const all = listThemes();
+    return all.find((entry) => entry.id === id) || all[0] || { id: 'default', name: '默认', builtin: true };
+  }
+
+  function syncThemeFields() {
+    if (disposed) return;
+    const entry = themeEntry(getActiveId());
+    themeName.value = themePreview ? themePreview.name : entry.name;
+    if (themePreview) themeName.removeAttribute('readonly');
+    else themeName.setAttribute('readonly', 'readonly');
+    themeSave.textContent = '保存主题';
+    themeSave.disabled = !themePreview;
+    themeDelete.disabled = !!themePreview || entry.builtin;
+  }
+
+  function syncThemeChips() {
+    if (disposed) return;
+    while (themeChips.children && themeChips.children.length) themeChips.removeChild(themeChips.children[0]);
+    const active = getActiveId();
+    for (const entry of listThemes()) {
+      const chip = element(doc, 'button', { class: 'vc-chip vc-theme-chip', type: 'button', 'data-theme': entry.id, 'aria-pressed': entry.id === active ? 'true' : 'false', title: entry.name }, entry.name);
+      if (entry.id === active) chip.setAttribute('data-active', '1');
+      if (typeof chip.addEventListener === 'function') chip.addEventListener('click', () => activateTheme(entry.id));
+      themeChips.appendChild(chip);
+    }
+  }
+
+  function syncThemeSection() {
+    syncThemeChips();
+    syncThemeFields();
+  }
+
+  function activateTheme(id) {
+    if (disposed) return;
+    themePreview = null;
+    const theme = setActiveId(id);
+    paintTheme(theme);
+    syncThemeSection();
+    themeSay('已换成「' + theme.name + '」');
+    if (onAction) onAction('theme', { id: getActiveId(), theme });
+  }
+
+  function themeSay(text) {
+    themeMessage.textContent = text || '';
+  }
+
+  function themeDesigning(on) {
+    themeBusy = !!on;
+    themeGenerate.disabled = !!on;
+    themeGenerate.textContent = on ? '生成中' : '生成';
+  }
+
+  function settleThemeDesign(payload) {
+    themeDesigning(false);
+    if (disposed) return null;
+    if (!payload || payload.ok !== true) {
+      themeSay(payload && payload.message ? payload.message : '这次没改出来，再试一次');
+      return null;
+    }
+    const source = payload.theme || payload;
+    const current = resolveTheme(getActiveId());
+    themePreview = {
+      v: 1,
+      name: String(source.name || THEME_FALLBACK_NAME).slice(0, THEME_NAME_LIMIT),
+      tokens: Object.assign({}, current.tokens, source.tokens || {}),
+      css: Object.assign({}, current.css, source.css || {}),
+    };
+    paintTheme(themePreview);
+    syncThemeFields();
+    themeSay(payload.message || '预览中，点「保存主题」才会记住');
+    return themePreview;
+  }
+
+  function handleThemeGenerate() {
+    if (disposed || themeBusy) return;
+    const utterance = String(themePrompt.value || '').trim().slice(0, 200);
+    if (!utterance) return themeSay('先写一句想要的样子');
+    themeDesigning(true);
+    themeSay('正在让模型改样式…');
+    if (onAction) onAction('theme-design', { utterance, base: resolveTheme(getActiveId()) });
+    else settleThemeDesign({ ok: false, message: '这个环境连不上模型' });
+  }
+
+  function handleThemeSave() {
+    if (disposed) return;
+    if (!themePreview) return themeSay('先用一句话生成一套，再保存');
+    const name = String(themeName.value || '').trim().slice(0, THEME_NAME_LIMIT);
+    const result = saveTheme({ name: name || themePreview.name, tokens: themePreview.tokens, css: themePreview.css });
+    if (!result.ok) return themeSay(result.error);
+    themePreview = null;
+    const theme = resolveTheme(result.id);
+    paintTheme(theme);
+    syncThemeSection();
+    themeSay('已保存「' + result.name + '」');
+    if (onAction) onAction('theme', { id: result.id, theme });
+  }
+
+  function handleThemeDelete() {
+    if (disposed) return;
+    const result = deleteTheme(getActiveId());
+    if (!result.ok) return themeSay(result.error);
+    paintTheme(result.theme);
+    syncThemeSection();
+    themeSay(result.fellBack ? '已删除，回到默认主题' : '已删除');
+    if (onAction) onAction('theme', { id: result.active, theme: result.theme });
+  }
+
+  function themeFileName(name) {
+    const safe = String(name || 'theme').replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '');
+    return 'vc-theme-' + (safe || 'theme').slice(0, 40) + '.json';
+  }
+
+  function handleThemeExport() {
+    if (disposed) return;
+    const active = getActiveId();
+    const text = exportTheme(active);
+    if (!text) return themeSay('这个主题导不出来');
+    const BlobCtor = (win && win.Blob) || (typeof Blob === 'function' ? Blob : null);
+    const urlApi = win && win.URL;
+    if (!BlobCtor || !urlApi || typeof urlApi.createObjectURL !== 'function') return themeSay('这个环境不能下载文件');
+    const fileName = themeFileName(themeEntry(active).name);
+    const href = urlApi.createObjectURL(new BlobCtor([text], { type: 'application/json' }));
+    const link = doc.createElement('a');
+    link.setAttribute('href', href);
+    link.setAttribute('download', fileName);
+    link.setAttribute('hidden', 'hidden');
+    const host = doc.body || doc.documentElement;
+    if (host && typeof host.appendChild === 'function') host.appendChild(link);
+    if (typeof link.click === 'function') link.click();
+    later(() => {
+      const parent = link.parentNode;
+      if (parent && typeof parent.removeChild === 'function') parent.removeChild(link);
+      if (typeof urlApi.revokeObjectURL === 'function') urlApi.revokeObjectURL(href);
+    }, 1000);
+    themeSay('已导出 ' + fileName);
+  }
+
+  function handleThemeImport() {
+    if (disposed) return;
+    if (typeof themeFileInput.click === 'function') themeFileInput.click();
+    else themeSay('这个环境不能选文件');
+  }
+
+  function handleThemeFile() {
+    if (disposed) return;
+    const file = themeFileInput.files && themeFileInput.files[0];
+    if (!file) return;
+    const ReaderCtor = (win && win.FileReader) || (typeof FileReader === 'function' ? FileReader : null);
+    if (!ReaderCtor) return themeSay('这个环境不能读文件');
+    const reader = new ReaderCtor();
+    reader.onload = () => {
+      if (disposed) return;
+      const result = importTheme(String(reader.result || ''));
+      if (!result.ok) {
+        themeSay(result.error);
+        syncThemeFields();
+        return;
+      }
+      themePreview = null;
+      const theme = resolveTheme(result.id);
+      paintTheme(theme);
+      syncThemeSection();
+      themeSay('已导入「' + result.name + '」');
+      if (onAction) onAction('theme', { id: result.id, theme });
+      try {
+        themeFileInput.value = '';
+      } catch (_error) {
+      }
+    };
+    reader.onerror = () => themeSay('这个文件读不了');
+    reader.readAsText(file);
   }
 
   function setSheetOpen(next) {
@@ -1594,8 +3067,8 @@ function createAvatar(options = {}) {
     const wanted = !!next;
     if (wanted) {
       syncSheet();
+      syncThemeSection();
     } else {
-      // 关抽屉时把正在编辑的名字落盘，避免「输入了却没保存」。
       commitName();
       cancel(sheetTimer);
       sheetTimer = null;
@@ -1603,6 +3076,7 @@ function createAvatar(options = {}) {
     }
     sheetOpen = wanted;
     sheet.setAttribute('data-open', wanted ? '1' : '0');
+    if (wanted) sheet.scrollTop = 0;
     sheet.setAttribute('aria-hidden', wanted ? 'false' : 'true');
     gearButton.setAttribute('aria-expanded', wanted ? 'true' : 'false');
     return wanted;
@@ -1686,6 +3160,32 @@ function createAvatar(options = {}) {
   if (typeof removeFaceButton.addEventListener === 'function') {
     removeFaceButton.addEventListener('click', handleRemoveFace);
   }
+  if (typeof themeGenerate.addEventListener === 'function') {
+    themeGenerate.addEventListener('click', handleThemeGenerate);
+  }
+  if (typeof themePrompt.addEventListener === 'function') {
+    themePrompt.addEventListener('keydown', (event) => {
+      if (event && (event.key === 'Enter' || event.key === 'Return')) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        handleThemeGenerate();
+      }
+    });
+  }
+  if (typeof themeSave.addEventListener === 'function') {
+    themeSave.addEventListener('click', handleThemeSave);
+  }
+  if (typeof themeDelete.addEventListener === 'function') {
+    themeDelete.addEventListener('click', handleThemeDelete);
+  }
+  if (typeof themeExport.addEventListener === 'function') {
+    themeExport.addEventListener('click', handleThemeExport);
+  }
+  if (typeof themeImport.addEventListener === 'function') {
+    themeImport.addEventListener('click', handleThemeImport);
+  }
+  if (typeof themeFileInput.addEventListener === 'function') {
+    themeFileInput.addEventListener('change', handleThemeFile);
+  }
   const handleSheetKeydown = (event) => {
     if (!sheetOpen || !event) return;
     if (event.key === 'Escape' || event.key === 'Esc') {
@@ -1740,9 +3240,19 @@ function createAvatar(options = {}) {
     unbind(resetButton, 'click', handleReset);
     unbind(changeFaceButton, 'click', handleChangeFace);
     unbind(removeFaceButton, 'click', handleRemoveFace);
+    unbind(themeGenerate, 'click', handleThemeGenerate);
+    unbind(themeSave, 'click', handleThemeSave);
+    unbind(themeDelete, 'click', handleThemeDelete);
+    unbind(themeExport, 'click', handleThemeExport);
+    unbind(themeImport, 'click', handleThemeImport);
+    unbind(themeFileInput, 'change', handleThemeFile);
     cancel(sheetTimer);
     sheetTimer = null;
     sheetOpen = false;
+    if (core3d) {
+      core3d.destroy();
+      core3d = null;
+    }
     if (fileInput.parentNode && typeof fileInput.parentNode.removeChild === 'function') {
       fileInput.parentNode.removeChild(fileInput);
     }
@@ -1761,6 +3271,7 @@ function createAvatar(options = {}) {
     } catch (error) { /* corrupt value: keep the default corner */ }
   }
   setCollapsed(readStore(FOLD_KEY) === '1');
+  syncThemeSection();
 
   return {
     root,
@@ -1768,10 +3279,13 @@ function createAvatar(options = {}) {
     setLevel,
     setSubtitle,
     setPartial,
+    setTheme: (theme) => paintTheme(theme),
+    themeDesign: (payload) => settleThemeDesign(payload),
+    setReceipt,
+    setReceiptState,
     setCharacter: (id) => selectCharacter(id, false),
     setCollapsed,
     toggleCollapsed,
-    // Where the panel was left, so a caller can re-apply it after a remount.
     get position() {
       return { left: px(root.style.left), top: px(root.style.top) };
     },
@@ -1779,7 +3293,6 @@ function createAvatar(options = {}) {
       return isCollapsed();
     },
     cycleCharacter,
-    // The label switches together with the button so the two never disagree.
     setMode: (mode) => {
       const next = mode === 'dictation' ? 'dictation' : 'call';
       modeButton.setAttribute('data-mode', next);
@@ -1797,7 +3310,6 @@ function createAvatar(options = {}) {
   };
 }
 
-// Helpers for offline tests (test/avatar-harness.mjs); not used at runtime.
 const __test = {
   pendingTimers: () => activeTimers.size,
   subtitleMax: SUBTITLE_MAX,
@@ -1805,10 +3317,6 @@ const __test = {
 };
 
 // ---- src/client/audio.js ----
-// Audio engine: microphone → energy VAD → incremental ASR → sentence playback.
-// Written as a plain fragment (no import/export): scripts/build-client.mjs inlines it
-// into the ModuleLoader factory together with avatar.js and index.js.
-
 const SAMPLE_RATE = 16000;
 const FRAME_MS = 20;
 const FRAME = (SAMPLE_RATE * FRAME_MS) / 1000;
@@ -2024,7 +3532,6 @@ function createAudioEngine(deps) {
     preRollMs: 320,
     maxSegmentMs: 20000,
   };
-  // 700 ms cadence keeps every local decode under ~250 ms up to a 12 s window (measured).
   const cadenceMs = 700;
   const partialWindowMs = 12000;
 
@@ -2044,7 +3551,6 @@ function createAudioEngine(deps) {
   let running = false;
   let disposed = false;
 
-  // playback
   let playQueue = [];
   let playing = false;
   let currentSource = null;
@@ -2063,7 +3569,6 @@ function createAudioEngine(deps) {
     emit();
   }
 
-  // ------------------------------------------------------------------ ASR
   async function transcribe(samples) {
     const wav = pcm16ToWav(floatToPcm16(samples));
     const audioBase64 = bytesToBase64(wav);
@@ -2071,7 +3576,6 @@ function createAudioEngine(deps) {
       const result = await withTimeout(deps.transcribeRemote({ audioBase64 }), 20000, 'speech transcribe');
       if (result && result.ok === true) return (result.value && result.value.text) || '';
       if (result && result.error && result.error.code === 'not-mounted') {
-        // fall through to the host route
       } else if (result && result.error) {
         throw new Error(result.error.message || 'transcribe failed');
       }
@@ -2101,7 +3605,6 @@ function createAudioEngine(deps) {
         deps.onPartial && deps.onPartial(text);
       }
     } catch (_error) {
-      // a failed partial is not worth surfacing: the final decode will retry
     } finally {
       inFlight = false;
     }
@@ -2133,7 +3636,6 @@ function createAudioEngine(deps) {
     }
   }
 
-  // -------------------------------------------------------------- playback
   /**
    * Playback rate is a presentation detail: clamp it so a corrupted profile can
    * never turn a sentence into a chipmunk or a 10x speedup.
@@ -2152,8 +3654,6 @@ function createAudioEngine(deps) {
   }
 
   async function playOne(bytes, rate) {
-    // A settings-panel audition may play outside a call, before start() created the
-    // context; create it on demand (the click is the user gesture Chrome wants).
     if (!audioContext) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
@@ -2207,9 +3707,6 @@ function createAudioEngine(deps) {
       return;
     }
     interrupt();
-    // Entries are either plain sentences or `{ text, voiceId, rate }` triples, so the
-    // host can give every sentence its own voice and speed without the engine
-    // knowing about characters.
     playQueue = sentences.map((entry, index) =>
       typeof entry === 'string'
         ? { text: entry, index }
@@ -2229,10 +3726,8 @@ function createAudioEngine(deps) {
       prefetched.delete(item.index);
       if (!playing) return;
       if (!payload || payload.error || !payload.audioBase64) {
-        // keep the conversation flowing: skip this sentence, surface nothing
         continue;
       }
-      // Prefetch the next two while this one plays, never re-fetching a played index.
       prefetch(playQueue.slice(0, 2));
       try {
         await playOne(base64ToBytes(payload.audioBase64), item.rate);
@@ -2262,10 +3757,8 @@ function createAudioEngine(deps) {
     }
   }
 
-  // ------------------------------------------------------------- lifecycle
   function onFrame(frame) {
     if (!vad) return;
-    // barge-in: talking over the companion stops playback
     const level = rms(frame);
     if (state.phase === 'speaking') {
       bargeMs = level >= Math.max(0.02, vad.threshold * 1.6) ? bargeMs + FRAME_MS : 0;
@@ -2417,16 +3910,6 @@ function createAudioEngine(deps) {
 }
 
 // ---- src/client/polish.js ----
-// Dictation text polish: pure functions, zero dependencies, no DOM.
-//
-// Ported (and simplified from `{ text, notes }` to plain strings) out of
-// dsh-plugins/plugins/realtime-voice/client.js — the functions `stripFillers`,
-// `collapseRepeats`, `resolveSelfCorrections`, `applySpokenCommands`,
-// `fixPunctuation`, `applyDictionary`, `mergeSegments`, `seamNeedsSpace`.
-// The audio/VAD/ASR stack stays in audio.js; this file only rewrites text.
-//
-// Every export is side-effect free: same input → same output, no globals read.
-
 const CJK_RANGE = '\\u3400-\\u4dbf\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af';
 const CJK_CHAR = new RegExp('[' + CJK_RANGE + ']');
 const CJK_RUN = new RegExp('[' + CJK_RANGE + ']', 'g');
@@ -2435,7 +3918,6 @@ const TERMINAL = '。！？!?…';
 const SOFT = '，,、；;：:';
 const CJK_PUNCT = '，。！？、；：…“”‘’（）《》〈〉【】—～·';
 
-// -------------------------------------------------------------- dictionary
 /**
  * Parse the user dictionary text, one `from=to` pair per line.
  * Lines starting with `#`, empty lines and lines without `=` are ignored.
@@ -2457,7 +3939,6 @@ function parseDictionary(text) {
   return out;
 }
 
-// ------------------------------------------------------------------ options
 const DEFAULT_OPTIONS = {
   spokenCommands: true,
   filler: true,
@@ -2476,13 +3957,8 @@ function resolveOptions(options) {
   return out;
 }
 
-// ------------------------------------------------------------- filler words
-// A filler only counts when it stands alone between pauses: "那个项目" keeps
-// its demonstrative, "那个，项目" loses the hesitation.
 const FILLER_ZH = /(?:^|[，。！？、,.!?\s])(?:嗯+|呃+|额+|啊+|哦+|唉+|诶+|那个+|就是说)(?=[，。！？、,.!?\s]|$)/g;
 const FILLER_EN = /\b(?:um+|uh+|er+|ah+|hmm+|you know|i mean)\b[,，]?\s*/gi;
-// Sentence-initial hesitations arrive without any punctuation after them
-// ("嗯我们走吧"), so they need their own rule.
 const FILLER_LEAD = /^(?:(?:嗯+|呃+|额+|啊+|哦+|唉+|诶+)[，,、\s]*|(?:就是说|也就是说)[，,、\s]*)/;
 
 function stripFillers(text) {
@@ -2495,10 +3971,6 @@ function stripFillers(text) {
   return out;
 }
 
-// ---------------------------------------------------------------- stutters
-// `([\u4e00-\u9fff]{1,3})\1+` in the source also ate legitimate reduplication
-// ("我天天跑步" → "我天跑步"), so single characters are limited to the pronouns
-// that people actually stutter on, and multi-character stutters start at two.
 const STUTTER_CHAR = /(我|你|他|她|它|咱|这|那)\1+/g;
 
 function collapseRepeats(text) {
@@ -2509,7 +3981,6 @@ function collapseRepeats(text) {
   return out;
 }
 
-// ------------------------------------------------------- self-corrections
 const CORRECTION_ZH = /(?:不对|说错了|我重说)\s*(?:[，,、]\s*)?(?:我是说|就是说|应该是|而是)?\s*/g;
 const CORRECTION_ZH_WEAK = /不是[，,、]\s*(?:我是说|就是说|应该是)?\s*/g;
 const CORRECTION_EN = /\b(?:no wait|i mean|sorry,?\s+i meant|rather)\b[,，]?\s*/gi;
@@ -2548,12 +4019,8 @@ function resolveSelfCorrections(text) {
   const tail = chosen.after.replace(REPLACE_LEAD, '').trim();
   if (!tail) return source;
   if (!chosen.head) return tail;
-  // "…说完了。不对，我是说…" keeps the finished sentence, then appends the fix.
   if (!replacesValue) return /[。！？.!?…]$/.test(chosen.head) ? chosen.head + tail : tail;
 
-  // The correction retires the value it replaces. Prefer the last clause
-  // boundary; with no boundary ("会议定在周三") swap the final two characters,
-  // which is how numerals and nouns get corrected in speech.
   const head = chosen.head;
   const cut = Math.max(head.lastIndexOf('，'), head.lastIndexOf(','), head.lastIndexOf('、'),
     head.lastIndexOf('。'), head.lastIndexOf('；'), head.lastIndexOf(';'), head.lastIndexOf(' '));
@@ -2562,10 +4029,6 @@ function resolveSelfCorrections(text) {
   return tail;
 }
 
-// ------------------------------------------------------- spoken punctuation
-// Deliberately tiny: only punctuation that has no other common meaning is
-// rewritten. "列表" / "另起一段" / English "period" are left alone on purpose —
-// rewriting them damaged ordinary prose far more often than it helped.
 const SPELLED_PUNCT = [
   [/换行/g, '\n'],
   [/逗号/g, '，'],
@@ -2580,13 +4043,11 @@ const SPELLED_PUNCT = [
 function applySpokenCommands(text) {
   let out = String(text == null ? '' : text);
   for (const [pattern, replacement] of SPELLED_PUNCT) out = out.replace(pattern, replacement);
-  // A comma/period spoken at a seam arrives as "…， ，下一句" — squeeze the gaps.
   out = out.replace(/[ \t]*([，。！？、；：])[ \t]*/g, '$1');
   out = out.replace(/[ \t]*\n[ \t]*/g, '\n');
   return out;
 }
 
-// --------------------------------------------------------------- punctuation
 function isCjkText(text) {
   const sample = String(text || '');
   if (!sample) return false;
@@ -2606,7 +4067,6 @@ function fixPunctuation(text) {
   out = out.replace(/([，。！？、：；,])[，。！？、：；,]+/g, '$1');
 
   if (cjk) {
-    // Digit-adjacent latin punctuation is data, not prose: keep 1,000 and 10:30.
     out = out.replace(/(?<!\d),(?!\d)/g, '，')
       .replace(/(?<!\d);(?!\d)/g, '；')
       .replace(/(?<!\d):(?!\d)/g, '：')
@@ -2625,7 +4085,6 @@ function fixPunctuation(text) {
   return out;
 }
 
-// ---------------------------------------------------------------- dictionary
 function applyDictionary(text, entries) {
   let out = String(text == null ? '' : text);
   for (const entry of entries || []) {
@@ -2636,7 +4095,6 @@ function applyDictionary(text, entries) {
   return out;
 }
 
-// ----------------------------------------------------------- CJK/Latin space
 /** Put one space between a Chinese character and an English letter. */
 function addCjkLatinSpacing(text) {
   return String(text == null ? '' : text)
@@ -2646,7 +4104,6 @@ function addCjkLatinSpacing(text) {
     .trim();
 }
 
-// -------------------------------------------------------------------- polish
 /**
  * One dictation segment → insertable text.
  * @param {string} text raw ASR text.
@@ -2669,7 +4126,6 @@ function polish(text, options = {}) {
   return value.trim();
 }
 
-// -------------------------------------------------------------- merge seams
 /**
  * Should the seam between two already-inserted segments take a space?
  * Latin↔Latin and Chinese↔Latin take one; Chinese punctuation never does
@@ -2709,17 +4165,14 @@ function mergeSentences(previous, next, options = {}) {
 
   let corrected = head;
 
-  // 1. Correction opening the new segment: "会议定在周三" + "不对，是周四".
   if (settings.corrections !== false && CORRECTION_LEAD.test(tail)) {
     tail = tail.replace(CORRECTION_LEAD, '').replace(REPLACE_LEAD, '').trim();
     const cut = Math.max(corrected.lastIndexOf('，'), corrected.lastIndexOf(','), corrected.lastIndexOf('、'),
       corrected.lastIndexOf('。'), corrected.lastIndexOf('；'), corrected.lastIndexOf(';'), corrected.lastIndexOf(' '));
     if (cut > 0) corrected = corrected.slice(0, cut);
-    // No delimiter to anchor on: a short replacement is a noun/numeral swap.
     else if (tail.length <= 8) corrected = corrected.slice(0, Math.max(0, corrected.length - 2));
   }
 
-  // 2. Overlap at the seam: the recognizer re-emits the previous tail.
   const maxOverlap = Math.min(24, corrected.length, tail.length);
   for (let size = maxOverlap; size >= 3; size -= 1) {
     if (corrected.slice(corrected.length - size) === tail.slice(0, size)) {
@@ -2728,13 +4181,11 @@ function mergeSentences(previous, next, options = {}) {
     }
   }
 
-  // 3. A segment that begins mid-sentence must not restart it with a capital.
   if (tail && !TERMINAL.includes(corrected[corrected.length - 1]) && corrected[corrected.length - 1] !== '.'
     && /^[A-Z][a-z]/.test(tail) && seamNeedsSpace(corrected, tail)) {
     tail = tail[0].toLowerCase() + tail.slice(1);
   }
 
-  // 4. Do not stack punctuation at the seam ("…，" + "，下一句").
   if (tail && (SOFT.includes(tail[0]) || TERMINAL.includes(tail[0]))
     && (SOFT.includes(corrected[corrected.length - 1]) || TERMINAL.includes(corrected[corrected.length - 1]))) {
     tail = tail.replace(/^[\s，,、；;：:。！？!?…]+/, '');
@@ -2745,24 +4196,6 @@ function mergeSentences(previous, next, options = {}) {
 }
 
 // ---- src/client/dictation.js ----
-// Dictation insertion: polish a recognized segment and put it into the chat input.
-//
-// Audio capture / VAD / ASR live in audio.js. This module only owns the last
-// mile: it registers a **render-less** slot component that captures the host's
-// composer actions (`insertText` / `captureInsertion` / `replaceText`), exactly
-// like `SurfaceActions` in dsh-plugins/plugins/realtime-voice/client.js:1359-1370,
-// and inserts polished text. If insertion fails the text is kept in `pending`
-// so the caller can retry or show it.
-//
-// React comes from the `require` the ModuleLoader factory hands in:
-//   createDictation(hooks).install(ctx, require)
-// When React is unavailable the module reports "输入框不可用" and stays inert —
-// it never throws into the host's slot pipeline.
-
-// Bundler note: scripts/build-client.mjs concatenates polish.js *before* this
-// file, so the bundler strips this import line and the `polish` binding resolves
-// to the concatenated function. Node's ESM loader uses it as written.
-
 const ACTIVITY_SLOT = 'conversation.input.activity';
 const FALLBACK_SLOT = 'conversation.input.right';
 const ERROR_NO_INPUT = '输入框不可用';
@@ -2773,7 +4206,6 @@ function safeCall(fn, arg) {
   try {
     return fn(arg);
   } catch (_callbackError) {
-    // A throwing host callback must not break insertion.
     return undefined;
   }
 }
@@ -2819,8 +4251,6 @@ function createDictation(hooks = {}) {
       status();
       return false;
     }
-    // Keep the original object, not a copy of its methods: the host's
-    // insertText may rely on `this` being the composer actions object.
     actions = next;
     ready = typeof next.insertText === 'function';
     status();
@@ -2852,9 +4282,6 @@ function createDictation(hooks = {}) {
 
     SlotProbe = function VoiceCompanionSlotProbe(props) {
       const incoming = props ? (props.inputActions || props.actions) : null;
-      // Capture during render as well as in the effect: the slot may be
-      // mounted without effects having flushed (and the test harness has no
-      // scheduler at all). Both paths are idempotent.
       setActions(incoming);
       const effect = React.useEffect;
       if (typeof effect === 'function') effect(() => { setActions(incoming); }, [incoming]);
@@ -2886,7 +4313,6 @@ function createDictation(hooks = {}) {
       return false;
     }
 
-    // Let the host tear us down with the plugin, if it offers an effect hook.
     if (typeof ctx.effect === 'function') {
       try {
         ctx.effect(() => () => dispose());
@@ -2974,14 +4400,6 @@ function createDictation(hooks = {}) {
 }
 
 // ---- src/client/hotkey.js ----
-// Push-to-talk over a global hotkey: hold Ctrl+Shift+Space → record → release →
-// /transcribe → /plan → /send. This is a plain ESM fragment with no imports:
-// scripts/build-client.mjs strips `export` and inlines it into the same
-// ModuleLoader factory as avatar.js/audio.js/index.js, so every top-level name
-// below is prefixed `hotkey`/`HOTKEY_` on purpose. In particular there is no
-// `__test` export (avatar.js already owns that name) — the test hook is
-// `__hotkeyTest`.
-
 const HOTKEY_DEFAULT_SPEC = 'ControlLeft+ShiftLeft+Space';
 const HOTKEY_STORAGE_KEY = 'dsh.voice-companion.hotkey';
 const HOTKEY_SAMPLE_RATE = 16000;
@@ -3002,14 +4420,14 @@ const HOTKEY_LABELS = {
 };
 
 const HOTKEY_STYLE_TEXT = `
-.vc-hotkey-hud{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483000;display:flex;align-items:center;gap:8px;max-width:min(78vw,560px);padding:8px 14px;border-radius:999px;background:rgba(22,24,29,.92);color:#f4f5f7;font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.22);pointer-events:none;transition:opacity .18s ease,visibility .18s ease}
+.vc-hotkey-hud{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:var(--vc-board-z, 2147483000);display:flex;align-items:center;gap:var(--vc-board-gap, 8px);max-width:min(78vw,560px);padding:var(--vc-btn-padding, 8px 14px);border-radius:var(--vc-btn-radius, 999px);background:var(--vc-board-bg-to, rgba(22,24,29,.92));color:var(--vc-text-primary, #f4f5f7);font:var(--vc-type-size, 12px)/var(--vc-type-line-height, 1.45) var(--vc-type-font, -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif);box-shadow:var(--vc-board-shadow, 0 8px 24px rgba(0,0,0,.22));pointer-events:none;transition:opacity .18s ease,visibility .18s ease}
 .vc-hotkey-hud[data-visible="0"]{opacity:0;visibility:hidden}
-.vc-hotkey-dot{width:7px;height:7px;border-radius:50%;background:#9aa0a6;flex:0 0 auto}
-.vc-hotkey-dot[data-phase="recording"]{background:#ff5f57;animation:vc-hotkey-pulse 1s ease-in-out infinite}
-.vc-hotkey-dot[data-phase="transcribing"]{background:#f5c451}
-.vc-hotkey-dot[data-phase="routing"]{background:#5b9dff}
-.vc-hotkey-dot[data-phase="done"]{background:#51c46a}
-.vc-hotkey-dot[data-phase="failed"]{background:#ff5f57}
+.vc-hotkey-dot{width:7px;height:7px;border-radius:50%;background:var(--vc-dot-idle, #9aa0a6);flex:0 0 auto}
+.vc-hotkey-dot[data-phase="recording"]{background:var(--vc-dot-error, #ff5f57);animation:vc-hotkey-pulse var(--vc-think-duration, 1s) ease-in-out infinite}
+.vc-hotkey-dot[data-phase="transcribing"]{background:var(--vc-dot-thinking, #f5c451)}
+.vc-hotkey-dot[data-phase="routing"]{background:var(--vc-dot-speaking, #5b9dff)}
+.vc-hotkey-dot[data-phase="done"]{background:var(--vc-dot-listening, #51c46a)}
+.vc-hotkey-dot[data-phase="failed"]{background:var(--vc-dot-error, #ff5f57)}
 .vc-hotkey-label{font-weight:600;white-space:nowrap}
 .vc-hotkey-detail{opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:42vw}
 @keyframes vc-hotkey-pulse{50%{opacity:.35}}
@@ -3055,7 +4473,6 @@ function hotkeyNoteError(scope, error) {
     const text = error && error.message ? error.message : String(error);
     console.warn('[voice-companion hotkey] ' + scope + ': ' + text);
   } catch {
-    // console itself can be unavailable in exotic hosts; never surface this.
   }
 }
 
@@ -3073,7 +4490,6 @@ function hotkeyPreventDefault(event) {
   try {
     if (typeof event.preventDefault === 'function') event.preventDefault();
   } catch {
-    // Some synthetic events expose a throwing preventDefault; ignore.
   }
 }
 
@@ -3089,7 +4505,6 @@ function hotkeyStopStream(stream) {
       try {
         if (track && typeof track.stop === 'function') track.stop();
       } catch {
-        // A track that is already ended can throw; nothing useful to do.
       }
     }
   } catch (error) {
@@ -3213,7 +4628,6 @@ function hotkeyReadSpec() {
       if (typeof stored === 'string' && stored.trim() !== '') return stored.trim();
     }
   } catch {
-    // localStorage can throw in privacy mode; fall back to the default binding.
   }
   return HOTKEY_DEFAULT_SPEC;
 }
@@ -3466,7 +4880,6 @@ function createHotkey(deps) {
     try {
       state.hud.root.setAttribute('data-visible', '0');
     } catch {
-      // The HUD may already be detached.
     }
   }
 
@@ -3532,7 +4945,6 @@ function createHotkey(deps) {
       try {
         capture.processor.onaudioprocess = null;
       } catch {
-        // Ignore a frozen processor object.
       }
     }
     for (const node of [capture.processor, capture.source, capture.gain]) {
@@ -3540,7 +4952,6 @@ function createHotkey(deps) {
         try {
           node.disconnect();
         } catch {
-          // Already disconnected.
         }
       }
     }
@@ -3552,7 +4963,6 @@ function createHotkey(deps) {
         const closed = context.close();
         if (closed && typeof closed.catch === 'function') closed.catch(hotkeyNoop);
       } catch {
-        // Ignore a context that is already closed.
       }
     }
     const chunks = capture.chunks || [];
@@ -3592,7 +5002,6 @@ function createHotkey(deps) {
       const resumed = context.resume();
       if (resumed && typeof resumed.catch === 'function') resumed.catch(hotkeyNoop);
     } catch {
-      // Autoplay policy can still refuse; speech is best-effort.
     }
   }
 
@@ -3603,12 +5012,10 @@ function createHotkey(deps) {
     try {
       if (playing.source && typeof playing.source.stop === 'function') playing.source.stop(0);
     } catch {
-      // The source may have ended already.
     }
     try {
       if (typeof playing.finish === 'function') playing.finish();
     } catch {
-      // finish is idempotent.
     }
   }
 
@@ -3654,7 +5061,6 @@ function createHotkey(deps) {
         try {
           source.onended = null;
         } catch {
-          // Ignore.
         }
         if (state.playback && state.playback.source === source) state.playback = null;
         resolveDone();
@@ -3720,7 +5126,6 @@ function createHotkey(deps) {
         if (resumed && typeof resumed.catch === 'function') resumed.catch(hotkeyNoop);
       }
     } catch {
-      // ScriptProcessor still works on some hosts without a resumed context.
     }
 
     try {
@@ -3749,7 +5154,6 @@ function createHotkey(deps) {
         try {
           gain.gain.value = 0;
         } catch {
-          // Ignore.
         }
         processor.connect(gain);
         gain.connect(context.destination);
@@ -3882,7 +5286,6 @@ function createHotkey(deps) {
   }
 
   function press() {
-    // Programmatic press() works before install(); dispose() makes it inert.
     if (state.disposed) return false;
     if (state.recording) return false;
     if (state.phase === 'transcribing' || state.phase === 'routing') return false;
@@ -3965,14 +5368,12 @@ function createHotkey(deps) {
         listeners.keyTarget.removeEventListener('keyup', listeners.onKeyUp);
       }
     } catch {
-      // Ignore.
     }
     try {
       if (listeners.blurTarget && typeof listeners.blurTarget.removeEventListener === 'function') {
         listeners.blurTarget.removeEventListener('blur', listeners.onBlur);
       }
     } catch {
-      // Ignore.
     }
   }
 
@@ -4018,7 +5419,6 @@ function createHotkey(deps) {
     try {
       blurTarget.addEventListener('blur', onBlur);
     } catch {
-      // A browser without blur is still usable.
     }
 
     state.listeners = { keyTarget, blurTarget, onKeyDown, onKeyUp, onBlur };
@@ -4047,7 +5447,6 @@ function createHotkey(deps) {
         const closed = context.close();
         if (closed && typeof closed.catch === 'function') closed.catch(hotkeyNoop);
       } catch {
-        // Ignore.
       }
     }
     removeHud();
@@ -4072,8 +5471,6 @@ function createHotkey(deps) {
   return { install, dispose, status, press, release, abort: abortPress };
 }
 
-// Test hooks only. The name must stay distinct from avatar.js's `__test`
-// because the build inlines every client fragment into one scope.
 const __hotkeyTest = {
   encodeWave: hotkeyEncodeWave,
   bytesToBase64: hotkeyBytesToBase64,
@@ -4089,24 +5486,12 @@ const __hotkeyTest = {
 };
 
 // ---- src/client/index.js ----
-// Orchestration: avatar panel + audio engine + host routes.
-// Plain fragment (no import/export); scripts/build-client.mjs wraps everything into the
-// ModuleLoader factory. Depends on `createCharacter` art in characters.js, `createAvatar`
-// (avatar.js), `createAudioEngine` (audio.js), `polish` (polish.js), `createDictation`
-// (dictation.js) and `createHotkey` (hotkey.js) — build-client.mjs keeps that order.
-// `voice-profile.js` is the one real ESM import: it is also loaded by node tests, so
-// the build script must inline it as well.
-
-
 const API = '/api/voice-companion';
 const POLL_MS = 1500;
 const CHARACTER_KEY = 'dsh.voice-companion.character';
-// The face store is owned by avatar.js; the bundle inlines both modules into one
-// scope, so this module keeps its own alias instead of redeclaring FACE_KEY.
 const FACE_STORE_KEY = 'dsh.voice-companion.face';
 const MODE_KEY = 'dsh.voice-companion.mode';
-// Pre-synthesised so the first 0.9 s after the user stops talking is never dead air:
-// the filler starts playing while the model is still thinking.
+const THEME_ACTIVE_KEY = 'dsh.voice-companion.theme.active';
 const FILLERS = ['嗯，我看一下。', '好呀。', '我在呢。'];
 
 function storedValue(key) {
@@ -4125,7 +5510,13 @@ function storeValue(key, value) {
   }
 }
 
-// 刷新后若只存了 'custom' 而图被清掉（换设备、清缓存），回落到内置形象。
+function storedTheme() {
+  try {
+    const parsed = JSON.parse(storedValue(THEME_ACTIVE_KEY) || 'null');
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_error) { return null; }
+}
+
 function storedFace() {
   try {
     const value = JSON.parse(storedValue(FACE_STORE_KEY));
@@ -4139,6 +5530,16 @@ function voiceError(kind, message) {
   const error = new Error(message);
   error.kind = kind;
   return error;
+}
+
+function themeDesignMessage(error) {
+  const kind = (error && error.kind) || '';
+  if (kind === 'rate-limited') return '太频繁了，稍后再试';
+  if (kind === 'service-missing') return '没有配置 API key';
+  if (kind === 'upstream' || kind === 'model-empty-patch') return '模型这次没给出可用样式';
+  if (kind === 'invalid') return '这句话没听懂，换个说法';
+  if (kind === 'timeout') return '等太久了，稍后再试';
+  return '网络不通';
 }
 
 async function requestJson(path, options, timeoutMs) {
@@ -4186,7 +5587,8 @@ function apply(ctx) {
     fillerIndex: 0,
     active: false,
     sessionId: undefined,
-    character: resolveCharacter(storedValue(CHARACTER_KEY), storedFace()).id,
+    receiptTask: null,
+    character: resolveCharacter(storedValue(CHARACTER_KEY) || 'core', storedFace()).id,
     voiceProfile: readVoiceProfile(),
     mode: storedValue(MODE_KEY) === 'dictation' ? 'dictation' : 'call',
     logger: (ctx && ctx.logger) || null,
@@ -4283,8 +5685,11 @@ function apply(ctx) {
     runtime.history.push({ role: 'assistant', text: say.join('') });
     if (runtime.history.length > 24) runtime.history.splice(0, runtime.history.length - 24);
     runtime.avatar && runtime.avatar.setSubtitle(say.join(''), { role: 'assistant' });
-    // The host picks a voice per sentence (character base, bright or soft); keep the
-    // pairing so one reply never changes timbre halfway through.
+    const task = reply && reply.task ? reply.task : null;
+    runtime.receiptTask = task;
+    if (runtime.avatar && typeof runtime.avatar.setReceipt === 'function') {
+      runtime.avatar.setReceipt(task);
+    }
     const voices = Array.isArray(reply.voices) ? reply.voices : [];
     await runtime.engine.speak(
       say.map((text, index) => ({ text, voiceId: voices[index], rate: runtime.voiceProfile.speed })),
@@ -4298,6 +5703,15 @@ function apply(ctx) {
       runtime.cursor = typeof body.cursor === 'number' ? body.cursor : runtime.cursor;
       for (const event of body.events || []) {
         log('event', { id: event.id, type: event.type });
+        if (runtime.receiptTask && event.sessionId && event.sessionId === runtime.receiptTask.sessionId) {
+          const next = event.type === 'task-done' ? 'done' : event.type === 'task-failed' ? 'failed' : null;
+          if (next) {
+            if (runtime.avatar && typeof runtime.avatar.setReceiptState === 'function') {
+              runtime.avatar.setReceiptState(next);
+            }
+            runtime.receiptTask = null;
+          }
+        }
         runtime.avatar && runtime.avatar.setSubtitle(event.text, { role: 'assistant' });
         runtime.engine.interrupt();
         await runtime.engine.speak([{ text: event.text, voiceId: event.voiceId }]);
@@ -4412,6 +5826,28 @@ function apply(ctx) {
     return runtime.mode;
   }
 
+  async function designTheme(request) {
+    if (!runtime.avatar || typeof runtime.avatar.themeDesign !== 'function') return;
+    if (runtime.themeDesigning) return;
+    runtime.themeDesigning = true;
+    try {
+      const body = await requestJson('/theme/design', {
+        method: 'POST',
+        body: {
+          utterance: request && request.utterance,
+          base: (request && request.base) || resolveTheme(getActiveId()),
+        },
+      }, 20000);
+      runtime.avatar.themeDesign({ ok: true, theme: body.theme, message: body.message });
+      log('theme:design', { changed: Array.isArray(body.changed) ? body.changed.length : 0 });
+    } catch (error) {
+      runtime.avatar.themeDesign({ ok: false, message: themeDesignMessage(error) });
+      log('theme:design:error', { kind: error && error.kind });
+    } finally {
+      runtime.themeDesigning = false;
+    }
+  }
+
   function mount() {
     if (typeof document === 'undefined' || !document.body) return;
     const host = document.createElement('div');
@@ -4431,8 +5867,24 @@ function apply(ctx) {
         if (name === 'face') log('face', value);
         if (name === 'voice') setVoiceProfile(value && typeof value === 'object' && value.profile ? value.profile : value);
         if (name === 'preview') previewVoice(value && typeof value === 'object' ? value.voiceId : value);
+        if (name === 'theme') {
+          if (value && value.theme) runtime.theme = value.theme;
+          log('theme', { id: value && value.id });
+        }
+        if (name === 'theme-design') void designTheme(value);
       },
     });
+
+    const legacyTheme = storedTheme();
+    if (legacyTheme && legacyTheme.name && legacyTheme.tokens && listThemes().length <= 1) {
+      const adopted = saveTheme({ name: legacyTheme.name, tokens: legacyTheme.tokens, css: legacyTheme.css });
+      if (adopted.ok) setActiveId(adopted.id);
+    }
+    const savedTheme = resolveTheme(getActiveId());
+    const painted = runtime.avatar && typeof runtime.avatar.setTheme === 'function'
+      ? runtime.avatar.setTheme(savedTheme)
+      : applyTheme(document, savedTheme);
+    runtime.theme = painted && painted.theme ? painted.theme : savedTheme;
 
     runtime.engine = createAudioEngine({
       onState: (state) => {
@@ -4452,8 +5904,6 @@ function apply(ctx) {
       },
     });
 
-    // Dictation: insert polished speech into the DSH composer. The slot registration
-    // is best-effort — without React the companion still talks, it just cannot type.
     runtime.dictation = createDictation({
       onStatus: (status) => log('dictation:status', status),
       onSubtitle: (text) => runtime.avatar && runtime.avatar.setPartial(text),
@@ -4466,8 +5916,6 @@ function apply(ctx) {
       log('dictation:install-failed', error && error.message);
     }
 
-    // Push-to-talk routing (Ctrl+Shift+Space): speak once, the host decides whether
-    // that is a new task, a resume, or a confirmation of the previous one.
     runtime.hotkey = createHotkey({
       requestJson,
       currentSessionId: () => runtime.sessionId,
@@ -4480,8 +5928,6 @@ function apply(ctx) {
       log('hotkey:install-failed', error && error.message);
     }
 
-    // Prefer the shipped local speech Remote (no audio leaves the machine); the host
-    // /transcribe route stays as the fallback when the bundle is disabled.
     runtime.disposers.push(
       ctx.inject(['remote.speech'], (scope) => {
         try {
@@ -4534,10 +5980,6 @@ function apply(ctx) {
   };
 }
 
-// No `inject` here on purpose: `webServer` is a Host service, and the renderer's
-// web boot fails when a client entry waits on a service that never exists
-// ("pending (waiting for service: webServer)"). This half talks to the Host
-// through same-origin /api routes and pulls `remote.speech` opportunistically.
 const voiceCompanion = {
   apply(ctx) {
     const disposer = apply(ctx);

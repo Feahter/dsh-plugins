@@ -7,6 +7,7 @@
 // the build script must inline it as well.
 
 import { clampSpeed, normalizeProfile, readVoiceProfile, writeVoiceProfile } from './voice-profile.js';
+import { getActiveId, listThemes, resolveTheme, saveTheme, setActiveId } from './theme-store.js';
 
 const API = '/api/voice-companion';
 const POLL_MS = 1500;
@@ -15,6 +16,7 @@ const CHARACTER_KEY = 'dsh.voice-companion.character';
 // scope, so this module keeps its own alias instead of redeclaring FACE_KEY.
 const FACE_STORE_KEY = 'dsh.voice-companion.face';
 const MODE_KEY = 'dsh.voice-companion.mode';
+const THEME_ACTIVE_KEY = 'dsh.voice-companion.theme.active';
 // Pre-synthesised so the first 0.9 s after the user stops talking is never dead air:
 // the filler starts playing while the model is still thinking.
 const FILLERS = ['嗯，我看一下。', '好呀。', '我在呢。'];
@@ -35,6 +37,13 @@ function storeValue(key, value) {
   }
 }
 
+function storedTheme() {
+  try {
+    const parsed = JSON.parse(storedValue(THEME_ACTIVE_KEY) || 'null');
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_error) { return null; }
+}
+
 // 刷新后若只存了 'custom' 而图被清掉（换设备、清缓存），回落到内置形象。
 function storedFace() {
   try {
@@ -49,6 +58,18 @@ function voiceError(kind, message) {
   const error = new Error(message);
   error.kind = kind;
   return error;
+}
+
+// 路由把失败压成 { ok:false, code }，这里翻成人话：429 太频繁、503 没 key、
+// 502 模型没给出可用 patch，其余（含断网）统一按网络问题提示。
+function themeDesignMessage(error) {
+  const kind = (error && error.kind) || '';
+  if (kind === 'rate-limited') return '太频繁了，稍后再试';
+  if (kind === 'service-missing') return '没有配置 API key';
+  if (kind === 'upstream' || kind === 'model-empty-patch') return '模型这次没给出可用样式';
+  if (kind === 'invalid') return '这句话没听懂，换个说法';
+  if (kind === 'timeout') return '等太久了，稍后再试';
+  return '网络不通';
 }
 
 async function requestJson(path, options, timeoutMs) {
@@ -96,7 +117,8 @@ function apply(ctx) {
     fillerIndex: 0,
     active: false,
     sessionId: undefined,
-    character: resolveCharacter(storedValue(CHARACTER_KEY), storedFace()).id,
+    receiptTask: null,
+    character: resolveCharacter(storedValue(CHARACTER_KEY) || 'core', storedFace()).id,
     voiceProfile: readVoiceProfile(),
     mode: storedValue(MODE_KEY) === 'dictation' ? 'dictation' : 'call',
     logger: (ctx && ctx.logger) || null,
@@ -193,6 +215,12 @@ function apply(ctx) {
     runtime.history.push({ role: 'assistant', text: say.join('') });
     if (runtime.history.length > 24) runtime.history.splice(0, runtime.history.length - 24);
     runtime.avatar && runtime.avatar.setSubtitle(say.join(''), { role: 'assistant' });
+    // Only real background dispatches get a receipt; a plain answer clears it.
+    const task = reply && reply.task ? reply.task : null;
+    runtime.receiptTask = task;
+    if (runtime.avatar && typeof runtime.avatar.setReceipt === 'function') {
+      runtime.avatar.setReceipt(task);
+    }
     // The host picks a voice per sentence (character base, bright or soft); keep the
     // pairing so one reply never changes timbre halfway through.
     const voices = Array.isArray(reply.voices) ? reply.voices : [];
@@ -208,6 +236,16 @@ function apply(ctx) {
       runtime.cursor = typeof body.cursor === 'number' ? body.cursor : runtime.cursor;
       for (const event of body.events || []) {
         log('event', { id: event.id, type: event.type });
+        // /events has no taskId, so the receipt matches on the dispatch session.
+        if (runtime.receiptTask && event.sessionId && event.sessionId === runtime.receiptTask.sessionId) {
+          const next = event.type === 'task-done' ? 'done' : event.type === 'task-failed' ? 'failed' : null;
+          if (next) {
+            if (runtime.avatar && typeof runtime.avatar.setReceiptState === 'function') {
+              runtime.avatar.setReceiptState(next);
+            }
+            runtime.receiptTask = null;
+          }
+        }
         runtime.avatar && runtime.avatar.setSubtitle(event.text, { role: 'assistant' });
         runtime.engine.interrupt();
         await runtime.engine.speak([{ text: event.text, voiceId: event.voiceId }]);
@@ -322,6 +360,30 @@ function apply(ctx) {
     return runtime.mode;
   }
 
+  async function designTheme(request) {
+    if (!runtime.avatar || typeof runtime.avatar.themeDesign !== 'function') return;
+    // 单飞：一次只放一个请求出去，避免连点「生成」烧两份 token。
+    if (runtime.themeDesigning) return;
+    runtime.themeDesigning = true;
+    try {
+      const body = await requestJson('/theme/design', {
+        method: 'POST',
+        // base 一定要带：模型只回增量，没有基准的话「边框再亮一点」会退回默认色。
+        body: {
+          utterance: request && request.utterance,
+          base: (request && request.base) || resolveTheme(getActiveId()),
+        },
+      }, 20000);
+      runtime.avatar.themeDesign({ ok: true, theme: body.theme, message: body.message });
+      log('theme:design', { changed: Array.isArray(body.changed) ? body.changed.length : 0 });
+    } catch (error) {
+      runtime.avatar.themeDesign({ ok: false, message: themeDesignMessage(error) });
+      log('theme:design:error', { kind: error && error.kind });
+    } finally {
+      runtime.themeDesigning = false;
+    }
+  }
+
   function mount() {
     if (typeof document === 'undefined' || !document.body) return;
     const host = document.createElement('div');
@@ -341,8 +403,27 @@ function apply(ctx) {
         if (name === 'face') log('face', value);
         if (name === 'voice') setVoiceProfile(value && typeof value === 'object' && value.profile ? value.profile : value);
         if (name === 'preview') previewVoice(value && typeof value === 'object' ? value.voiceId : value);
+        if (name === 'theme') {
+          if (value && value.theme) runtime.theme = value.theme;
+          log('theme', { id: value && value.id });
+        }
+        if (name === 'theme-design') void designTheme(value);
       },
     });
+
+    // 0.3 只把快照写进 theme.active；主题库还是空的时候把它收编成一条自定义主题，
+    // 升级后用户原来的配色不会因为「库里没有」被重置成默认。
+    const legacyTheme = storedTheme();
+    if (legacyTheme && legacyTheme.name && legacyTheme.tokens && listThemes().length <= 1) {
+      const adopted = saveTheme({ name: legacyTheme.name, tokens: legacyTheme.tokens, css: legacyTheme.css });
+      if (adopted.ok) setActiveId(adopted.id);
+    }
+    const savedTheme = resolveTheme(getActiveId());
+    // avatar.setTheme 返回 { theme, css, dropped }，runtime.theme 要的是里面那套 token。
+    const painted = runtime.avatar && typeof runtime.avatar.setTheme === 'function'
+      ? runtime.avatar.setTheme(savedTheme)
+      : applyTheme(document, savedTheme);
+    runtime.theme = painted && painted.theme ? painted.theme : savedTheme;
 
     runtime.engine = createAudioEngine({
       onState: (state) => {
