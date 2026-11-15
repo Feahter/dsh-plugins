@@ -91,12 +91,12 @@
       },
       "versions": [
         {
-          "version": "0.1.0",
-          "publishTimestamp": 1793885748,
+          "version": "0.3.0",
+          "publishTimestamp": 1794482916,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "a483a06a0b8a4cae191a04cc91f308f123569842",
+            "commit": "a0d4785a840ee17e049cfd328288702f36f5835e",
             "path": "plugins/realtime-voice"
           },
           "engines": {
@@ -104,12 +104,12 @@
           }
         },
         {
-          "version": "0.3.0",
-          "publishTimestamp": 1794482916,
+          "version": "0.1.0",
+          "publishTimestamp": 1793885748,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "a0d4785a840ee17e049cfd328288702f36f5835e",
+            "commit": "a483a06a0b8a4cae191a04cc91f308f123569842",
             "path": "plugins/realtime-voice"
           },
           "engines": {
@@ -125,8 +125,8 @@
         "zh": "语音看板娘"
       },
       "description": {
-        "en": "One panel for the whole voice surface: call mode (energy VAD + sentence splitting, every reply spoken sentence by sentence while task progress is read back), composer dictation with filler-word cleanup, and a global Ctrl+Shift+Space hotkey that turns a held-down phrase into a planned turn. The mascot is original inline SVG in two switchable looks (whale, anime stand-in); the panel drags anywhere and folds into a pill. TTS voice is picked per character and per sentence mood — an apology comes out soft, good news comes out bright. Since 0.3 the mascot can be swapped for your own image (resized in a local canvas, the image never leaves your machine) and the voice comes from three selectable slots with adjustable speed.",
-        "zh": "一个面板吃掉整条语音链路：通话模式（能量 VAD + 断句，回复逐句朗读、任务进度读出来）、输入框听写（去口头语）、Ctrl+Shift+Space 按住说话松手即计划并发送。看板娘是原创内联 SVG，两种形象可切换（鲸鱼、二次元小妹）；面板能拖到任意位置，也能折成一枚胶囊。音色按形象和每句话的情绪自适应——道歉是温柔的，好消息是明亮的。0.3 起形象可以换成你自己的图（本地 canvas 缩放，图片不出机器），声音从三个槽里自选并可调语速。"
+        "zh": "语音看板娘 0.4：核心形象换成自研的 3D 发光体（core3d.js，单文件 WebGL，不依赖 three.js、不加载贴图）——idle / listening / thinking / speaking / error 五套状态调色板，87 个样式 token 全部可改；跟模型说一句「换成暖金色、切换慢一点」就能改主题，连同名字存成你自己的主题。面板收窄回两件事：语音输入（通话模式逐句朗读、输入框听写、按住热键说话）与派活给 DSH。音色按形象与每句话的情绪自适应，声音与语速可选。",
+        "en": "Voice companion 0.4: the mascot is now an original 3D surface drawn by core3d.js — one WebGL file, no three.js, no textures — with five state palettes (idle, listening, thinking, speaking, error) and 87 style tokens open to edit. Ask the model in one sentence (\"make it warm gold, slower transitions\") and it rewrites the theme; name it and it is stored as your own. The panel is narrowed back to two jobs: voice input (call mode speaking replies sentence by sentence, composer dictation, hold-to-talk) and handing work to DSH. Voice and speed follow the character and each sentence mood."
       },
       "icon": "plugins/voice-companion/icon.svg",
       "author": "Feahter",
@@ -152,10 +152,23 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794668800
+          "updated": 1794732661
         }
       },
       "versions": [
+        {
+          "version": "0.4.0",
+          "publishTimestamp": 1794732661,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "12bc62f5fe300a68fc5e4a28425851673c3e7e35",
+            "path": "plugins/voice-companion"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
         {
           "version": "0.3.0",
           "publishTimestamp": 1794668800,
@@ -253,8 +266,8 @@
         "zh": "归档会话与 PDCA 炼金"
       },
       "description": {
-        "en": "CRUD over the Harness session archive plus a PDCA loop that mines historical sessions into measurable findings and adoptable context patches: tool-error rate, correction rate, verification gaps, context pressure and tool-catalog cost, each with session-level evidence and re-measured after adoption. Every session also gets deterministic auto:* tags (error hotspot, verification gap, turn failure, repeat, correction, context pressure, cost outlier, scale, top tools, language). Auto tags are written in Chinese; proposals are deduplicated by content fingerprint and the act step is idempotent; a status strip shows whether a run is in flight, what the last run produced and when the next auto run is due. Tool-layer recursive self-improvement with a sidebar panel.",
-        "zh": "会话归档 CRUD + PDCA 数据炼金：从历史会话里算出工具错误率、纠正率、编辑后未验证缺口、上下文压力与工具目录成本，给出带会话级证据的 finding 与可采纳的上下文补丁，采纳后再用后续会话重估；每条会话另有按事实派生的 auto:* 标签（错误热点、验证缺口、回合失败、重复调用、纠正、上下文压力、成本离群、规模、常用工具、语言）。标签用中文；提案按内容指纹去重、行动步骤幂等；面板顶部显示炼金是否在跑、上次结果与下次自动运行时间。带侧边栏面板的工具层递归自我改进。"
+        "zh": " 0.3.2 打磨详情页：没选中会话时给功能清单式空态，加排序标签与刷新提示，标签文案去掉中英并列的冗余。",
+        "en": " 0.3.2 polishes the detail pane: an empty state that lists what the pane shows, a sort label and a refresh hint, and cleaner tab labels without the duplicated English."
       },
       "icon": "plugins/archive-rsi/icon.svg",
       "author": "Feahter",
@@ -281,30 +294,31 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794408770
+          "updated": 1794732661
         }
       },
       "versions": [
         {
-          "version": "0.1.0",
-          "publishTimestamp": 1794138556,
+          "version": "0.3.2",
+          "publishTimestamp": 1794732661,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "d7fdc2fbc421939edb4bfe19212e87e051bc9ae8",
+            "commit": "788a6edc2dc647d7a55a9a6b4973a32eca65f891",
             "path": "plugins/archive-rsi"
           },
           "engines": {
-            "dsh": ">=0.2.1-rc.4"
+            "dsh": ">=0.2.1-rc.4",
+            "node": ">=22.15"
           }
         },
         {
-          "version": "0.2.0",
-          "publishTimestamp": 1794142559,
+          "version": "0.3.1",
+          "publishTimestamp": 1794408770,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "989ff3177268d5483ca1ea4adedc8d43bbf36473",
+            "commit": "ffc19c4fa2651b1c53d803383925c1dfb74d186c",
             "path": "plugins/archive-rsi"
           },
           "engines": {
@@ -325,12 +339,25 @@
           }
         },
         {
-          "version": "0.3.1",
-          "publishTimestamp": 1794408770,
+          "version": "0.2.0",
+          "publishTimestamp": 1794142559,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "ffc19c4fa2651b1c53d803383925c1dfb74d186c",
+            "commit": "989ff3177268d5483ca1ea4adedc8d43bbf36473",
+            "path": "plugins/archive-rsi"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794138556,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "d7fdc2fbc421939edb4bfe19212e87e051bc9ae8",
             "path": "plugins/archive-rsi"
           },
           "engines": {
@@ -346,8 +373,8 @@
         "zh": "dsh-360 两面体检"
       },
       "description": {
-        "en": "One plugin, two surfaces of health checks, one sidebar panel with two tabs and one shared 18-bucket S~E grade scale (S+/S/S-/A+/A/A-/.../E-). The skills surface grades the on-demand loading path of every skill; the agents surface grades everything that gets injected (instruction files, subagent definitions, agent presets). v0.2 adds a four-axis classification (role / kind / scope / state) plus a skills-only meta-skill layer (meta vs task), a snapshot-first panel that paints the last scan before revalidating, collapsed filters behind one icon, optimization-effect cards with trustworthy undo, and roughly 3x faster scans. Four dsh360_* tools, routes under /api/dsh-360/skills and /api/dsh-360/agents, every write backed up and undoable.",
-        "zh": "一个插件、两面体检、一个侧栏面板双 tab、一套共用的 S~E × ± 18 档等级制。技能面评每个技能的按需加载路径；Agents 面评一切会被注入的内容（常驻说明书、子代理定义、agent 预设）。v0.2 增加四轴分类（职责/类型/范围/状态）与技能专属的元技能层级（元技能/任务技能），面板先画上次快照再后台刷新，筛选收进一个图标，优化后有分数/token 效果卡与可靠撤销，扫描速度提升约 3 倍。四个 dsh360_* 工具，路由在 /api/dsh-360/skills 与 /api/dsh-360/agents，所有写入有备份可撤销。"
+        "zh": " 0.2.3 收紧打分口径：跨文件冲突只在拿到组合级 detectConflicts 结果时给分，缺数据记 N/A 而不是默认满分；analyze/score/report 三件套与 RUBRIC.md 对齐，并补了锁住该口径的测试。",
+        "en": " 0.2.3 tightens the rubric: cross-file conflicts are graded only when a composition-level detectConflicts result exists — missing data is N/A, never a default full score; analyze, score and report now follow RUBRIC.md, and tests pin the rule."
       },
       "icon": "plugins/dsh-360/icon.svg",
       "author": "Feahter",
@@ -378,10 +405,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794382558
+          "updated": 1794732661
         }
       },
       "versions": [
+        {
+          "version": "0.2.3",
+          "publishTimestamp": 1794732661,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "685b9f2b13283e351843e83c678f2127ca37d461",
+            "path": "plugins/dsh-360"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.2.2",
           "publishTimestamp": 1794382558,
@@ -448,12 +489,12 @@
       },
       "versions": [
         {
-          "version": "0.2.1",
-          "publishTimestamp": 1794396811,
+          "version": "0.3.0",
+          "publishTimestamp": 1794482916,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "42bf4d63cb12bd45ba05b133d5a81914be788eb7",
+            "commit": "0026383366f7feeeb4a5440024e38b8692a7cd7f",
             "path": "plugins/mind-canvas"
           },
           "engines": {
@@ -461,12 +502,12 @@
           }
         },
         {
-          "version": "0.3.0",
-          "publishTimestamp": 1794482916,
+          "version": "0.2.1",
+          "publishTimestamp": 1794396811,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "0026383366f7feeeb4a5440024e38b8692a7cd7f",
+            "commit": "42bf4d63cb12bd45ba05b133d5a81914be788eb7",
             "path": "plugins/mind-canvas"
           },
           "engines": {
@@ -514,12 +555,12 @@
       },
       "versions": [
         {
-          "version": "1.0.1",
-          "publishTimestamp": 1794408770,
+          "version": "1.0.2",
+          "publishTimestamp": 1794409317,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "0bf50449221b3a82f8a653a8d4fcc2a72a25a774",
+            "commit": "37ba5f4b3dd85cd40982dc0087c48e2dae16e549",
             "path": "plugins/task-ledger"
           },
           "engines": {
@@ -527,12 +568,12 @@
           }
         },
         {
-          "version": "1.0.2",
-          "publishTimestamp": 1794409317,
+          "version": "1.0.1",
+          "publishTimestamp": 1794408770,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "37ba5f4b3dd85cd40982dc0087c48e2dae16e549",
+            "commit": "0bf50449221b3a82f8a653a8d4fcc2a72a25a774",
             "path": "plugins/task-ledger"
           },
           "engines": {
@@ -578,12 +619,12 @@
       },
       "versions": [
         {
-          "version": "0.1.0",
-          "publishTimestamp": 1794408770,
+          "version": "0.1.1",
+          "publishTimestamp": 1794409317,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "b226db5c672330e809bc673c4aa1684cd0d2b884",
+            "commit": "37ba5f4b3dd85cd40982dc0087c48e2dae16e549",
             "path": "plugins/update-check"
           },
           "engines": {
@@ -591,12 +632,12 @@
           }
         },
         {
-          "version": "0.1.1",
-          "publishTimestamp": 1794409317,
+          "version": "0.1.0",
+          "publishTimestamp": 1794408770,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "37ba5f4b3dd85cd40982dc0087c48e2dae16e549",
+            "commit": "b226db5c672330e809bc673c4aa1684cd0d2b884",
             "path": "plugins/update-check"
           },
           "engines": {
@@ -612,8 +653,8 @@
         "zh": "墨炉 · 小说炼炉"
       },
       "description": {
-        "en": "A full novel pipeline behind one premise: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages are resumable per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. A female lead is never rewritten as him: gender is canon, pronoun tables are injected into every writing prompt, and a deterministic check flags pronoun drift.",
-        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。"
+        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。0.3 按长篇网文的真实规模重做：卷 → 章两级大纲，卷纲由脚本建骨架、不烧模型；首轮先出「黄金三章」开篇包，世界观与卖点压成固定分片进每章上下文；craft 质检与 story-craft 的 11 项量化指标同口径（句长、感官密度、抽象情绪、副词、AI 套话、人物密度、对话占比），超容差直接列 finding；novel_* 工具按会话开关，不写小说时 0 常驻 token；另带「一句话改写故事核 / 提炼文风 / 起标题」的写作助手与新建向导。",
+        "en": "A full novel pipeline behind one sentence: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages resume per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. Gender is canon, so pronoun tables are injected into every writing prompt and a deterministic check flags drift. 0.3 rebuilds the pipeline for web-novel scale: volume-to-chapter outlines whose volume skeletons are built by script instead of model calls, a golden-three-chapters opening pack on the first turn, and world/pitch slices pinned into every draft packet. Craft review now reports the same 11 metrics as story-craft (sentence length, sensory density, abstract emotion, adverbs, AI clichés, name density, dialogue ratio) and turns over-tolerance readings into findings. novel_* tools activate per session, so a session that is not writing a novel carries 0 resident tokens; a writing assistant polishes the premise, extracts the tone and names chapters, and a wizard creates the project."
       },
       "icon": "plugins/novel-forge/icon.svg",
       "author": "Feahter",
@@ -639,10 +680,23 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1794460984
+          "updated": 1794732661
         }
       },
       "versions": [
+        {
+          "version": "0.3.0",
+          "publishTimestamp": 1794732661,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "7d7069970b457b729a63337ae326a377b2f89ce4",
+            "path": "plugins/novel-forge"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        },
         {
           "version": "0.1.0",
           "publishTimestamp": 1794460984,
@@ -701,19 +755,6 @@
       },
       "versions": [
         {
-          "version": "0.1.0",
-          "publishTimestamp": 1794633171,
-          "source": {
-            "type": "git",
-            "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "b7634e9c8534804b26b384d88f183a7d9cc59f80",
-            "path": "plugins/context-lib"
-          },
-          "engines": {
-            "dsh": ">=0.2.1-rc.4"
-          }
-        },
-        {
           "version": "0.2.0",
           "publishTimestamp": 1794666266,
           "source": {
@@ -725,11 +766,76 @@
           "engines": {
             "dsh": ">=0.2.1-rc.4"
           }
+        },
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794633171,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "b7634e9c8534804b26b384d88f183a7d9cc59f80",
+            "path": "plugins/context-lib"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
         }
       ],
       "sortKeys": {
         "updated": 1794666266
       }
+    },
+    {
+      "name": "dsh-voice-control",
+      "title": {
+        "en": "Voice control",
+        "zh": "语音控制"
+      },
+      "description": {
+        "zh": "按住 Ctrl+Shift+Space 说话，这句话被送进「该去的那个 Session」，回复用语音播回来。路由是一个纯函数（17 个单测覆盖）：显式新开 → 新建会话；标题强匹配 → 回到那个会话；「继续」这类普通接续 → 最近且唯一的会话；「回到 X」但 X 谁也不是 → 不猜，改成播报候选让你说序号。错路由比不路由更糟，所以 confidence < 0.6 一律转成确认。Host 半片持有 API key、做语音合成与 sessionController 调度，浏览器半片负责录音、HUD 与播报，两边走同源 HTTP（health/plan/dispatch/speak/transcribe）。热键与声音可在 localStorage 覆盖。",
+        "en": "Hold Ctrl+Shift+Space, speak, and the utterance is delivered to the Session it belongs to; the reply is spoken back. Routing is one pure function covered by 17 unit tests: an explicit new-session phrase creates one, a strong title match resumes it, a plain \"continue\" goes to the single most recent candidate, and \"back to X\" where X matches nothing is never guessed — it speaks the candidates and asks for a number. A wrong route is worse than no route, so anything under 0.6 confidence becomes a confirmation. The host half holds the API key, does speech synthesis and drives sessionController; the browser half records, shows the HUD and speaks; both talk over same-origin HTTP (health/plan/dispatch/speak/transcribe). Hotkey and voice are overridable from localStorage."
+      },
+      "icon": "plugins/voice-control/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/voice-control"
+      },
+      "metadata": {
+        "category": "voice",
+        "keywords": [
+          "voice",
+          "speech",
+          "hotkey",
+          "routing",
+          "session",
+          "stt",
+          "tts",
+          "中文"
+        ],
+        "labels": [
+          "experimental"
+        ],
+        "sortKeys": {
+          "updated": 1794732661
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794732661,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "bfb3e198a471505a34220923d3adceb5fb2e0242",
+            "path": "plugins/voice-control"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4"
+          }
+        }
+      ]
     }
   ]
 }

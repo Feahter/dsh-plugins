@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Verifies the README pair, llms.txt and index.json stay internally consistent.
 // Run from the repository root: node docs/verify-readme.mjs
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -83,9 +83,13 @@ ok(`README.md: ${external.length} 个外部链接（可达性由 curl 单独检�
 // --- index.json -------------------------------------------------------------
 const index = JSON.parse(read("index.json"));
 const entries = index.plugins ?? index.packages ?? [];
-if (!Array.isArray(entries) || entries.length !== 10)
-  bad(`index.json: 期望 10 个插件，实际 ${Array.isArray(entries) ? entries.length : "非数组"}`);
-else ok("index.json: 10 个插件");
+// 期望值取自 plugins/ 下带 package.json 的目录，新增插件不必再改这个脚本
+const pluginDirCount = readdirSync(join(root, "plugins"), { withFileTypes: true }).filter(
+  (d) => d.isDirectory() && existsSync(join(root, "plugins", d.name, "package.json")),
+).length;
+if (!Array.isArray(entries) || entries.length !== pluginDirCount)
+  bad(`index.json: 期望 ${pluginDirCount} 个插件（plugins/ 下的目录数），实际 ${Array.isArray(entries) ? entries.length : "非数组"}`);
+else ok(`index.json: ${entries.length} 个插件`);
 
 const pluginDirs = entries.map((e) => {
   const p = e.source?.path?.replace(/^\.?\//, "") ??

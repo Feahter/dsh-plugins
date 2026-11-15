@@ -7,17 +7,17 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-**dsh-plugins is a collection of ten open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — the open-source agent harness built on the everything-is-a-plugin [Cordis](https://github.com/cordiverse/cordis) architecture — plus the self-hosted, machine-readable plugin market index that installs them.**
+**dsh-plugins is a collection of eleven open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — the open-source agent harness built on the everything-is-a-plugin [Cordis](https://github.com/cordiverse/cordis) architecture — plus the self-hosted, machine-readable plugin market index that installs them.**
 
 The plugins cover voice input and speech output, GitHub project management, session archiving with a PDCA self-improvement loop, skills and agent-instruction health checks, mind mapping, a local context library, an external task ledger, version update checks, and a full novel-writing pipeline. Each one is a standard DSH bundle: a Host half, an optional Web client half, and a `cordis.patch.yml` that wires it into the app.
 
-- **One index URL, no build step.** Add the index in DSH's plugin market and install any of the ten.
+- **One index URL, no build step.** Add the index in DSH's plugin market and install any of the eleven.
 - **Local first.** Recognition, scanning, scoring and ledger data stay on the machine; the few features that call out are listed under [Privacy and data](#privacy-and-data).
 - **MIT licensed.** Every plugin, including the index format, is in this repository.
 
 ## 中文导读
 
-一个仓库收录十个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件，并自带一份可被插件市场直接读取的索引。在 DSH Web UI 的 **插件 → 发现** 里添加：
+一个仓库收录十一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件，并自带一份可被插件市场直接读取的索引。在 DSH Web UI 的 **插件 → 发现** 里添加：
 
 ```
 https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
@@ -84,12 +84,13 @@ Replace `<commit>` with the commit recorded for the version you want in [`index.
 
 ## Plugin catalog
 
-Ten maintained plugins, grouped by what they are for. The market title in brackets is the name shown in DSH Discover.
+Eleven maintained plugins, grouped by what they are for. The market title in brackets is the name shown in DSH Discover.
 
 | Plugin | Category | What it does |
 | --- | --- | --- |
 | [Realtime voice input](./plugins/realtime-voice) | Voice | Continuous offline dictation: speak, and each sentence is cleaned up and written into the composer. Optional dictation translation. |
 | [Voice companion](./plugins/voice-companion) | Voice | One panel for the whole voice surface: call mode, dictation, a global hold-to-talk hotkey, spoken task progress, and a switchable mascot with custom voice. |
+| [Voice control](./plugins/voice-control) | Voice | Hold a key, speak, and the sentence is routed to the session it belongs to and the reply is spoken back. The router is one tested pure function that asks instead of guessing. |
 | [GitHub project manager](./plugins/github-manager) | Developer tools | A sidebar GitHub panel plus `github_*` agent tools: repositories, branches, issues, pull requests, comments. Reuses your existing `gh` login. |
 | [Session archive + PDCA alchemy](./plugins/archive-rsi) | Context engineering | Curate DSH session history (tags, notes, search, trash) and mine it for measurable context fixes with a PDCA loop. |
 | [dsh-360](./plugins/dsh-360) | Context engineering | Two health checks in one panel: the skills catalog and everything injected into context (`AGENTS.md`, subagent definitions, agent presets). |
@@ -246,11 +247,11 @@ Original session files and scanned documents are never modified, moved or delete
 
 ## Compatibility
 
-- **DSH version.** All ten plugins require DSH `0.2.1-rc.4` or newer. DSH is in developer preview, so pin the version you install and read the release notes before upgrading.
+- **DSH version.** All eleven plugins require DSH `0.2.1-rc.4` or newer. DSH is in developer preview, so pin the version you install and read the release notes before upgrading.
 - **Node.** `archive-rsi` and `dsh-360` need Node `22.15+` to decode concatenated-zstd session logs.
-- **Platform.** macOS is required only for `context-lib` previews; the other nine plugins make no platform-specific calls.
+- **Platform.** macOS is required only for `context-lib` previews; the other ten plugins make no platform-specific calls.
 - **Optional capabilities.** The voice plugins need the experimental Voice input bundle and a microphone; `voice-companion` and `novel-forge` need a TTS provider or a configured model respectively.
-- **Superseded packages.** `voice-control` (hotkey) and the standalone `realtime-voice` dictation are folded into `voice-companion`; `skills-360` and `agents-360` are folded into `dsh-360`. Do not enable the old and new packages side by side.
+- **Superseded packages.** The standalone `realtime-voice` dictation is folded into `voice-companion`; `skills-360` and `agents-360` are folded into `dsh-360`. `voice-control` is published again as its own plugin (0.1.0) focused on routing a spoken sentence to the right session; it and `voice-companion` both bind `Ctrl+Shift+Space`, so enable one of the two, not both.
 
 ## FAQ
 
@@ -258,7 +259,7 @@ Original session files and scanned documents are never modified, moved or delete
 DeepSeek Harness (`dsh`) is an open-source agent harness from DeepSeek AI, built on an everything-is-a-plugin architecture powered by Cordis. It runs as a local Web UI / desktop app, and plugins add panels, tools and services to it.
 
 **What is dsh-plugins?**
-A repository of ten DSH plugins plus a self-hosted format-1 plugin market index (`index.json`). Adding the index URL to DSH Discover makes all ten installable with one click.
+A repository of eleven DSH plugins plus a self-hosted format-1 plugin market index (`index.json`). Adding the index URL to DSH Discover makes all eleven installable with one click.
 
 **Are these official DeepSeek plugins?**
 No. dsh-plugins is an independent community project maintained by [Feahter](https://github.com/Feahter). It targets the public DSH plugin API and is not published or endorsed by DeepSeek.
@@ -329,7 +330,7 @@ Each plugin directory is a standard DSH bundle: `package.json`, `cordis.patch.ym
 
 Issues and pull requests are welcome. A plugin PR should include: a `package.json` with `engines.dsh`, a `cordis.patch.yml`, a README that states requirements and data paths, and an entry in `index.json` with a pinned commit. Run the plugin's own tests before opening the PR.
 
-If you build a DSH plugin somewhere else, add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your repository so it can be found. For a docs change, run `node docs/verify-readme.mjs` first — it checks that every relative link and anchor resolves and that all ten plugins appear in `index.json`, `llms.txt` and both READMEs.
+If you build a DSH plugin somewhere else, add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your repository so it can be found. For a docs change, run `node docs/verify-readme.mjs` first — it checks that every relative link and anchor resolves and that all eleven plugins appear in `index.json`, `llms.txt` and both READMEs.
 
 ## License
 
