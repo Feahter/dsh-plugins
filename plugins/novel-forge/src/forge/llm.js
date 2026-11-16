@@ -379,10 +379,19 @@ export function createLlmGateway(config = {}) {
           }
           // 截断说明 budget 不够：抬到 1.6× 再试一次；已经在上限就直接报可执行的错。
           // escalate:false 用于长章正文——那边会带着半截稿续写，重生成一遍整篇纯属白花钱。
+          // 例外：一个字都没吐出来（推理把预算烧光了）。没有半截稿可续，加倍预算是唯一出路，
+          // 这条不服从 escalate:false，否则真实项目里会出现「续写没锚点 → 第 2 章直接失败」。
           if (fe.code === 'LLM_TRUNCATED') {
+            const empty = !String(fe.detail?.text ?? '').trim()
+            const delay = delays[Math.min(i, delays.length - 1)] ?? 1000
+            if (empty && doublings < 2 && maxTokens < MAX_OUTPUT_TOKENS) {
+              maxTokens = Math.min(MAX_OUTPUT_TOKENS, maxTokens * 2)
+              doublings += 1
+              await abortableSleep(delay, chosenSignal)
+              continue
+            }
             if (opts.escalate === false || i > 0 || maxTokens >= MAX_OUTPUT_TOKENS) throw fe
             maxTokens = Math.min(MAX_OUTPUT_TOKENS, Math.round(maxTokens * 1.6))
-            const delay = delays[Math.min(i, delays.length - 1)] ?? 1000
             await abortableSleep(delay, chosenSignal)
             continue
           }

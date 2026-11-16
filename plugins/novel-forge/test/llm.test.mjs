@@ -184,6 +184,36 @@ test('escalate:false：长章正文不整篇重生成，直接把半截稿交给
   assert.equal(service.calls.length, 1, '不该再抬预算重跑一次')
 })
 
+test('截断且一个字都没吐：推理烧光预算时加倍再试（7000→14000→16000），不认 escalate:false', async () => {
+  const service = fakeService(() => textStream([], { finish: { kind: 'max_tokens' } }))
+  const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
+  await assert.rejects(
+    () => gw.generate({ user: '写一章', maxTokens: 7000, escalate: false }),
+    (err) => {
+      assert.equal(err.code, 'LLM_TRUNCATED')
+      assert.equal(err.detail.text, '')
+      return true
+    },
+  )
+  assert.deepEqual(
+    service.calls.map((call) => call.args.maxTokens),
+    [7000, 14000, 16000],
+  )
+})
+
+test('截断且空文本：预算加倍后就写出了正文', async () => {
+  const service = fakeService((index) =>
+    index === 0
+      ? textStream([], { finish: { kind: 'max_tokens' } })
+      : textStream(['这一章终于写出来了。'], { finish: { kind: 'stop' } }),
+  )
+  const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
+  const result = await gw.generate({ user: '写一章', maxTokens: 7000, escalate: false })
+  assert.match(result.text, /写出来了/)
+  assert.equal(service.calls.length, 2)
+  assert.equal(service.calls[1].args.maxTokens, 14000)
+})
+
 test('截断后抬预算成功：返回正文，并记下尝试次数', async () => {
   const service = fakeService((index) =>
     index === 0

@@ -155,3 +155,32 @@ test('draft 阶段：第一枪被截断时续写拼接，不整章失败', async
   // 第二枪必须带上续写指令
   assert.match(String(ctx.calls[1]?.user), /【续写指令】/)
 })
+
+test('draft 阶段：一枪连正文都没吐（推理烧光预算）时，换「直接开写」再要一次', async () => {
+  const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })
+  const outline = sampleOutlineV2({ chapters: 3 })
+  const chapter = outline.chapters[0]
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS, wordsPerChapter: 3000 },
+    item: chapter,
+    artifacts: {
+      outline: { kind: 'json', content: outline },
+      [`beats/${chapter.id}`]: { kind: 'json', content: sampleBeats(chapter.id) },
+    },
+    outputs: [
+      () => {
+        throw truncated('')
+      },
+      {
+        text: '第二枪终于有正文了。\n<<<SUMMARY>>>\n沈砚查清父亲的名字。\n<<<CANON>>>\n{"facts":[],"threads":[]}',
+      },
+    ],
+  })
+  const stage = recipe.stages.find((item) => item.id === 'draft')
+  const result = await stage.run(ctx)
+  const draft = String(result.artifacts[`draft/${chapter.id}`]?.content ?? '')
+  assert.match(draft, /第二枪终于有正文了/)
+  const proseCalls = ctx.calls.filter((call) => call.label === 'draft')
+  assert.equal(proseCalls.length, 2)
+  assert.match(String(proseCalls[1].user), /直接写正文第一句/)
+})

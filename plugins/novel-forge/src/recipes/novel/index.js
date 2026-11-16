@@ -694,6 +694,12 @@ async function callText(ctx, stage, promptFn, { phase, maxTokens, temperature } 
  * 中文 1600 字的章按 wordsPerChapter*2.2 要 3520 tokens，换个输出上限低的模型就必撞；
  * 重跑同参数还会撞在同一条线上，所以只能续写。
  */
+const EMPTY_TRUNCATE_NOTE = [
+  '',
+  '【注意】上一枪你把整个输出预算花在了思考上，正文一个字都没写出来。',
+  '这一枪不要列提纲、不要分析、不要复述要求，直接写正文第一句，边写边想。',
+].join('\n')
+
 async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, temperature, targetChars = 0 } = {}) {
   const spec = promptSpec(ctx, promptFn, stage)
   const base = {
@@ -703,30 +709,45 @@ async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, tempe
     temperature: Number.isFinite(temperature) ? temperature : spec.temperature,
     stage,
   }
-  const { text, parts } = await generateWithContinuation({
-    spec: base,
-    targetChars,
-    maxParts: 3,
-    generate: (next) =>
-      ctx.llm.generate({
-        system: next.system,
-        user: next.user,
-        maxTokens: next.maxTokens,
-        temperature: next.temperature,
-        json: false,
-        phase: phase ?? stage,
-        label: stage,
-        // 长章正文由 continuation 负责「接着写」，不让网关再整篇重生成一遍。
-        escalate: false,
-      }),
-    onPart: ({ part, chars }) => {
-      if (typeof ctx.warn === 'function') {
-        ctx.warn(`输出被截断（已写出 ${chars} 字），正在续写第 ${part} 段`)
-      }
-    },
-  })
-  if (parts > 1 && typeof ctx.warn === 'function') ctx.warn(`${stage} 分 ${parts} 段续写完成`)
-  return String(text ?? '').trim()
+  const once = async (user) => {
+    const { text, parts } = await generateWithContinuation({
+      spec: { ...base, user },
+      targetChars,
+      maxParts: 3,
+      generate: (next) =>
+        ctx.llm.generate({
+          system: next.system,
+          user: next.user,
+          maxTokens: next.maxTokens,
+          temperature: next.temperature,
+          json: false,
+          phase: phase ?? stage,
+          label: stage,
+          // 长章正文由 continuation 负责「接着写」，不让网关再整篇重生成一遍。
+          escalate: false,
+        }),
+      onPart: ({ part, chars }) => {
+        if (typeof ctx.warn === 'function') {
+          ctx.warn(`输出被截断（已写出 ${chars} 字），正在续写第 ${part} 段`)
+        }
+      },
+    })
+    return { text: String(text ?? '').trim(), parts }
+  }
+
+  let outcome
+  try {
+    outcome = await once(base.user)
+  } catch (err) {
+    // 幂等重跑一次：上一枪一个字都没吐（预算全烧在推理上），没有半截稿可续，
+    // 只能把「别分析了，直接写」讲明白再要一次。
+    const empty = err?.code === 'LLM_TRUNCATED' && !String(err?.detail?.text ?? '').trim()
+    if (!empty) throw err
+    if (typeof ctx.warn === 'function') ctx.warn('这一枪连正文都没吐出来（推理吃光了预算），换成「直接开写」再要一次')
+    outcome = await once(`${base.user}\n${EMPTY_TRUNCATE_NOTE}`)
+  }
+  if (outcome.parts > 1 && typeof ctx.warn === 'function') ctx.warn(`${stage} 分 ${outcome.parts} 段续写完成`)
+  return outcome.text
 }
 
 function parseBlurbMarkdown(text) {
