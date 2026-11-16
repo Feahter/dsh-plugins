@@ -159,9 +159,202 @@ export async function epubExport(ctx) {
   }
 }
 
+// ---- 编辑审稿单（outline-editor）：纯确定性表格，不调模型 ----
+
+const OUTLINE_EDITOR_COLUMNS = [
+  '章号', '标题', 'POV', '目标', '冲突', '转折', '钩子类型', '钩子强度',
+  '爽点等级', '伏笔(立)', '伏笔(收)', '字数预算', '状态', '审校结论',
+]
+
+const DASH = '—'
+
+function safeHas(ctx, key) {
+  try {
+    return typeof ctx.has === 'function' && ctx.has(key) === true
+  } catch {
+    return false
+  }
+}
+
+function cell(value) {
+  if (value === null || value === undefined) return DASH
+  const text = String(value).trim()
+  return text || DASH
+}
+
+/** plan.js 把 payoff 规范成 { level, text }；旧数据可能是纯字符串。 */
+function payoffOfChapter(chapter) {
+  const payoff = chapter?.payoff
+  if (payoff && typeof payoff === 'object' && !Array.isArray(payoff)) {
+    return { level: payoff.level, text: payoff.text }
+  }
+  if (typeof payoff === 'string') return { level: '', text: payoff }
+  return { level: '', text: '' }
+}
+
+function threadOpenText(chapter) {
+  const list = Array.isArray(chapter?.threadDue) ? chapter.threadDue : []
+  return list
+    .map((item) => (typeof item === 'string' ? item : item && typeof item === 'object' ? item.text : ''))
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean)
+    .join('、')
+}
+
+function hookStrengthCell(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return DASH
+  return String(value).trim()
+}
+
+/**
+ * 审校结论：review/* 的真实 schema 是 { findings, canonPatch, verdict }
+ * （见 src/recipes/novel/index.js 的 review 阶段 / reviewSchema）。
+ * 这里只读不推断：verdict 缺失时按与生产代码相同的 block/warn 阈值判定。
+ */
+function reviewConclusion(ctx, id) {
+  let artifact = null
+  try {
+    artifact = typeof ctx.read === 'function' && id ? ctx.read(`review/${id}`) : null
+  } catch {
+    artifact = null
+  }
+  if (!artifact) return DASH
+
+  let data = artifact?.content ?? artifact
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return DASH
+    }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return DASH
+
+  const findings = Array.isArray(data.findings) ? data.findings : []
+  const counts = { block: 0, warn: 0, note: 0 }
+  for (const finding of findings) {
+    const severity = finding?.severity
+    if (severity === 'block' || severity === 'warn' || severity === 'note') counts[severity] += 1
+  }
+
+  const verdict = data.verdict === 'pass'
+    ? '通过'
+    : data.verdict === 'revise'
+      ? '需修订'
+      : counts.block > 0 || counts.warn >= 3 ? '需修订' : '通过'
+  const top =
+    findings.find((finding) => finding?.severity === 'block' && String(finding?.issue ?? '').trim()) ??
+    findings.find((finding) => finding?.severity === 'warn' && String(finding?.issue ?? '').trim()) ??
+    findings.find((finding) => String(finding?.issue ?? '').trim())
+  const issue = String(top?.issue ?? '').trim()
+  const head = `${verdict}（block ${counts.block} / warn ${counts.warn} / note ${counts.note}）`
+  return issue ? `${head}：${issue}` : head
+}
+
+function outlineEditorTitle(ctx) {
+  const params = ctx.params ?? {}
+  const outline = safeJson(ctx, 'outline', {})
+  const brief = safeJson(ctx, 'brief', {}) ?? {}
+  const blurbArtifact = safeJson(ctx, 'blurb', null)
+  // project.title 是 novel_create 时给的书名，优先级低于作者后来改过的 brief/blurb。
+  return String(
+    blurbArtifact?.title || brief.title || params.title || ctx.project?.title || outline?.title || '未命名',
+  ).trim() || '未命名'
+}
+
+function collectOutlineEditor(ctx) {
+  const outline = safeJson(ctx, 'outline', {})
+  const chapters = chaptersOf(outline)
+  const params = ctx.params ?? {}
+  const budgetRaw = params.wordsPerChapter ?? 3000
+  const budget = Number.isFinite(Number(budgetRaw)) && String(budgetRaw).trim() !== ''
+    ? String(budgetRaw)
+    : '3000'
+
+  let written = 0
+  let reviewed = 0
+  const rows = chapters.map((chapter, index) => {
+    const id = String(chapter.id ?? '')
+    const hasDraft = Boolean(id) && safeHas(ctx, `draft/${id}`)
+    const hasReview = Boolean(id) && safeHas(ctx, `review/${id}`)
+    if (hasDraft) written += 1
+    if (hasReview) reviewed += 1
+    // 审校发生在成稿之后：有 review 就算「已审」，否则才看有没有草稿。
+    const status = hasReview ? '已审' : hasDraft ? '已写' : '未写'
+    const payoff = payoffOfChapter(chapter)
+    return [
+      String(index + 1),
+      cell(chapter.title),
+      cell(chapter.pov),
+      cell(chapter.goal),
+      cell(chapter.conflict),
+      cell(chapter.turn),
+      cell(chapter.hookType),
+      hookStrengthCell(chapter.hookStrength),
+      cell(payoff.level),
+      cell(threadOpenText(chapter)),
+      cell(payoff.text),
+      cell(budget),
+      status,
+      reviewConclusion(ctx, id),
+    ]
+  })
+
+  return {
+    title: outlineEditorTitle(ctx),
+    rows,
+    total: chapters.length,
+    written,
+    reviewed,
+  }
+}
+
+function markdownCell(value) {
+  // 表格单元格里的 `|` 与换行不转义就会把 14 列撑破。
+  return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')
+}
+
+/** RFC4180：字段含逗号/双引号/换行时整体加引号，内部双引号翻倍。 */
+function csvCell(value) {
+  const text = String(value)
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+export async function outlineEditorExport(ctx) {
+  const { title, rows, total, written, reviewed } = collectOutlineEditor(ctx)
+  const base = `${slugify(title)}-编辑审稿单`
+
+  const markdown = [
+    `# 《${title}》编辑审稿单`,
+    `共 ${total} 章 · 已写 ${written} 章 · 已审 ${reviewed} 章`,
+    '',
+    `| ${OUTLINE_EDITOR_COLUMNS.join(' | ')} |`,
+    `| ${OUTLINE_EDITOR_COLUMNS.map(() => '---').join(' | ')} |`,
+    ...rows.map((row) => `| ${row.map(markdownCell).join(' | ')} |`),
+    '',
+  ].join('\n')
+
+  const csv = [
+    OUTLINE_EDITOR_COLUMNS.map(csvCell).join(','),
+    ...rows.map((row) => row.map(csvCell).join(',')),
+    '',
+  ].join('\r\n')
+
+  return {
+    filename: `${base}.md`,
+    mime: 'text/markdown; charset=utf-8',
+    buffer: Buffer.from(markdown, 'utf8'),
+    extras: [
+      { filename: `${base}.csv`, buffer: Buffer.from(`\ufeff${csv}`, 'utf8') },
+    ],
+  }
+}
+
 export const exports = {
   markdown: { title: 'Markdown', run: markdownExport },
   epub: { title: 'EPUB', run: epubExport },
+  'outline-editor': { title: '编辑审稿单', run: outlineEditorExport },
 }
 
 export default exports

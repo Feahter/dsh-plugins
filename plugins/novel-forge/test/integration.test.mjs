@@ -448,3 +448,46 @@ test('window + 占位草稿：占位章算候选，同样受窗口限制', async
   assert.equal(after.stages.draft.status, 'partial')
   assert.equal(after.stages.draft.items.ch04, 'pending', '第 3 个候选章 defer 成 pending')
 })
+
+test('材料包：到期线索走引擎草稿路径（draft 的 packet 里带「到期待收线索」）', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'novel-forge-it-'))
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))
+  // draft builder 在真实配方里会收到 ctx.packet：这里把它截下来，验证引擎兜底拼包也带到期线索。
+  const packets = []
+  const prompts = fakePrompts()
+  prompts.draft = (ctx) => {
+    packets.push(ctx?.packet)
+    return { system: '你是小说家。', user: ctx?.packet?.text ?? '写。', maxTokens: 4000, temperature: 0.8 }
+  }
+  const llm = fakeLlm()
+  const engine = new ForgeEngine({ root, recipes: [createNovelRecipe({ prompts })], llm })
+  const project = await engine.createProject({
+    title: '长夜将明',
+    params: { premise: PREMISE, chapters: 6, wordsPerChapter: 800, pov: '第三人称限知' },
+  })
+  const boot = await engine.startRun(project.id, { stages: ['premise', 'bible', 'characters', 'spine', 'outline'] })
+  await waitRun(engine, boot.id)
+
+  // 手工种一条第 1 章就到期的线索：引擎路径（assemblePacket 兜底）必须把它置顶进材料包。
+  const existing = await engine.getArtifact(project.id, 'canon')
+  const canon = existing?.content && typeof existing.content === 'object'
+    ? existing.content
+    : { facts: [], threads: [], entities: {}, invariants: [], notes: [] }
+  canon.threads = [
+    ...(Array.isArray(canon.threads) ? canon.threads : []),
+    { id: 't-due', text: '沈砚袖口的香灰', opened: 'ch01', dueIn: 1, status: 'open' },
+  ]
+  await engine.writeArtifact(project.id, 'canon', { kind: 'json', content: canon })
+
+  const final = await waitRun(engine, (await engine.startRun(project.id, { stages: ['draft'], window: 1 })).id)
+  assert.equal(final.status, 'done', JSON.stringify(final.error))
+
+  assert.ok(packets.length >= 1, '应至少写一章')
+  const text = packets[0]?.text ?? ''
+  assert.match(text, /到期待收线索/, '草稿材料包应含到期线索分片')
+  assert.match(text, /沈砚袖口的香灰/, '到期线索正文应进材料包')
+  assert.ok(
+    text.indexOf('到期待收线索') < text.indexOf('## 正典'),
+    '到期线索应排在正典之前',
+  )
+})

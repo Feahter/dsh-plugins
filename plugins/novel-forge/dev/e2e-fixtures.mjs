@@ -42,6 +42,27 @@ function payload(phase) {
       genreTags: ['悬疑', '民俗'],
     }
   }
+  // 情感脊柱（JSON）：卷数由 ctx.volumePlan 决定，假模型只给一卷，alignSpine 会补齐。
+  if (phase === 'spine') {
+    return {
+      mainline: '沈砚从替亡者了结遗愿，走到敢问自己的名字为什么也在名册上',
+      ending: '沈砚烧掉名册，离开殡仪馆',
+      volumes: [
+        {
+          title: '卷一 夜班',
+          goal: '入职并撞上第一桩怪事',
+          arc: '从旁观者到被写进名册的人',
+          cast: ['沈砚', '老周'],
+          opens: ['名册第三行是谁改的'],
+          closes: [],
+        },
+      ],
+    }
+  }
+  // 逐卷展开（chapter.js 的卷纲调用）：fixture 只给一卷的章表。
+  if (phase === 'volumeChapters') {
+    return { chapters: outlineChapters }
+  }
   if (phase === 'outline') {
     return { volumes: [{ title: '卷一 夜班', purpose: '入职与第一桩怪事', chapters: outlineChapters }] }
   }

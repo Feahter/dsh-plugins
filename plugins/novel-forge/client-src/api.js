@@ -30,6 +30,16 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     try {
       payload = JSON.parse(text)
     } catch {
+      // 2xx 但响应体不是 JSON（宿主把 HTML / 静态页兜到接口上、网关插了一段错误页）：
+      // 不能当成「没有内容」静默返回 null——调用方会一路拿到 null，最后变成
+      // `Cannot read properties of null` 这种英文 TypeError 冒到界面上，
+      // 或者被上层 catch 掉、把「读不到」显示成「这本书还没有内容」。
+      if (response.ok) {
+        const error = new Error(`墨炉服务返回的不是 JSON（HTTP ${response.status}），请重启宿主后重试`)
+        error.code = 'BAD_RESPONSE'
+        error.status = response.status
+        throw error
+      }
       payload = null
     }
   }
@@ -69,6 +79,11 @@ export const getArtifact = (projectId, key) =>
 
 export const putArtifact = (projectId, { key, kind, content }) =>
   request(`/projects/${id(projectId)}/artifact`, { method: 'PUT', body: { key, kind, content } }).then(data => data.artifact)
+
+// 一键续写本章：接着已有正文的断点往下写，返回 { chapterId, beforeChars, afterChars, truncated, text, version }。
+export const continueChapter = (projectId, chapterId) =>
+  request(`/projects/${id(projectId)}/chapters/${id(chapterId)}/continue`, { method: 'POST' })
+    .then(data => data?.continue ?? data)
 
 // ------------------------------------------------------------------ 运行
 export const getRun = (projectId, after = 0) =>

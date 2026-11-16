@@ -59,21 +59,23 @@ novel_audit  → 全书确定性体检（死亡人物说话、时间倒流、线
 | `novel_run` | 批量推进（`window` 默认 10 章，`from/to/stages/items/force/dryRun`） |
 | `novel_status` | 阶段进度、卷/章计划、正典规模、当前运行、待确认 |
 | `novel_read` / `novel_write` | 读 / 手改任意产物（设定、大纲、某章细纲草稿审校） |
-| `novel_list` / `novel_cancel` / `novel_export` | 列表 / 取消（已完成章节保留）/ 导出 |
+| `novel_continue` | 接着某一章已有正文的断点往下写（不重写整章，撞输出上限自动再续） |
+| `novel_deconstruct` | 拆书：导入一本现成小说的纯文本，本地解析出章节骨架 + 文风指纹（不调模型） |
+| `novel_list` / `novel_cancel` / `novel_export` | 列表 / 取消（已完成章节保留）/ 导出（markdown / epub / 编辑审稿单 md+csv） |
 
 ## 长篇怎么撑住
 
 - **部 → 卷 → 章，卷纲惰性展开。** 脚本先建骨架（300 章 0 次调用、<1ms），只有真要写这一卷时才花一次调用产出该卷章表；`chaptersPerVolume` 会在卷数超 40 时自动抬高，保证卷表永远写得完。
-- **单章材料包是硬预算。** `packet.js` 按固定分片与优先级拼装（本章细纲 2500 / 上一章 800 / 近几章摘要 1200 / 正典 3200 / 人物速查 1500 / 下一章目标 300 / 文风 1200 / 上帝视角摘要 1000 / 故事核 900），总长硬性 ≤ `contextBudget`（默认 12000），超了按优先级裁并给出每片的 `chars/cap/allocated/dropped`。包的大小不随章号增长：细纲 / 正典 / 人物速查这几片逐片固定上限，第 5 章和第 500 章一样大；第 1 章天然没有上一章与文风样本，会短一些。差别只在检索到了什么。
+- **单章材料包是硬预算。** `packet.js` 按固定分片与优先级拼装（本章细纲 2500 / 上一章 800 / 近几章摘要 1200 / 正典 3200 / 人物速查 1500 / 下一章目标 300 / 文风 1200 / 上帝视角摘要 1000 / 故事核 900 / 世界规则 600 / 商业定位 300），另有独立分片「到期待收线索」（cap 600，排在正典之前，到期未收的线不会被预算挤掉）；总长硬性 ≤ `contextBudget`（默认 12000），超了按优先级裁并给出每片的 `chars/cap/allocated/dropped`。包的大小不随章号增长：细纲 / 正典 / 人物速查这几片逐片固定上限，第 5 章和第 500 章一样大；第 1 章天然没有上一章与文风样本，会短一些。差别只在检索到了什么。
 - **正典只增不减。** `canon.json` 存结构化事实三元组（`s/p/o/chapter/status`）+ 线索（含 payoff）+ 人物档案（含 `knows`/`relations`/`lastSeen`）+ 时间线 + 不变量；没有总数上限，同一 `s|p` 出现不同 `o` 标 conflict 而不是悄悄覆盖。检索用倒排索引，只把与本章 `cast`/地点/关键词相关、且**章节不晚于本章**的事实塞进包——第 5 章看不到第 200 章才写的结局，既不剧透，也不会让角色提前知道后事。v1 的 `ledger.json` 幂等迁移，原章 id 保留。
-- **一致性靠代码查，不靠模型自觉。** 单章体检 27 类、全书体检 14 类，每条都配正反用例（详见下一节）。除 `block` 外都只是提示：`warn` 进审校合并，`note` 只记录，不改稿也不拦流程。宁漏勿误报。
+- **一致性靠代码查，不靠模型自觉。** 单章体检 30 类、全书体检 18 类，每条都配正反用例（详见下一节）。除 `block` 外都只是提示：`warn` 进审校合并，`note` 只记录，不改稿也不拦流程。宁漏勿误报。
 - **一份产物一套检查。** 审校阶段 = 模型意见 + 确定性检查合并；`block>0 或 warn≥3` 才进入修订，修订有长度保护（0.8–1.25 倍），不会越改越短或膨胀。
 
 ## 体检与结构校验清单
 
 `novel_commit` 落盘后跑 `craft.js` 的单章体检，`novel_audit` 跑 `consistency.js` 的全书体检。两张表里的 kind 都是 `findings[].kind` 的原值，级别是该 kind 实际可能出现的全部级别。
 
-### 单章体检（`craft.js`，27 类）
+### 单章体检（`craft.js`，30 类）
 
 | kind | 级别 | 触发条件 | 来源 |
 |---|---|---|---|
@@ -104,8 +106,11 @@ novel_audit  → 全书确定性体检（死亡人物说话、时间倒流、线
 | `name-density` | note | 正文≥800 字且活跃具名人物超过 5 人 /1500 字，或有 cast 台账时千字具名密度高于 1.5 | 03 |
 | `ending-summary` | note | 末 80 字出现总结词 | 04 |
 | `ending-mode` | note | 末 120 字以议论或内省收尾 | 06 |
+| `vocab-flat` | note | 正文≥800 字且二字组多样性低于 0.6（重度重复） | 06 |
+| `dialogue-flat` | note | 对话≥8 轮且轮与轮之间夹叙事的比例低于 25%（纯台词堆） | 05 |
+| `dialogue-no-question` | note | 对话≥8 轮且问句占比低于 15%（没有人在试探） | 05 |
 
-### 全书体检（`consistency.js`，14 类）
+### 全书体检（`consistency.js`，18 类）
 
 | kind | 级别 | 触发条件 | 来源 |
 |---|---|---|---|
@@ -123,6 +128,10 @@ novel_audit  → 全书确定性体检（死亡人物说话、时间倒流、线
 | `hook-share` | note | 全书 5 分钩占比超过 20% | 04 |
 | `bookend-flat` | note | 首末章同一地点，`turn` 价值方向也相同 | 01 |
 | `bline-unmerged` | note | 卷纲标了 B 线，58% 章号之后没有任何一章写到它 | 01 |
+| `payoff-gap` | warn | 连续 6 章及以上没有任何小/中/大爽点兑现 | 01 |
+| `payoff-volume` | note | 已排完的卷里 large 级兑现超过 3 章，或整卷一次 large 都没有 | 01 |
+| `payoff-opening` | note | 前三章爽点不递进（第 1 章 none、第 3 章不到 medium，或前三章提前给 large） | 01 |
+| `payoff-thin` | note | 兑现章里线索关键词出现不足 2 次，或 2 次全在引号对话内；线索 text 派生不出可检索关键词时跳过，同章已报 `name-drift` 时不叠加 | 01 |
 
 `midpoint-drift`、`hook-streak`、`hook-share`、`bookend-flat`、`bline-unmerged` 只认卷纲 v2 的可选字段；老项目没有这些字段时整条跳过。`turn-flat` 对老项目只 note，不影响已有稿的通过率。
 
@@ -167,7 +176,7 @@ node dev/mount-check.mjs # 临时 DSH_HOME 起真 dsh web，验证侧栏挂载�
 
 ## 已知限制
 
-- 只实现中文提示词（`prompts/en.js` 留了接口）。
+- 只实现中文提示词（`src/recipes/novel/prompts/` 只有 `zh.js`；多语言要先补一份 `en.js` 再接进 `resolvePrompts`）。
 - EPUB 不含封面图。
 - 细纲是单次调用：模型输出坏 JSON 时整章报 `LLM_PARSE` 而不是重试抢救（v0.1 的 `callJson` 截断重试路径没有接进来）。长篇卷纲一次要写 75 条章表，遇到截断请调小 `chaptersPerVolume`（如 20–25）让每卷更短。
 - 卷纲只能往前展开：已 `planned` 且已有草稿的卷不要重规划（会重排后续章 id）；上一卷还有章没写完时 `novel_plan` 会直接返回 `skipped` 并告诉你差哪一章，不会启动空跑。

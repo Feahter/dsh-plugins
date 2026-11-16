@@ -240,6 +240,8 @@ const ADDENDA = {
 - 连续性：只用【材料包】里的人物、设定、前情与正典；包里没有的不许自造，不新增有名有姓的人物或规则。
 - 细纲是骨架，可为更强偏离，但必须兑现本章转折与结尾钩子。
 - 语感：动词承担画面，少用形容词和比喻；不用现成的感受词。
+- 换词：同一实词或二字组本段出现第二次就换说法；换不出就换个观察角度，别用「缓缓／一点点」凑节奏。
+- 对话要有暗流：每轮都在争一样东西（立场、信息或面子）；两人都同意的句子删掉，用动作接。
 - 段落中位 20–80 字，长短交错；不许连续三段同长。
 - 预期三段式：每章至少一处「建立模式→打破→200 字内给可理解的解释」；只破不解释＝事故。
 - 一个场景只引入一个新设定或人物；新名字一次给全，不要挤在一段。
@@ -1991,6 +1993,11 @@ function craftStatsText(ctx) {
     return Number.isFinite(value) ? value : null
   }
   const ratio = num('dialogueRatio')
+  const pct = (key) => {
+    const value = num(key)
+    if (value == null) return null
+    return Math.round((value <= 1 ? value * 100 : value) * 10) / 10
+  }
   const bits = [
     num('cjk') == null ? '' : `全章 ${num('cjk')} 字`,
     num('paragraphs') == null ? '' : `${num('paragraphs')} 段`,
@@ -2000,6 +2007,12 @@ function craftStatsText(ctx) {
     num('shortSentenceRatio') == null ? '' : `短句（≤12 字）占比 ${num('shortSentenceRatio')}%`,
     ratio == null ? '' : `对话比 ${Math.round((ratio <= 1 ? ratio * 100 : ratio) * 10) / 10}%`,
     num('sensoryPer1k') == null ? '' : `感官密度 ${num('sensoryPer1k')}/千字`,
+    num('bigramTtr') == null ? '' : `二字组多样性 ${num('bigramTtr')}`,
+    num('charVariety') == null ? '' : `汉字种类 ${num('charVariety')}`,
+    num('turnCount') == null ? '' : `对话 ${num('turnCount')} 轮`,
+    num('avgTurnLen') == null ? '' : `单轮均长 ${num('avgTurnLen')} 字`,
+    pct('questionRatio') == null ? '' : `问句占比 ${pct('questionRatio')}%`,
+    pct('actionBetweenRatio') == null ? '' : `对话间动作 ${pct('actionBetweenRatio')}%`,
     num('abstractEmotionPer1k') == null ? '' : `抽象情绪密度 ${num('abstractEmotionPer1k')}/千字`,
     num('adverbPer1k') == null ? '' : `副词密度 ${num('adverbPer1k')}/千字`,
     num('aiMarkerCount') == null ? '' : `AI 标记 ${num('aiMarkerCount')} 处`,

@@ -8,10 +8,15 @@ import { defaultCraft, severityRank, countCjk } from './craft.js'
 import { chaptersOf } from './outline.js'
 import { characterBrief } from './ledger.js'
 import { buildPacket } from './packet.js'
-import { generateWithContinuation } from './continuation.js'
+import {
+  continuationSpec,
+  generateWithContinuation,
+  joinProse,
+  tailOfProse,
+} from './continuation.js'
 import * as plan from './plan.js'
 import * as canonLib from './canon.js'
-import { markdownExport, epubExport } from './export.js'
+import { markdownExport, epubExport, outlineEditorExport } from './export.js'
 
 // forge/errors.js 由引擎负责；并行施工/单测先行时用兼容兜底（形状一致，engine 只看 code）。
 async function loadForgeError() {
@@ -794,6 +799,23 @@ function normalizeProse(raw, { no, title }) {
   return `${heading}\n\n${text}`
 }
 
+// 「续写本章」的字数口径：与工作台/统计一致，按非空白字符数算；
+// 目标字数是全书统一口径（wordsPerChapter），不是「这一次写多少」。
+function proseChars(text) {
+  return String(text ?? '').replace(/\s+/g, '').length
+}
+
+// 续写返回的正文可能带：代码围栏、章标题、「以下是续写」之类的前缀，
+// 以及 draft 同一枪里的 <<<SUMMARY>>> / <<<CANON>>> 尾巴。落盘前只留正文。
+function continuationBody(unit, raw) {
+  const source = String(raw ?? '')
+  const split = typeof unit?.splitInline === 'function' ? unit.splitInline(source) : { body: source }
+  let text = stripFence(split?.body ?? source)
+  text = text.replace(/^(?:以下是|这是|下面继续|续写如下)[^\n]*\n+/, '').trim()
+  text = text.replace(/^\s*#{1,4}\s*第\s*[^\n]*章[^\n]*\n+/, '').trim()
+  return text
+}
+
 // draft/revise 的同一枪里带着摘要：按标记切开。
 // 只有「切出来且看起来真的是摘要」才认，否则让调用方回退到独立摘要调用——
 // 省一次往返是优化，摘要正确性是前提。
@@ -1195,7 +1217,7 @@ function normalizeFinding(raw) {
  * 兜底拼包：prepareChapter 没给 packet 时用；revise 永远自己拼（mode:'revise'）。
  * 返回 buildPacket 的 {text,report,sections}，text 就是 draft/revise 的 user。
  */
-function assemblePacket(ctx, { chapter, volume, beats, canon, mode = 'draft', revisionFindings = [] }) {
+function assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads = '', mode = 'draft', revisionFindings = [] }) {
   const params = ctx.params ?? {}
   const outline = currentOutline(ctx) ?? { chapters: [] }
   const id = String(chapter?.id ?? '')
@@ -1212,6 +1234,7 @@ function assemblePacket(ctx, { chapter, volume, beats, canon, mode = 'draft', re
     recentSummaries: recentSummaries(outline, ctx, id),
     volumeDigest: volumeDigest(outline, ctx, id),
     canonText: canonTextFor(canon, names, id),
+    dueThreads,
     castBrief: characterBrief(jsonOr(ctx, 'characters', {})?.cast ?? [], names, 1500),
     styleSample: fit(ctx, params.styleGuide ?? '', 1200),
     nextChapterGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
@@ -1506,7 +1529,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         volume = prepared?.volume ?? volume
         const beats = prepared?.beats ?? jsonOr(ctx, `beats/${id}`, null)
         const canon = prepared?.canon ?? seedCanon(ctx, jsonOr(ctx, 'spine', null)).canon
-        const packet = prepared?.packet ?? assemblePacket(ctx, { chapter, volume, beats, canon })
+        const packet = prepared?.packet ?? assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads: unit.dueThreadsText?.(canon, chapter) ?? '' })
         if (packet?.report?.overBudget) ctx.warn(`${id} 写作材料超出 contextBudget，packet 已按优先级裁剪`)
 
         const promptCtx = withPromptContext(ctx, {
@@ -1697,6 +1720,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           volume,
           beats,
           canon,
+          dueThreads: unit.dueThreadsText?.(canon, chapter) ?? '',
           mode: 'revise',
           revisionFindings: actionable.map(findingLine),
         })
@@ -1808,6 +1832,139 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
 
     stages,
 
+    /**
+     * 「一键续写本章」：从 draft/<chapterId> 的断点接着写，不重写整章、不碰下一章。
+     * ctx 与 stage 同形（read/text/json/llm/warn），落盘交给 engine.continueChapter，
+     * 因为 recipe 不应该知道 store/版本滚动。返回 { chapterId, beforeChars, afterChars, truncated, text }。
+     */
+    async continueChapter(ctx, arg = {}) {
+      const unit = requireChapter()
+      const params = ctx?.params ?? {}
+      const language = params.language ?? 'zh'
+      const chapterId = String(arg?.chapterId ?? arg?.chapter ?? '').trim()
+      if (!chapterId) throw new ForgeError('BAD_PARAMS', '续写需要章 id，例如 ch03', { chapterId: '' })
+
+      const outline = currentOutline(ctx)
+      if (!outline) {
+        throw new ForgeError('NOT_FOUND', '还没有大纲：先跑一次 outline 阶段，再续写这一章', { chapterId })
+      }
+      const chapter = chaptersOf(outline).find((item) => String(item?.id) === chapterId) ?? null
+      if (!chapter) {
+        throw new ForgeError('NOT_FOUND', `大纲里没有 ${chapterId} 这一章：先展开它所在的卷纲，再续写`, {
+          chapterId,
+        })
+      }
+
+      const existing = draftOf(ctx, chapterId).trim()
+      if (!existing) {
+        throw new ForgeError('CONFLICT', '这一章还没有正文：先跑一次 draft 再续写', { chapterId })
+      }
+
+      const target = chapterTargetChars(params)
+      const beforeChars = proseChars(existing)
+      if (beforeChars >= target) {
+        return {
+          chapterId,
+          beforeChars,
+          afterChars: beforeChars,
+          truncated: false,
+          text: existing,
+          skipped: true,
+          note: `这一章已有 ${beforeChars} 字，达到目标 ${target} 字，不再续写`,
+        }
+      }
+      if (!ctx?.llm || typeof ctx.llm.generate !== 'function') {
+        throw new ForgeError('LLM_UNAVAILABLE', '模型服务未就绪：先在设置里选一个模型再续写', { chapterId })
+      }
+
+      // 和 draft 阶段同一条取材路径：beats/canon/volume 缺了就现补（只读，不落盘）。
+      let volume = plan.volumeOfChapter(outline, chapterId) ?? plan.volumeById(outline, chapter.volume)
+      const read = readerOf(ctx, { outline })
+      const prepared = await unit.prepareChapter(
+        { outline, params, chapterId, read, llm: ctx.llm, language },
+        { prompts },
+      )
+      volume = prepared?.volume ?? volume
+      const activeChapter = prepared?.chapter ?? chapter
+      const beats = prepared?.beats ?? jsonOr(ctx, `beats/${chapterId}`, null)
+      const canon = prepared?.canon ?? seedCanon(ctx, jsonOr(ctx, 'spine', null)).canon
+      const packet = prepared?.packet ?? assemblePacket(ctx, {
+        chapter: activeChapter,
+        volume,
+        beats,
+        canon,
+        dueThreads: unit.dueThreadsText?.(canon, activeChapter) ?? '',
+      })
+      if (packet?.report?.overBudget && typeof ctx.warn === 'function') {
+        ctx.warn(`${chapterId} 的写作材料超出 contextBudget，续写已按 packet 优先级裁剪`)
+      }
+      const promptCtx = withPromptContext(ctx, {
+        chapter: activeChapter,
+        volume: volume ?? null,
+        beats,
+        packet,
+        canonText: canonTextFor(canon, castNamesFor(beats, activeChapter, volume), chapterId),
+        language,
+      })
+      const spec = promptSpec(promptCtx, prompts.draft, 'draft')
+      const remaining = target - beforeChars
+      const maxTokens = Math.min(
+        draftMaxTokens(params) + 400,
+        Math.max(1200, Math.round(remaining * 2.2)),
+      )
+
+      let text = existing
+      let truncated = false
+      // 首段之外最多再续 2 段（撞输出上限时才续）；部分文本一律先接上，别把已付费的字丢掉。
+      const maxParts = 2
+      for (let round = 0; round <= maxParts; round += 1) {
+        const chars = proseChars(text)
+        const next = continuationSpec(
+          { system: spec.system, user: spec.user, maxTokens, temperature: spec.temperature },
+          {
+            tail: tailOfProse(text),
+            chars,
+            remaining: Math.max(0, target - chars),
+          },
+        )
+        try {
+          const result = await ctx.llm.generate({
+            system: next.system,
+            user: next.user,
+            maxTokens: next.maxTokens,
+            temperature: next.temperature,
+            json: false,
+            phase: 'prose',
+            label: 'continue',
+            escalate: false,
+          })
+          text = joinProse(text, continuationBody(unit, result?.text ?? ''))
+          break
+        } catch (err) {
+          if (err?.code !== 'LLM_TRUNCATED') throw err
+          const partial = String(err?.detail?.text ?? '')
+          if (!partial.trim()) throw err
+          text = joinProse(text, continuationBody(unit, partial))
+          if (round >= maxParts) {
+            truncated = true
+            break
+          }
+          if (typeof ctx.warn === 'function') {
+            ctx.warn(`续写撞到输出上限（已写到 ${proseChars(text)} 字），接着再续第 ${round + 2} 段`)
+          }
+        }
+      }
+
+      const afterChars = proseChars(text)
+      if (afterChars <= beforeChars) {
+        throw new ForgeError('LLM_EMPTY', '模型这次没有接着写（只重复了已有结尾）：再点一次，或先改一下正文', {
+          chapterId,
+          beforeChars,
+        })
+      }
+      return { chapterId, beforeChars, afterChars, truncated, text }
+    },
+
     /** 领域统计：已写章节/字数/卷进度，供引擎写进 project.stats、UI 展示。 */
     stats(project, read) {
       let chapters = clampInt(project?.params?.chapters, paramsDefaults.chapters, 6, 3000)
@@ -1892,6 +2049,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
     exports: {
       markdown: { title: 'Markdown', run: markdownExport },
       epub: { title: 'EPUB', run: epubExport },
+      'outline-editor': { title: '编辑审稿单', run: outlineEditorExport },
     },
   }
 }

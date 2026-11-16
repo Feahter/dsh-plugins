@@ -1,6 +1,7 @@
 // 章节页：细纲 / 草稿 / 审校 / 摘要，草稿可直接改并回写。
 import React from 'react'
-import { getArtifact, putArtifact } from '../api.js'
+import { continueChapter, getArtifact, putArtifact } from '../api.js'
+import { chapterMeta } from '../outline.js'
 import {
   Button, Empty, Icon, Markdown, Spinner,
 } from './bits.jsx'
@@ -52,27 +53,30 @@ export function ChapterView({ projectId, project, chapterId, initialTab = 'beats
   const [original, setOriginal] = React.useState('')
   const [editing, setEditing] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [continuing, setContinuing] = React.useState(false)
+  const [loadError, setLoadError] = React.useState('')
 
-  const meta = React.useMemo(() => {
-    const volumes = Array.isArray(outline?.volumes) && outline.volumes.length
-      ? outline.volumes
-      : [{ chapters: Array.isArray(outline?.chapters) ? outline.chapters : [] }]
-    for (const volume of volumes) {
-      for (const chapter of volume?.chapters ?? []) {
-        if (chapter?.id === chapterId) return chapter
-      }
-    }
-    return null
-  }, [outline, chapterId])
+  const meta = React.useMemo(
+    () => chapterMeta(outline).find(chapter => chapter?.id === chapterId) ?? null,
+    [outline, chapterId],
+  )
 
   React.useEffect(() => {
     let alive = true
     setLoading(true)
+    setLoadError('')
     const requests = TABS.map(item => {
       const key = `${KEY_OF[item.id]}/${chapterId}`
       return getArtifact(projectId, key)
         .then(payload => [item.id, payload?.content ?? null])
-        .catch(() => [item.id, null])
+        .catch(error => {
+          // 产物还没生成（ARTIFACT_MISSING）是正常空态，不是错误。
+          // 其它失败（宿主断了、响应不是 JSON）不能也变成「这一章还没写」，否则用户
+          // 看到的是空态、点「继续炼」也没用——真实原因必须浮上来。
+          const missing = error?.code === 'ARTIFACT_MISSING' || /没有这个产物/.test(error?.message ?? '')
+          if (alive && !missing) setLoadError(error?.message || '取这一章失败')
+          return [item.id, null]
+        })
     })
     Promise.all(requests).then(entries => {
       if (!alive) return
@@ -122,8 +126,51 @@ export function ChapterView({ projectId, project, chapterId, initialTab = 'beats
     }
   }
 
+  // 一键续写：接着本章已有正文的断点往下写，不是重写整章、也不是写下一章。
+  // 目标字数 = wordsPerChapter − 已有字数；正文够了就没必要再点。
+  const targetWords = Number(project?.params?.wordsPerChapter) || 3000
+  const hasDraft = countChars(original) > 0 || countChars(draft) > 0
+  const continueTitle = !hasDraft
+    ? '这一章还没有正文：先跑一次草稿，再续写'
+    : dirty
+      ? '有未保存的修改：先保存草稿再续写'
+      : continuing
+        ? '正在接着写…'
+        : `从已有正文的断点接着写，目标约 ${targetWords} 字`
+
+  const continueWriting = async () => {
+    if (!hasDraft || continuing || dirty) return
+    setContinuing(true)
+    notify('正在接着写这一章…', 'info')
+    try {
+      const result = await continueChapter(projectId, chapterId)
+      const payload = await getArtifact(projectId, `draft/${chapterId}`)
+      const text = typeof payload?.content === 'string' ? payload.content : draft
+      setDraft(text)
+      setOriginal(text)
+      setLoaded(previous => ({ ...previous, draft: text }))
+      setEditing(false)
+      setTab('draft')
+      if (!result || result.afterChars === result.beforeChars) {
+        notify('这一章已经达到目标字数，没有再续写', 'info')
+      } else if (result.truncated) {
+        notify(`已续写到 ${countChars(text)} 字，仍撞输出上限；写出的部分已保存，可再点一次`, 'ok')
+      } else {
+        notify(`已续写到 ${countChars(text)} 字`, 'ok')
+      }
+    } catch (error) {
+      notify(error.message, 'error')
+    } finally {
+      setContinuing(false)
+    }
+  }
+
   const tabBody = () => {
     if (loading) return React.createElement('div', { className: 'nf-loading' }, React.createElement(Spinner), '取这一章…')
+    // 当前标签什么内容都没有，又有真实错误：先报错误，不拿空态盖掉。
+    if (loadError && !loaded[tab] && !(tab === 'draft' && draft)) {
+      return React.createElement('div', { className: 'nf-error' }, loadError)
+    }
     if (tab === 'beats') {
       return loaded.beats
         ? React.createElement(BeatsView, { data: loaded.beats })
@@ -180,6 +227,15 @@ export function ChapterView({ projectId, project, chapterId, initialTab = 'beats
           ? React.createElement('span', null, `出场：${meta.cast.join('、')}`)
           : null,
       ),
+      React.createElement('span', { className: 'nf-grow' }),
+      React.createElement(Button, {
+        size: 'sm',
+        variant: 'primary',
+        busy: continuing,
+        disabled: !hasDraft || dirty,
+        title: continueTitle,
+        onClick: continueWriting,
+      }, Icon.plus, '续写本章'),
     ),
 
     React.createElement('div', { className: 'nf-tabs', role: 'tablist' },

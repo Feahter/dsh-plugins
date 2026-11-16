@@ -3,6 +3,7 @@
 import React from 'react'
 import { Icon, Markdown, formatNumber } from './bits.jsx'
 import { SEVERITY_LABEL } from '../strings.js'
+import { chapterMeta, volumeRows } from '../outline.js'
 
 const asArray = value => (Array.isArray(value) ? value : [])
 
@@ -64,9 +65,7 @@ export function BriefView({ data }) {
 
 // ------------------------------------------------------------------ 大纲
 export function OutlineView({ data, onOpenChapter }) {
-  const volumes = asArray(data?.volumes).length
-    ? asArray(data.volumes)
-    : [{ title: '全书', purpose: '', chapters: asArray(data?.chapters) }]
+  const rows = volumeRows(data)
 
   const chapterRow = (chapter, index, volumeIndex) => {
     const chapterId = chapter?.id || `ch${String(index + 1).padStart(2, '0')}`
@@ -88,8 +87,7 @@ export function OutlineView({ data, onOpenChapter }) {
 
   let offset = 0
   return React.createElement('div', null,
-    volumes.map((volume, volumeIndex) => {
-      const chapters = asArray(volume?.chapters)
+    rows.map(({ volume, chapters }, volumeIndex) => {
       const rows = chapters.map((chapter, index) => chapterRow(chapter, offset + index, volumeIndex))
       offset += chapters.length
       return React.createElement('section', { className: 'nf-volume', key: volumeIndex },
@@ -101,7 +99,7 @@ export function OutlineView({ data, onOpenChapter }) {
       )
     }),
     React.createElement('p', { className: 'nf-muted', style: { marginTop: 18, fontSize: 11 } },
-      `共 ${asArray(data?.volumes).length ? volumes.reduce((sum, volume) => sum + asArray(volume?.chapters).length, 0) : asArray(data?.chapters).length} 章。点任意一章进去看细纲、草稿与审校。`),
+      `共 ${chapterMeta(data).length} 章。点任意一章进去看细纲、草稿与审校。`),
   )
 }
 

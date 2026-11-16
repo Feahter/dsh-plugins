@@ -8,7 +8,7 @@
 // 五个入口与 §6 一字不差：
 //   inspectChapter / ensureVolume / prepareChapter / commitChapter / checkChapter
 // 外加内联协议解析 splitInline（§12）。
-import { buildPacket } from './packet.js'
+import { buildPacket, DUE_THREADS_SPEC } from './packet.js'
 import {
   emptyCanon,
   mergeCanon,
@@ -662,6 +662,32 @@ function openThreadsForVolume(read, maxChars = 600) {
   return clip(lines.join('\n'), maxChars)
 }
 
+const DUE_THREAD_HINT = '以上线索已到期，本章必须回应或显式延后'
+
+/** 已到期（dueIn <= 本章号）且未关闭的线索：独立成片，先于正典进入材料包。 */
+export function dueThreadsText(canon, chapter, maxChars = DUE_THREADS_SPEC.cap) {
+  const at = Math.floor(Number(chapter?.index))
+  if (!Number.isFinite(at) || at < 1) return ''
+  const lines = []
+  for (const thread of Array.isArray(canon?.threads) ? canon.threads : []) {
+    if (!thread || typeof thread !== 'object') continue
+    if (String(thread.status ?? '').trim() === 'closed' || thread.closedIn) continue
+    const due = Math.floor(Number(thread.dueIn))
+    if (!Number.isFinite(due) || due > at) continue
+    const body = text(thread.text)
+    if (!body) continue
+    lines.push(`- ${body}（到期：第 ${due} 章）`)
+  }
+  if (!lines.length) return ''
+  // 提示行必须活着：先给提示留位置，再截线索清单。
+  // maxChars 是 packet 的整片 cap，而 cap 计在渲染后的整块上（含 `## 到期待收线索\n`
+  // 这 10 个字符），所以这里还要把标题开销让出来——否则清单填满 600 时，末尾的
+  // 提示语会被 packet 切掉半句。
+  const overhead = `## ${DUE_THREADS_SPEC.title}\n`.length
+  const room = Math.max(0, maxChars - overhead - DUE_THREAD_HINT.length - 1)
+  return `${clip(lines.join('\n'), room)}\n${DUE_THREAD_HINT}`
+}
+
 function volumePromptContext({ outline, params, read, volume, language }) {
   const allChapters = chaptersOf(outline)
   const existingTitles = uniqueStrings(allChapters.map((chapter) => chapter.title)).join('、')
@@ -771,6 +797,8 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
     maxTokens: Number.isFinite(spec.maxTokens) ? Math.round(spec.maxTokens) : DEFAULT_PROMPT_MAX_TOKENS,
     temperature: Number.isFinite(spec.temperature) ? spec.temperature : 0.7,
     json: true,
+    // 与 index.js 的 callJson 同约定：没显式给 phase 就用阶段名，run 事件里能看到是哪一步调的模型。
+    phase: 'volumeChapters',
   })
 
   const payload = payloadOf(result)
@@ -912,6 +940,7 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
       maxTokens: Number.isFinite(spec.maxTokens) ? Math.round(spec.maxTokens) : DEFAULT_PROMPT_MAX_TOKENS,
       temperature: Number.isFinite(spec.temperature) ? spec.temperature : 0.8,
       json: true,
+      phase: 'beats',
     })
     calls += 1
     beats = normalizeBeats(payloadOf(result), chapter)
@@ -940,6 +969,7 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
     recentSummaries: recentSummariesOf(read, current, chapter),
     volumeDigest: volumeDigestOf(read, current, chapter),
     canonText,
+    dueThreads: dueThreadsText(canon, chapter),
     castBrief: castBriefOf(characters, names, 1500),
     worldBrief: worldBriefOf(read),
     pitchText: pitchTextOf(read),

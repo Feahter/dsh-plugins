@@ -13,6 +13,7 @@ import * as esbuild from 'esbuild'
 import { ForgeEngine } from '../src/forge/index.js'
 import { novelRecipe } from '../src/recipes/novel/index.js'
 import { makeHandler, ROUTE_PREFIX } from '../src/host/routes.js'
+import { STAGES } from '../client-src/strings.js'
 import { createFakeLlm } from './e2e-fixtures.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -98,7 +99,19 @@ async function main() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'novel-forge-e2e-'))
   const llm = createFakeLlm({ delayMs: 4 })
   const engine = new ForgeEngine({ root, recipes: [novelRecipe], llm })
-  const api = makeHandler({ engine, modelInfo: () => ({ provider: 'fake', model: 'fake' }), guard: () => null })
+  // activation：真宿主里由 DSH 注入。端到端只需要面板读到「工具闲置」，给个最小桩，
+  // 否则 /novel-forge/tools 落到 404，浏览器控制台会多一条错误。
+  const activation = {
+    state: () => ({ active: [], latest: null }),
+    enable: () => {},
+    enableLatest: () => ({ ok: true }),
+  }
+  const api = makeHandler({
+    engine,
+    modelInfo: () => ({ provider: 'fake', model: 'fake' }),
+    guard: () => null,
+    activation,
+  })
   const harnessJs = await bundleHarness()
 
   const server = http.createServer(async (req, res) => {
@@ -213,7 +226,8 @@ async function main() {
     assert('引擎 run 最终 done', final?.status === 'done', `status=${final?.status}${final?.error ? ` error=${final.error}` : ''}`)
     const finishedProject = await engine.getProject(projectId)
     const doneStages = Object.values(finishedProject.stages ?? {}).filter(stage => stage.status === 'done').length
-    assert('运行覆盖全部阶段', doneStages === 10, `doneStages=${doneStages}`)
+    // 阶段数以 strings.js 的 STAGES 为准（曾硬编码 10，多算了一个已合并的阶段）。
+    assert('运行覆盖全部阶段', doneStages === STAGES.length, `doneStages=${doneStages}/${STAGES.length}`)
 
     const { events } = await engine.getRunEvents(runId, 0)
     const runEnd = events.find(event => event.type === 'run-end')

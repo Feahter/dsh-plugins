@@ -1121,6 +1121,123 @@ export class ForgeEngine {
     }
   }
 
+  // ------------------------------------------------------------------ 续写
+
+  /**
+   * 「一键续写本章」：接着 draft/<chapterId> 的断点往下写，不重写整章、不续跑下一章。
+   * 落盘走 store.writeArtifact，旧正文自动进 .versions（默认留 3 版）。
+   * @param {string} idOrPrefix
+   * @param {string} chapterId
+   */
+  async continueChapter(idOrPrefix, chapterId) {
+    const project = await this.getProject(idOrPrefix)
+    if (this.live.has(project.id)) {
+      throw new ForgeError('RUN_ACTIVE', '项目正在运行，不能续写这一章', { projectId: project.id })
+    }
+    const recipe = this.#recipe(project.recipe)
+    if (typeof recipe.continueChapter !== 'function') {
+      throw new ForgeError('BAD_RECIPE', `recipe ${project.recipe} 不支持续写`, { recipe: project.recipe })
+    }
+    const key = safeKey(`draft/${String(chapterId ?? '')}`)
+    const { cache } = await this.#loadArtifactCache(project)
+    const api = this.#readApi(cache)
+    const warnings = []
+    let calls = 0
+    let tokensIn = 0
+    let tokensOut = 0
+    const controller = new AbortController()
+    const ctx = {
+      project: deepFreeze(clone(project)),
+      params: deepFreeze(clone(project.params || {})),
+      ...api,
+      fit: (text, maxChars) => fit(text, maxChars),
+      log: async () => {},
+      warn: (message) => {
+        if (message) warnings.push(String(message))
+      },
+      progress: async () => {},
+      llm: {
+        generate: async (opts = {}) => {
+          if (!this.llm || typeof this.llm.generate !== 'function') {
+            throw new ForgeError('LLM_UNAVAILABLE', '模型服务未就绪，请先在设置里选择模型')
+          }
+          if (controller.signal.aborted) throw new ForgeError('LLM_ABORTED', '续写已取消')
+          const system = typeof opts.system === 'string' ? opts.system : ''
+          const user = typeof opts.user === 'string' ? opts.user : ''
+          const perAttemptIn = estimateTokens(system.length + user.length)
+          let result
+          try {
+            result = await this.llm.generate({
+              ...opts,
+              system,
+              user,
+              maxTokens: opts.maxTokens ?? 4096,
+              signal: controller.signal,
+              sessionId: opts.sessionId || `dsh-forge-continue-${project.id}`,
+            })
+          } catch (err) {
+            const attempts = Math.max(1, Number(err?.detail?.attempts) || 1)
+            calls += attempts
+            tokensIn += perAttemptIn * attempts
+            if (isAbort(err)) throw new ForgeError('LLM_ABORTED', '续写已取消')
+            // 截断要靠 detail.text 接着续，asForgeError 会丢 detail，这里原样保留。
+            if (err?.code === 'LLM_TRUNCATED') {
+              throw new ForgeError('LLM_TRUNCATED', err.message ?? '模型输出被截断', err.detail)
+            }
+            throw asForgeError(err, 'LLM_ERROR')
+          }
+          const text = typeof result?.text === 'string' ? result.text : ''
+          const chars = typeof result?.chars === 'number' ? result.chars : text.length
+          const failed = Math.max(0, Number(result?.failedAttempts) || 0)
+          calls += 1 + failed
+          tokensIn += result?.usage?.inputTokens ?? perAttemptIn * (1 + failed)
+          tokensOut += result?.usage?.outputTokens ?? estimateTokens(chars)
+          return result
+        },
+      },
+    }
+
+    const outcome = await recipe.continueChapter(ctx, { chapterId: String(chapterId ?? '') })
+    const result = outcome && typeof outcome === 'object' ? { ...outcome } : {}
+    result.chapterId = String(result.chapterId ?? chapterId ?? '')
+    result.warnings = warnings
+    if (result.skipped === true) {
+      result.version = null
+      return result
+    }
+    if (typeof result.text !== 'string' || !result.text.trim()) {
+      throw new ForgeError('BAD_RECIPE', '续写没有返回正文', { chapterId: result.chapterId })
+    }
+
+    const written = await this.store.writeArtifact(
+      project.id,
+      key,
+      { kind: 'md', content: result.text },
+      { stage: 'continue' },
+    )
+    result.version = written?.meta?.version ?? null
+
+    // 正文已经换了，统计要跟着：复用 recipe.stats，再把本次调用记到 calls/tokens。
+    const fresh = await this.store.readProject(project.id)
+    cache.set(key, { key, kind: 'md', content: String(result.text), meta: written?.meta })
+    let domain = {}
+    try {
+      if (typeof recipe.stats === 'function') domain = recipe.stats(fresh, this.#readApi(cache)) || {}
+    } catch {
+      domain = {}
+    }
+    fresh.stats = {
+      ...(fresh.stats || {}),
+      ...domain,
+      calls: (Number(fresh.stats?.calls) || 0) + calls,
+      estTokensIn: (Number(fresh.stats?.estTokensIn) || 0) + tokensIn,
+      estTokensOut: (Number(fresh.stats?.estTokensOut) || 0) + tokensOut,
+    }
+    fresh.updatedAt = this.#now()
+    await this.store.saveProject(fresh)
+    return result
+  }
+
   // ------------------------------------------------------------------ 导出
 
   async exportProject(idOrPrefix, format) {
@@ -1157,11 +1274,20 @@ export class ForgeEngine {
     }
     const buffer = Buffer.isBuffer(result.buffer) ? result.buffer : Buffer.from(result.buffer ?? '')
     const written = await this.store.writeExport(project.id, result.filename, buffer)
+    // 一次导出可能同时产出两种格式（如编辑审稿单的 md + csv）；extras 里的每个文件各自落盘。
+    const extras = []
+    for (const extra of Array.isArray(result.extras) ? result.extras : []) {
+      if (!extra || typeof extra !== 'object' || !extra.filename) continue
+      const bytes = Buffer.isBuffer(extra.buffer) ? extra.buffer : Buffer.from(extra.buffer ?? '')
+      const saved = await this.store.writeExport(project.id, extra.filename, bytes)
+      extras.push({ filename: saved.filename, path: saved.path, bytes: saved.bytes })
+    }
     return {
       filename: written.filename,
       path: written.path,
       mime: result.mime || 'application/octet-stream',
       bytes: written.bytes,
+      ...(extras.length ? { extras } : {}),
     }
   }
 

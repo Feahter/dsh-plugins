@@ -119,7 +119,7 @@ test('recipe 形状符合 §3.1，9 个 stage 顺序符合 §4.2', () => {
   assert.equal(stageOf(novelRecipe, 'draft').onItemError, 'stop')
   // v0.2：细纲不再是独立 stage，并入 draft——同一次 run 里先补 beats 再写正文。
   assert.deepEqual(stageOf(novelRecipe, 'draft').produces, ['draft/*', 'summary/*', 'beats/*', 'canon', 'outline'])
-  assert.deepEqual(novelRecipe.exports && Object.keys(novelRecipe.exports), ['markdown', 'epub'])
+  assert.deepEqual(novelRecipe.exports && Object.keys(novelRecipe.exports), ['markdown', 'epub', 'outline-editor'])
   assert.equal(typeof novelRecipe.estimate, 'function')
 })
 

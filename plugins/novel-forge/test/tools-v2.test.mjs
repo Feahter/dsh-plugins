@@ -133,6 +133,7 @@ function makeHarness({
   canon = null,
   ledger = null,
   characters = null,
+  opener = null,
   params = {},
   drafts = {},
   summaries = {},
@@ -159,6 +160,7 @@ function makeHarness({
   if (canon) put('canon', canon)
   if (ledger) put('ledger', ledger)
   if (characters) put('characters', characters)
+  if (opener) put('opener', opener)
   for (const [id, content] of Object.entries(beats)) put(`beats/${id}`, content)
   for (const [id, content] of Object.entries(summaries)) put(`summary/${id}`, content, 'md')
   for (const [id, content] of Object.entries(drafts)) put(`draft/${id}`, content, 'md')
@@ -574,6 +576,57 @@ test('novel_audit：有 block 时不记 auditedAt（别让 novel_next 提前放�
   assert.ok(value.findings.some(item => item.kind === 'dead-character'), '应抓到死亡人物')
   assert.equal(value.markedAudited, false)
   assert.equal(calls.writeArtifact.some(item => item.key === 'outline'), false)
+})
+
+// ---------------------------------------------------------------- 黄金三章契约接线
+
+/** 第 1 章缺 infoDrop / promiseBeat，第 2 章 payoff 为 none，第 3 章钩子与第 1 章同型。 */
+function brokenOpener() {
+  return {
+    version: 1,
+    chapters: [
+      { index: 1, id: 'ch0001', hook: { type: '悬念', text: '信' }, payoff: { level: 'none', text: '' }, infoDrop: { readerLearns: '', characterLoses: '' }, promiseBeat: '', endHook: { type: '悬念', text: '半枚指纹' } },
+      { index: 2, id: 'ch0002', hook: { type: '危机', text: '夜闯' }, payoff: { level: 'none', text: '' }, infoDrop: { readerLearns: '有人在遮掩', characterLoses: '' }, promiseBeat: '从县衙查起', endHook: { type: '危机', text: '腰牌' } },
+      { index: 3, id: 'ch0003', hook: { type: '反转', text: '线人没来' }, payoff: { level: 'medium', text: '', chapterDue: 5 }, infoDrop: { readerLearns: '两头卖消息', characterLoses: '' }, promiseBeat: '逼线人摊牌', endHook: { type: '悬念', text: '线人来了' } },
+    ],
+  }
+}
+
+test('novel_audit：接上黄金三章契约，缺 infoDrop 与没兑现都报出来', async () => {
+  const { engine } = makeHarness({ outline: plannedOutline(), opener: brokenOpener() })
+  const { value, text } = await run(engine, 'novel_audit')
+
+  const opening = value.findings.filter(item => item.kind === 'opening-contract')
+  assert.ok(opening.length >= 2, '第 1 章缺契约、第 2 章没兑现应各报一条')
+  assert.ok(opening.some(item => item.where === 'ch0001'))
+  assert.ok(opening.some(item => item.where === 'ch0002'))
+  // finding 仍是 5 键，别把契约结果塞成第六个字段
+  for (const item of opening) assert.deepEqual(Object.keys(item).sort(), ['fix', 'issue', 'kind', 'severity', 'where'])
+  assert.match(text, /黄金三章契约/)
+})
+
+test('novel_audit：没有 opener 工件时静默，不报 opening-contract', async () => {
+  const { engine } = makeHarness({ outline: plannedOutline() })
+  const { value } = await run(engine, 'novel_audit')
+
+  assert.equal(value.findings.some(item => item.kind === 'opening-contract'), false)
+})
+
+test('novel_next：黄金三章契约未满足时在下一步里先提醒', async () => {
+  const { engine } = makeHarness({ outline: plannedOutline(), opener: brokenOpener() })
+  const { value, text } = await run(engine, 'novel_next')
+
+  assert.equal(value.opening.ok, false)
+  assert.ok(value.opening.issues.length >= 2)
+  assert.match(text, /黄金三章契约未满足/)
+})
+
+test('novel_next：没有 opener 工件时 opening.ok 为 true，不多嘴', async () => {
+  const { engine } = makeHarness({ outline: plannedOutline(), opener: null })
+  const { value, text } = await run(engine, 'novel_next')
+
+  assert.equal(value.opening.ok, true)
+  assert.doesNotMatch(text, /黄金三章契约/)
 })
 
 // ---------------------------------------------------------------- novel_run / novel_plan

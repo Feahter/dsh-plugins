@@ -2,6 +2,7 @@
 // 契约：docs/architecture-v2.md §5.2。
 // 本模块不读盘、不调模型、不 import canon：canonText 由调用方格式化后传入。
 import { assemble } from '../../forge/budget.js'
+import { truncate } from '../../forge/text.js'
 
 const DEFAULT_BUDGET = 12000
 const DEFAULT_WORDS = 3000
@@ -56,6 +57,11 @@ export function sliceOf(name) {
 
 const REVISION_SPEC = { name: 'revision', title: '需修正', cap: 1500, priority: 0, required: true }
 
+// v0.4：到期线索独立成片（priority 2 排在 canon 的 3 之前）。与 revision 一样
+// 不写进 SLICE_SPEC：那份数组是 §5.2 的固定契约，追加会改变它的严格快照。
+// 文本由 chapter.js 从 canon.threads 筛好后传入，packet 不反解析 canonText。
+export const DUE_THREADS_SPEC = { name: 'dueThreads', title: '到期待收线索', cap: 600, priority: 2, required: false }
+
 function textOf(value) {
   if (value === undefined || value === null) return ''
   if (typeof value === 'string') return value
@@ -74,6 +80,19 @@ function clipValue(value, max = 600) {
 
 function render(slice) {
   return slice.title ? `## ${slice.title}\n${slice.text}` : slice.text
+}
+
+/**
+ * 分片正文的可用字符数：`cap` 记在「渲染后的整块」上（`## 标题\n` 这层也算），
+ * 而 canonTextFor / characterBrief / dueThreadsText / fit(styleSample) 都是按 cap 生成的，
+ * 直接塞进来会在分片填满时被 assemble 再切掉末尾几字——把「…（已截断）」标记或
+ * 到期线索的提示语切成半句，且不带任何截断标记。所以在这里先把标题开销让出来。
+ */
+function clipToBody(spec, text) {
+  const cap = Number(spec?.cap)
+  if (!Number.isFinite(cap)) return text
+  const overhead = spec?.title ? `## ${spec.title}\n`.length : 0
+  return truncate(text, Math.max(0, Math.floor(cap) - overhead))
 }
 
 function normalizeBeats(beats) {
@@ -265,7 +284,14 @@ export function buildPacket(input = {}) {
   const slices = []
   const push = (spec, text) => {
     if (!text) return
-    slices.push({ name: spec.name, title: spec.title, text, cap: spec.cap, priority: spec.priority, required: spec.required })
+    slices.push({
+      name: spec.name,
+      title: spec.title,
+      text: clipToBody(spec, text),
+      cap: spec.cap,
+      priority: spec.priority,
+      required: spec.required,
+    })
   }
 
   push(sliceOf('brief'), renderBrief({ params, chapter, volume, mode }))
@@ -276,6 +302,7 @@ export function buildPacket(input = {}) {
   push(sliceOf('beats'), normalizeBeats(source.beats))
   push(sliceOf('previous'), renderPrevious(source.previous, source.previousSummary))
   push(sliceOf('recent'), renderRecent(source.recentSummaries))
+  if (source.dueThreads) push(DUE_THREADS_SPEC, textOf(source.dueThreads))
   if (source.worldBrief) push(sliceOf('world'), textOf(source.worldBrief))
   if (source.volumeDigest) push(sliceOf('digest'), textOf(source.volumeDigest))
   if (source.canonText) push(sliceOf('canon'), textOf(source.canonText))
@@ -286,6 +313,12 @@ export function buildPacket(input = {}) {
 
   const { text, report } = assemble({ slices, budget })
 
+  // 超预算被裁的判据：分片被整片丢掉，或整块被预算（而不是自己的 cap）截短。
+  // index.js 的两条 warn 读的就是这个字段——在此之前它从没被生产过，那两条提示是死的。
+  const overBudget = Boolean(
+    report.hardTruncated || report.slices.some((slice) => slice.dropped || slice.truncated),
+  )
+
   // sections 只保留真正进入正文的片段，值与正文中的块逐字一致（含标题行）。
   const sections = {}
   for (const slice of slices) {
@@ -294,5 +327,5 @@ export function buildPacket(input = {}) {
     sections[slice.name] = render(slice).slice(0, row.allocated)
   }
 
-  return { text, report, sections }
+  return { text, report: { ...report, overBudget }, sections }
 }

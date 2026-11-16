@@ -225,7 +225,7 @@ export function chapterById(project, id) {
   return chaptersOf(project).find((chapter) => chapter.id === id) ?? null
 }
 
-// ---- X12 黄金三章契约（纯函数；本轮只导出 + 单测，不接流水线） ----------
+// ---- X12 黄金三章契约（纯函数；已接进 novel_audit 与 novel_next，见 src/host/tools.js） ----
 
 const OPENING_BANNED_PHRASES = ['后来', '不久', '更大的']
 

@@ -213,8 +213,11 @@ export function buildPacket(input)   // input 见下；返回 { text, report, se
 | `style` | 1200 | 6 | | styleGuide + 风格样本 |
 | `world` | 600 | 2 | | v0.3：bible 前 600 字（含第二段「力量与规则」） |
 | `pitch` | 300 | 5 | | v0.3：频道/标签/卖点/金手指压成清单 |
+| `dueThreads` | 600 | 2 | | 已到期（`dueIn ≤ 本章号`）未关闭的线索清单，独立于 `SLICE_SPEC`（同 `revision`，追加会改严格快照） |
 
-`contextBudget` 默认 12000，上表 cap 合计 13500 → 允许 2 片被压缩，但**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。
+`contextBudget` 默认 12000，上表 cap 合计 13500 → 允许 2 片被压缩，但**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。`cap` 记在**渲染后的整块**上（含 `## 标题\n`），所以分片正文按 `cap − 标题开销` 生成。
+
+`buildPacket` 的 `report` 在 `assemble` 的字段之外多一个 `overBudget`（`hardTruncated || 有分片 dropped/truncated`）：index.js 的两条「材料超出 contextBudget，已按优先级裁剪」提示读的就是它，别只加字段不接线。
 
 ### 5.3 集成点
 
@@ -272,8 +275,10 @@ export function checkChapter({ read, params, outline, chapterId, text })
 | `aiMarkerCount` | 13 个 AI 套话词＋10 条模板句式的命中总数（按起始位置去重） | ≥ 3 → warn `ai-cliche`；「不是…而是…」单独 warn `ai-pattern` |
 | `nameDensity` | 出场 ≥2 次的具名人物数，折算到 1500 字 | > 5 且正文 ≥ 800 字、有 cast → note `name-density` |
 | `dialogueRatio` | 引号内汉字数 / 全文汉字数（0–1） | < 8% → warn `dialogue`；8%–15% → note `dialogue` |
+| `bigramTtr` / `charVariety` / `topBigrams` | 不重复二字组数 / 二字组总数（连续汉字串内取，4 位小数）；不重复汉字数 / 总汉字数（4 位小数）；高频二字组 top5（排除 cast 人名与 20 组功能词） | `bigramTtr` < 0.6 且正文 ≥ 800 字 → note `vocab-flat` |
+| `turnCount` / `avgTurnLen` / `questionRatio` / `actionBetweenRatio` | 引号对话轮数、轮均汉字数（1 位小数）、含「？」或疑问词的轮次占比、相邻两轮间夹非对话叙事的比例（0–1） | 轮数 ≥ 8 且夹叙事占比 < 0.25 → note `dialogue-flat`；轮数 ≥ 8 且疑问占比 < 0.15 → note `dialogue-no-question` |
 
-口径纪律：切句只在 `。！？!?…` 后切、句长按汉字数、占比按汉字数——与 `story_check.py` 逐项一致。`scripts/craft-parity.mjs` 拿同一份稿子跑两边，11 项指标超出容差就 exit 1：
+口径纪律：切句只在 `。！？!?…` 后切、句长按汉字数、占比按汉字数——与 `story_check.py` 逐项一致。`stats` 里除 `topBigrams`（`[{gram,count}]` 数组，供 issue 文本举高频组例子）之外全部是数字标量；新增字段必须是数字，否则 `test/craft-metrics.test.mjs` 与 `craft-name-tag.test.mjs` 的数值断言会红。`scripts/craft-parity.mjs` 拿同一份稿子跑两边，11 项指标超出容差就 exit 1：
 
 ```bash
 node scripts/craft-parity.mjs test/fixtures/craft/skill-story.md
@@ -307,7 +312,7 @@ node scripts/craft-parity.mjs test/fixtures/craft/skill-story.md
 
 **工具按需装载（v0.2.1：不写小说时 0 常驻 token）**
 
-13 个工具默认不参与模型请求。`registerNovelTools` 改成 `tools.register(definition, { when })`，`when` 每个模型步求值一次；返回 `false` 时 DSH 把该工具排除在 executor description、PTC 绑定与执行之外——请求 `tools[]` 里根本没有这条，不是"标记了但还能用"。账：13 个 schema 合计约 2,581 token/请求，长期对话里是纯闲置开销。
+15 个工具（R2 新增 `novel_continue` 与 `novel_deconstruct`）默认不参与模型请求。`registerNovelTools` 改成 `tools.register(definition, { when })`，`when` 每个模型步求值一次；返回 `false` 时 DSH 把该工具排除在 executor description、PTC 绑定与执行之外——请求 `tools[]` 里根本没有这条，不是"标记了但还能用"。账：这十几个 schema 的常驻开销在长期对话里是纯闲置开销。
 
 - 状态在 `src/host/activation.js`：进程内内存，按 sessionId 一个 Set，外加 `latest`（最近一次求值看到的 `agent.id`）。不落盘，重启清空。
 - 开关：`GET /novel-forge/tools` 读状态；`POST /novel-forge/tools` body `{enabled, conversationId?}` 开/关。不带 `conversationId` 时作用"最近活跃的对话"（客户端拿不到会话 id），一个活跃对话都没有则返回 409 `NO_SESSION`。面板按钮的亮灭只看"最近一次对话"是否在 `active` 里（不看全局面），关闭时带 `conversationId` 只关这一个；状态在内存，插件重载或进程重启即回到闲置。
@@ -351,6 +356,9 @@ export function audit({ chapters, canon, outline, params })  // 全书确定性�
 | `invariant-hit` | 命中 `invariants` 关键词（≥3 字词） | warn |
 | `canon-conflict` | 同 `s|p` 两条 `canon` 事实值不同 | warn（audit） |
 | `fact-contradict` | 正文同时出现 `s` 与一条 `retracted` 事实的 `o`（≥4 字） | note |
+| `payoff-gap` | 连续 >5 章 `payoff.level` 缺失或为 `none`（没有 small/medium/large），按连续区间报一条；字段全缺则跳过 | warn（audit） |
+| `payoff-volume` | 已排完的卷里 `large` >3 章（大爽点过密）；或整卷 0 章 `large` 且每章都已有 level（整卷没有大爽点） | note（audit） |
+| `payoff-opening` | 第 1–3 章兑现不递进：第 1 章须 small/medium、第 2 章须 small/medium、第 3 章须 medium，且前三章不得出现 large；缺字段跳过 | note（audit） |
 
 `review` stage = `consistency.checkChapter` + `craft.checkDraft` + LLM findings 三者合并、按 `severity→block>warn>note` 排序，`block>0 或 warn≥3 → revise`（沿用 v0.1 规则）。
 
@@ -372,7 +380,7 @@ export function audit({ chapters, canon, outline, params })  // 全书确定性�
    - `test/plan.test.mjs`（23）：3000 章 → 40 卷 × 75 章（0.379ms）；章 id 宽度 = `max(2, 总章数位数)`；骨架 0 次模型；惰性展开幂等、乱序展开不重排章号；v1 迁移保留原 id（99 章 + params 120 仍 ch01…ch99）。
    - `test/consistency.test.mjs`（25）：8 条规则各一正一反（含"不误报"用例）。
    - `test/chapter.test.mjs`（33）：prepare/commit/inspect/splitInline 的依赖注入契约；正文行内出现字面 `<<<SUMMARY>>>` 不算分隔符。
-   - `test/tools-v2.test.mjs`（23）：13 个工具、`window` 透传、`novel_commit` 写 review、`novel_audit` 的 auditedAt 语义（干净写、有 block 不写）、`novel_plan` 在上一卷未写完时 `skipped` 且不启动 run、300 章新项目 `novel_context {chapter:'5'}` 解析成 ch005 且只展开目标卷、未知章 commit 404 零落盘。
+   - `test/tools-v2.test.mjs`（23）：15 个工具、`window` 透传、`novel_commit` 写 review、`novel_audit` 的 auditedAt 语义（干净写、有 block 不写）、`novel_plan` 在上一卷未写完时 `skipped` 且不启动 run、300 章新项目 `novel_context {chapter:'5'}` 解析成 ch005 且只展开目标卷、未知章 commit 404 零落盘。
    - `test/longform.test.mjs`（11）：300 章 mock —— 骨架 5.2ms；ch001 包 6269 字 / ch300 8781 字；第 100 章与第 300 章包体差 0.43%；40 章 commit 后 facts 2→80、threads 1→40 全在（单调递增）；第 250 章仍能检索到第 5 章的「沈砚·左手有旧伤」；植入的死亡人物出场 → `dead-character(block)`，干净正文 0 误报；300 章 + 900 条事实全量 audit 272ms；分片账在 4000 预算下丢掉 style、保住 beats/canon。
 2. **向后兼容**：v1 项目（`ledger.json` + v1 outline）能直接打开并续跑；`novel_status`/`novel_read` 正常；v1 断言适配后仍全绿（`test/novel-recipe.test.mjs` 72、`test/integration.test.mjs` 6（window/defer 三轮 2+2+2；force 与占位草稿同样受 window 限制）、`test/host.test.mjs` 23）。
 3. **`node dev/verify.mjs` 通过**：侧栏注册、书架、新建预估、工作台（九段轨 + 事件流 + 正典入口）、章节四标签、草稿编辑、运行中取消；`console error 0 / page error 0`，截图落 `test/screens/`。

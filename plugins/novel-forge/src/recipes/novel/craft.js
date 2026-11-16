@@ -75,6 +75,21 @@ export const AI_PATTERNS = [
 const PUNCTUATION = /[\s，。！？；：、“”‘’"'（）()《》〈〉…—·,.!?;:]/
 const TRUNCATED = '…（已截断）'
 
+// 引号段口径：dialogueRatio / dialogueTagStats / dialogueTurnStats 共用同一份来源，
+// 改口径时只改这里。
+const QUOTE_SPAN_SOURCE = '[“"「『]([^”"」』]{1,600})[”"」』]'
+const HAN_CHAR = /[\u3400-\u4dbf\u4e00-\u9fff]/g
+const HAN_RUN = /[\u3400-\u4dbf\u4e00-\u9fff]+/g
+// 只用于 topBigrams 的可读性，不影响 bigramTtr。
+const BIGRAM_STOP = new Set([
+  '的了', '一个', '什么', '就是', '没有', '自己', '我们', '他们', '这个', '那个',
+  '不是', '时候', '知道', '这样', '起来', '已经', '可以', '现在', '因为', '然后',
+])
+const QUESTION_TURN = /[？?]|吗|呢|什么|为什么|怎么|哪|谁|多少|多久|多远|几[个点岁天年次月]|是不是|有没有|能不能|要不要|会不会|可不可以|难道/
+// 实测：1.1k 字成稿约 0.79–0.81，2.3k 字约 0.70，4.5k 字约 0.68。
+// TTR 随篇幅自然下降，取 0.6 只抓「整章重复同一批词」的重度样本，避免误报正常长章。
+const BIGRAM_TTR_FLOOR = 0.6
+
 const DEFAULTS = {
   wordsPerChapter: 3000,
   pov: '第三人称限知',
@@ -102,7 +117,7 @@ export function countCjk(text) {
 export function dialogueRatio(text) {
   const total = countCjk(text)
   if (!total) return 0
-  const pattern = /[“"「『]([^”"」』]{1,600})[”"」』]/g
+  const pattern = new RegExp(QUOTE_SPAN_SOURCE, 'g')
   let chars = 0
   let matched
   while ((matched = pattern.exec(String(text ?? ''))) !== null) {
@@ -542,7 +557,7 @@ function isSpeechTag(text, index, verb) {
 function dialogueTagStats(body) {
   const text = String(body ?? '')
   const sentences = statSentences(text)
-  const spanPattern = /[“"「『]([^”"」』]{1,600})[”"」』]/g
+  const spanPattern = new RegExp(QUOTE_SPAN_SOURCE, 'g')
   const tags = []
   const seen = new Set()
   let dialogueCjk = 0
@@ -628,6 +643,115 @@ function tagFindings(body, metrics = dialogueTagStats(body)) {
 }
 
 /**
+ * 词汇丰富度（capability-2026-11）：二字组多样性、汉字多样性、高频二字组 top5。
+ * 二字组只在连续汉字串内取：标点、空白、换行都断开，不跨词边界造组。
+ * bigramTtr 是纯比值；topBigrams 只做可读性过滤（cast 人名 + 20 组功能词），
+ * 不影响 bigramTtr 的分子分母。
+ */
+function vocabStats(body, names = []) {
+  const text = String(body ?? '')
+  const counts = new Map()
+  let total = 0
+  for (const run of text.match(HAN_RUN) ?? []) {
+    for (let index = 0; index + 1 < run.length; index += 1) {
+      const gram = run.slice(index, index + 2)
+      counts.set(gram, (counts.get(gram) ?? 0) + 1)
+      total += 1
+    }
+  }
+  const nameGrams = new Set()
+  for (const raw of names) {
+    const name = String(raw ?? '').trim()
+    for (let index = 0; index + 1 < name.length; index += 1) {
+      nameGrams.add(name.slice(index, index + 2))
+    }
+  }
+  const topBigrams = [...counts.entries()]
+    .filter(([gram]) => !BIGRAM_STOP.has(gram) && !nameGrams.has(gram))
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, 5)
+    .map(([gram, count]) => ({ gram, count }))
+  const chars = text.match(HAN_CHAR) ?? []
+  return {
+    bigramTtr: total ? Math.round((counts.size / total) * 10000) / 10000 : 0,
+    charVariety: chars.length ? Math.round((new Set(chars).size / chars.length) * 10000) / 10000 : 0,
+    topBigrams,
+  }
+}
+
+/**
+ * 对话张力（capability-2026-11）：以引号段为一轮。
+ * 引号口径复用 QUOTE_SPAN_SOURCE，与 dialogueRatio / dialogueTagStats 同源。
+ * actionBetweenRatio 的分母是相邻轮次对数（turnCount-1）：轮间文本只要有汉字
+ * 就算夹了叙事——包括「他说」这类标签句，宁可少报也不漏报。
+ */
+function dialogueTurnStats(body) {
+  const text = String(body ?? '')
+  const pattern = new RegExp(QUOTE_SPAN_SOURCE, 'g')
+  const turns = []
+  let matched
+  while ((matched = pattern.exec(text)) !== null) {
+    turns.push({ text: matched[1], start: matched.index, end: pattern.lastIndex })
+  }
+  const turnCount = turns.length
+  const turnLens = turns.map((turn) => countCjk(turn.text))
+  const avgTurnLen = turnCount
+    ? round1(turnLens.reduce((sum, value) => sum + value, 0) / turnCount)
+    : 0
+  const questionTurns = turns.filter((turn) => QUESTION_TURN.test(turn.text)).length
+  const questionRatio = turnCount
+    ? Math.round((questionTurns / turnCount) * 1000) / 1000
+    : 0
+  let withAction = 0
+  for (let index = 0; index + 1 < turnCount; index += 1) {
+    if (countCjk(text.slice(turns[index].end, turns[index + 1].start)) > 0) withAction += 1
+  }
+  const gaps = turnCount - 1
+  return {
+    turnCount,
+    avgTurnLen,
+    questionRatio,
+    actionBetweenRatio: gaps > 0 ? Math.round((withAction / gaps) * 1000) / 1000 : 0,
+  }
+}
+
+function vocabFindings(metrics) {
+  if (metrics.cjk < 800 || metrics.bigramTtr >= BIGRAM_TTR_FLOOR) return []
+  const examples = metrics.topBigrams.slice(0, 3).map((item) => `「${item.gram}」`).join('、')
+  return [{
+    severity: 'note',
+    kind: 'vocab-flat',
+    where: '全章',
+    issue: `二字组多样性 ${metrics.bigramTtr}，低于 ${BIGRAM_TTR_FLOOR}：整章在重复同一批词${examples ? `（高频组：${examples}）` : ''}`,
+    fix: '把重复的二字组换掉一半：同义动词/名词轮换，合并复述同一动作的句子，删掉纯过渡的重复短句',
+  }]
+}
+
+function dialogueTensionFindings(metrics) {
+  if (metrics.cjk < 800 || metrics.turnCount < 8) return []
+  const findings = []
+  if (metrics.actionBetweenRatio < 0.25) {
+    findings.push({
+      severity: 'note',
+      kind: 'dialogue-flat',
+      where: '全章',
+      issue: `对话 ${metrics.turnCount} 轮，轮间夹叙事的比例 ${metrics.actionBetweenRatio}，低于 0.25：整段是纯台词接力，动作和环境没进场`,
+      fix: '在每两三轮之间插一个动作节拍或环境反应（放下杯子、看门口、停半拍），让说话的人有身体',
+    })
+  }
+  if (metrics.questionRatio < 0.15) {
+    findings.push({
+      severity: 'note',
+      kind: 'dialogue-no-question',
+      where: '全章',
+      issue: `对话 ${metrics.turnCount} 轮，含疑问的轮次只占 ${metrics.questionRatio}，低于 0.15：人物只在陈述，没有互相追问`,
+      fix: '把两三轮陈述改成追问或反问（「你为什么现在才说？」），让对话有信息差和压迫感',
+    })
+  }
+  return findings
+}
+
+/**
  * 确定性检查。返回 findings（形状同 §4.4）与 stats。
  * @param {{text?: string, params?: object, beats?: object|null, previousHook?: string, cast?: Array<{name?: string, role?: string, gender?: string}>}} input
  */
@@ -645,6 +769,8 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   const sceneCount = countScenes(body, beats)
   const sensoryBuckets = sensoryBucketCounts(body)
   const tagMetrics = dialogueTagStats(body)
+  const vocab = vocabStats(body, castNameList)
+  const turns = dialogueTurnStats(body)
   const stats = {
     cjk,
     dialogueRatio: ratio,
@@ -670,6 +796,13 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     dialogueSentences: tagMetrics.dialogueSentences,
     adverbTagCount: tagMetrics.adverbCount,
     adverbTagRatio: tagMetrics.adverbRatio,
+    bigramTtr: vocab.bigramTtr,
+    charVariety: vocab.charVariety,
+    topBigrams: vocab.topBigrams,
+    turnCount: turns.turnCount,
+    avgTurnLen: turns.avgTurnLen,
+    questionRatio: turns.questionRatio,
+    actionBetweenRatio: turns.actionBetweenRatio,
   }
 
   const findings = []
@@ -937,6 +1070,15 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
 
   // 10c. 对话标签（05-R7 / 08-V3）：密度 >2/100 字对话，或出现副词标签 → warn。
   for (const finding of tagFindings(body, tagMetrics)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
+  }
+
+  // 10d. 词汇丰富度 / 对话张力（capability-2026-11）：只判 ≥800 字章节，
+  // 短章二字组样本太少、TTR 虚高，一律跳过（宁漏勿误报）。
+  for (const finding of vocabFindings(stats)) {
+    add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
+  }
+  for (const finding of dialogueTensionFindings(stats)) {
     add(finding.severity, finding.kind, finding.where, finding.issue, finding.fix)
   }
 

@@ -4,6 +4,7 @@ import {
   getProject, getArtifact, getRun, startRun, cancelRun, continueReview, exportProject,
 } from '../api.js'
 import { STAGES, STAGE_BY_ID, STATUS_LABEL, STAGE_ARTIFACT } from '../strings.js'
+import { chapterMeta } from '../outline.js'
 import {
   Badge, Button, Dot, Empty, Icon, ProgressBar, Spinner, formatNumber, formatTokens, formatWords,
 } from './bits.jsx'
@@ -39,19 +40,6 @@ export function resumeStage(project) {
   if (gate) return gate
   const pending = STAGES.find(stage => (project?.stages?.[stage.id]?.status ?? 'idle') !== 'done')
   return pending?.id ?? 'premise'
-}
-
-function chapterMeta(outline) {
-  const list = []
-  const volumes = Array.isArray(outline?.volumes) && outline.volumes.length
-    ? outline.volumes
-    : [{ title: '全书', chapters: Array.isArray(outline?.chapters) ? outline.chapters : [] }]
-  for (const volume of volumes) {
-    for (const chapter of volume?.chapters ?? []) {
-      list.push({ ...chapter, volume: volume?.title })
-    }
-  }
-  return list
 }
 
 // 成本可见性：调用次数旁边直接给出估算 token 与重试次数，省得用户去翻 run.json。

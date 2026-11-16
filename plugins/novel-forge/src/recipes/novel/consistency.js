@@ -707,6 +707,167 @@ function hookFindings(list) {
   return findings
 }
 
+// ---- 全书结构：爽点兑现节奏（payoff，只读 payoff.level；字段缺失即跳过） ----
+
+const PAYOFF_LEVELS = ['none', 'small', 'medium', 'large']
+const PAYOFF_REAL_LEVELS = new Set(['small', 'medium', 'large'])
+
+/** 只认卷纲章表里的 payoff.level（plan 章表产物）；缺失或非法返回空串。 */
+function payoffLevelOf(chapter) {
+  const payoff = chapter?.payoff
+  if (!payoff || typeof payoff !== 'object' || Array.isArray(payoff)) return ''
+  const level = String(payoff.level ?? '').trim().toLowerCase()
+  return PAYOFF_LEVELS.includes(level) ? level : ''
+}
+
+function chapterLabelOf(chapter) {
+  const title = String(chapter?.title ?? '').trim()
+  return title || whereOf(chapter)
+}
+
+/** 连续 >5 章没有 small|medium|large 兑现 → 每个断档区间一条 warn；全缺 level 时静默。 */
+function payoffGapFindings(list) {
+  if (!list.some((item) => payoffLevelOf(item))) return []
+  const levels = list.map((item) => payoffLevelOf(item))
+  const findings = []
+  let runStart = -1
+  let runLength = 0
+  const flush = (endIndex) => {
+    if (runLength <= 5) return
+    const start = list[runStart]
+    const end = list[endIndex]
+    const where = whereOf(start)
+    findings.push({
+      severity: 'warn',
+      kind: 'payoff-gap',
+      where,
+      issue: `从「${chapterLabelOf(start)}」到「${chapterLabelOf(end)}」连续 ${runLength} 章没有兑现任何承诺（爽点断档）`,
+      fix: `在这 ${runLength} 章里插入一次 small 级兑现（payoff.level=small），或把其中一章的 turn 改成「选择 + 代价」（被迫二选一，并付出可感知的损失）`,
+    })
+  }
+  for (let i = 0; i < levels.length; i += 1) {
+    if (!PAYOFF_REAL_LEVELS.has(levels[i])) {
+      if (runLength === 0) runStart = i
+      runLength += 1
+    } else {
+      flush(i - 1)
+      runLength = 0
+      runStart = -1
+    }
+  }
+  flush(levels.length - 1)
+  return findings
+}
+
+/** 卷表成员：优先 outline.volumes[].chapterIds，没有时退回章表里的 volume 字段。 */
+function payoffVolumeGroups(list, outline) {
+  const byId = new Map()
+  for (const item of list) {
+    const id = String(item?.id ?? '')
+    if (id) byId.set(id, item)
+  }
+  const groups = []
+  for (const volume of asList(outline?.volumes)) {
+    const members = asList(volume?.chapterIds)
+      .map((id) => byId.get(String(id)))
+      .filter(Boolean)
+    if (members.length) groups.push({ volume, members })
+  }
+  if (groups.length) return groups
+  const fallback = new Map()
+  for (const item of list) {
+    const volume = String(item?.volume ?? '').trim()
+    if (!volume) continue
+    if (!fallback.has(volume)) fallback.set(volume, [])
+    fallback.get(volume).push(item)
+  }
+  for (const [id, members] of fallback) groups.push({ volume: { id }, members })
+  return groups
+}
+
+/** 卷排完了才判：planned=true 且成员数达到 targetChapters（无目标章数时只看 planned）。 */
+function volumeIsComplete(volume, members) {
+  if (volume?.planned !== true) return false
+  const target = Math.floor(Number(volume?.targetChapters))
+  return !(Number.isFinite(target) && target > 0) || members.length >= target
+}
+
+/** 单卷 large >3 → 过密；==0 且每章都有 level → 整卷没有大爽点；未排完的卷跳过。 */
+function payoffVolumeFindings(list, outline) {
+  const findings = []
+  for (const { volume, members } of payoffVolumeGroups(list, outline)) {
+    if (!volumeIsComplete(volume, members)) continue
+    const levels = members.map((item) => payoffLevelOf(item))
+    const large = levels.filter((level) => level === 'large').length
+    const where = String(volume?.id ?? volume?.title ?? '本卷')
+    const label =
+      volume?.id && volume?.title
+        ? `${volume.id}「${volume.title}」`
+        : String(volume?.title ?? volume?.id ?? '本卷')
+    if (large > 3) {
+      findings.push({
+        severity: 'note',
+        kind: 'payoff-volume',
+        where,
+        issue: `「${label}」${members.length} 章里有 ${large} 章 payoff.level=large，大爽点过密（上限 3 章）`,
+        fix: `把其中 ${large - 3} 章的 large 降到 medium，把 large 留给卷末主高潮或大转折`,
+      })
+      continue
+    }
+    if (large === 0 && levels.length > 0 && levels.every(Boolean)) {
+      findings.push({
+        severity: 'note',
+        kind: 'payoff-volume',
+        where,
+        issue: `「${label}」整卷 ${members.length} 章都没有 large 级兑现（整卷没有大爽点）`,
+        fix: '在本卷高潮章安排一次 large 级兑现（payoff.level=large），让卷末有能记住的大回报',
+      })
+    }
+  }
+  return findings
+}
+
+/** 黄金三章递进：1 小/中、2 小/中、3 中，且前 3 章出现 large 即报；缺字段整条跳过。 */
+function payoffOpeningFindings(list) {
+  if (list.length < 3) return []
+  const first = list.slice(0, 3)
+  const numbers = first.map((item) => chapterNumber(item?.id))
+  if (numbers.every((n) => n != null) && !(numbers[0] === 1 && numbers[1] === 2 && numbers[2] === 3)) {
+    return []
+  }
+  const levels = first.map((item) => payoffLevelOf(item))
+  if (!levels.every(Boolean)) return []
+  const problems = []
+  if (levels[0] === 'none') problems.push(`第 1 章 payoff.level=none，应为 small 或 medium`)
+  if (levels[1] === 'none') problems.push(`第 2 章 payoff.level=none，应为 small 或 medium`)
+  if (levels[2] !== 'medium' && levels[2] !== 'large') {
+    problems.push(`第 3 章 payoff.level=${levels[2]}，应为 medium 或 large`)
+  }
+  const largeAt = []
+  for (let i = 0; i < 3; i += 1) if (levels[i] === 'large') largeAt.push(i + 1)
+  if (largeAt.length) {
+    problems.push(`第 ${largeAt.join('、')} 章出现 large 级兑现，前三章不应提前给大爽点`)
+  }
+  if (!problems.length) return []
+  return [
+    {
+      severity: 'note',
+      kind: 'payoff-opening',
+      where: whereOf(first[0]),
+      issue: `第 1–3 章的爽点兑现不递进：${problems.join('；')}`,
+      fix: '改成第 1 章 small、第 2 章 small 或 medium、第 3 章 medium 的递进；大爽点留到第 4 章之后再给',
+    },
+  ]
+}
+
+function payoffFindings(list, outline) {
+  return [
+    ...payoffGapFindings(list),
+    ...payoffVolumeFindings(list, outline),
+    ...payoffOpeningFindings(list),
+  ]
+}
+
 // ---- 全书结构：首末呼应 / 兑现章专名 / B 线合流（全部 note） -------------
 
 const BOOKEND_GAIN_MARKS = [
@@ -866,6 +1027,139 @@ function payoffNameDriftFindings(index, list) {
   return findings
 }
 
+// P1-C5 兑现质量：引号段口径与 craft.js:80 的 QUOTE_SPAN_SOURCE 逐字一致。
+// craft.js 没有导出这个常量，consistency.js 也不想再造第二套口径，所以这里只镜像字符串；
+// 改引号口径时必须两处一起改（dialogueRatio / dialogueTagStats / dialogueTurnStats 同源）。
+const DIALOGUE_SPAN_SOURCE = '[“"「『]([^”"」』]{1,600})[”"」』]'
+
+// 线索 text → 可检索关键词：先按标点/空白切中文段，再切掉虚词与「线索/伏笔」这类元词。
+// 只保留 2–10 字片段；宁漏勿误报，派生不出关键词就整条跳过。
+const THREAD_KEYWORD_SPLIT = /一个|这个|线索|伏笔|将在|之后|之前|暗线|埋线|埋下|回收|兑现|[的了是]/g
+const THREAD_KEYWORD_MAX = 10
+const THREAD_KEYWORD_LIMIT = 8
+
+function threadKeywords(text) {
+  const runs = String(text ?? '')
+    .replace(/[^\u3400-\u4dbf\u4e00-\u9fff]+/g, '\n')
+    .split('\n')
+  const seen = new Set()
+  const keywords = []
+  for (const run of runs) {
+    for (const piece of run.split(THREAD_KEYWORD_SPLIT)) {
+      if (piece.length < 2 || piece.length > THREAD_KEYWORD_MAX) continue
+      if (COMMON_WORDS.has(piece) || seen.has(piece)) continue
+      seen.add(piece)
+      keywords.push(piece)
+    }
+  }
+  keywords.sort((a, b) => b.length - a.length || compareText(a, b))
+  return keywords.slice(0, THREAD_KEYWORD_LIMIT)
+}
+
+/** 引号段 [start, end)（含引号本身），口径同 craft.js 的 QUOTE_SPAN_SOURCE。 */
+function dialogueSpans(body) {
+  const pattern = new RegExp(DIALOGUE_SPAN_SOURCE, 'g')
+  const spans = []
+  let matched
+  while ((matched = pattern.exec(body)) !== null) {
+    spans.push([matched.index, matched.index + matched[0].length])
+  }
+  return spans
+}
+
+/** 关键词出现次数，以及其中完整落在引号段内的次数（= 对话里的次数）。 */
+function keywordStats(body, keyword, spans) {
+  let total = 0
+  let inDialogue = 0
+  let spanIndex = 0
+  let position = body.indexOf(keyword)
+  while (position !== -1) {
+    total += 1
+    while (spanIndex < spans.length && spans[spanIndex][1] <= position) spanIndex += 1
+    const span = spans[spanIndex]
+    if (span && position >= span[0] && position + keyword.length <= span[1]) inDialogue += 1
+    position = body.indexOf(keyword, position + keyword.length)
+  }
+  return { total, inDialogue, narration: total - inDialogue }
+}
+
+/**
+ * C5 兑现质量：兑现章里线索关键词出现 ≥2 次，且至少 1 次不在对话里。
+ * 只判 thread.closedIn === 本章 的兑现章；无正文、无线索、无可用关键词都静默。
+ * 同章若已报 name-drift，则不再叠加 payoff-thin（同一兑现章只提醒一次）。
+ */
+function payoffThinFindings(index, list, nameDriftFindings = []) {
+  if (!list.length) return []
+  const closed = index.threads.some(
+    (thread) => thread && typeof thread === 'object' && thread.closedIn != null && thread.closedIn !== '',
+  )
+  if (!closed) return []
+  const nameDriftWhere = new Set(nameDriftFindings.map((finding) => finding.where))
+  const findings = []
+  const spanCache = new Map()
+  const countCache = new Map()
+  for (const item of list) {
+    const body = chapterText(item)
+    if (!body.trim()) continue
+    const threads = payoffThreadsOf(index, item?.id)
+    if (!threads.length) continue
+    const where = whereOf(item)
+    if (nameDriftWhere.has(where)) continue
+    const chapterKey = String(item?.id ?? where)
+    let spans = spanCache.get(chapterKey)
+    if (!spans) {
+      spans = dialogueSpans(body)
+      spanCache.set(chapterKey, spans)
+    }
+    for (const thread of threads) {
+      if (!thread || typeof thread !== 'object') continue
+      const keywords = threadKeywords(thread.text)
+      if (!keywords.length) continue
+      const threadLabel = String(thread.text ?? thread.id ?? '').trim() || '未命名线索'
+      let best = null
+      let landed = false
+      for (const keyword of keywords) {
+        const cacheKey = `${chapterKey}\u0000${keyword}`
+        let stats = countCache.get(cacheKey)
+        if (!stats) {
+          stats = keywordStats(body, keyword, spans)
+          countCache.set(cacheKey, stats)
+        }
+        if (
+          !best ||
+          stats.total > best.stats.total ||
+          (stats.total === best.stats.total && stats.narration > best.stats.narration) ||
+          (stats.total === best.stats.total &&
+            stats.narration === best.stats.narration &&
+            keyword.length > best.keyword.length)
+        ) {
+          best = { keyword, stats }
+        }
+        if (stats.total >= 2 && stats.narration >= 1) {
+          landed = true
+          break
+        }
+      }
+      if (landed || !best) continue
+      const { keyword, stats } = best
+      const issue =
+        stats.total === 0
+          ? `「${where}」是线索「${threadLabel}」的兑现章，但正文里没有出现「${keyword}」：兑现没有落地`
+          : stats.total === 1
+            ? `「${where}」是线索「${threadLabel}」的兑现章，但正文里「${keyword}」只出现 1 次${stats.inDialogue ? '，且这一次在对话里' : ''}：兑现没有落地`
+            : `「${where}」是线索「${threadLabel}」的兑现章，但正文里「${keyword}」出现 ${stats.total} 次，都在对话里：叙述没有落地`
+      findings.push({
+        severity: 'note',
+        kind: 'payoff-thin',
+        where,
+        issue,
+        fix: `把「${keyword}」写进兑现章的叙述（动作、环境或后果），至少 1 次落在引号外；若兑现已不依赖这个词，改线索 text，或把 thread 标成 closed 但不填 closedIn`,
+      })
+    }
+  }
+  return findings
+}
+
 const B_LINE_MARKERS = [
   { label: 'B 线', re: /B\s*线/i },
   { label: '副线', re: /副线/ },
@@ -918,14 +1212,17 @@ function bLineFindings(outline, list) {
 export function audit({ chapters = null, canon = null, outline = null, params = {} } = {}) {
   const index = createCanonIndex(canon)
   const list = normalizeChapters(chapters, outline)
+  const nameDrift = payoffNameDriftFindings(index, list)
   const findings = [
     ...threadStaleFindings(index.threads, list),
     ...canonConflictFindings(index.facts),
     ...turnFindings(list),
     ...midpointFindings(outline, list),
     ...hookFindings(list),
+    ...payoffFindings(list, outline),
     ...bookendFindings(list),
-    ...payoffNameDriftFindings(index, list),
+    ...nameDrift,
+    ...payoffThinFindings(index, list, nameDrift),
     ...bLineFindings(outline, list),
   ]
   // 有正文的章节继续跑单章规则；只有细纲元数据时只报全书级规则。

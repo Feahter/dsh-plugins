@@ -4,13 +4,16 @@
 //   novel_run 批量推进（同一个 chapter.js / 同一份 packet 契约）
 // 每个工具都只做一层薄封装，真正的语义在 recipes/novel 与 ForgeEngine 里。
 
+import { readFile, stat } from 'node:fs/promises'
 import { httpError } from './json.js'
 import { countCjk } from '../forge/text.js'
 import { audit as auditChapters } from '../recipes/novel/consistency.js'
 import { canonProblems, canonStats, emptyCanon, migrateLedger } from '../recipes/novel/canon.js'
 import { chapterRequirements } from '../recipes/novel/packet.js'
 import { migrateOutline, nextActions, volumeOfChapter } from '../recipes/novel/plan.js'
+import { checkOpeningContract } from '../recipes/novel/outline.js'
 import { commitChapter, ensureVolume, prepareChapter } from '../recipes/novel/chapter.js'
+import { deconstruct } from '../recipes/novel/deconstruct.js'
 
 // 需要按 JSON 存的产物 key。ledger 保留：v1 项目还有账本，读的时候要能迁移。
 const JSON_KEYS = new Set(['brief', 'pitch', 'opener', 'characters', 'spine', 'outline', 'canon', 'ledger', 'blurb'])
@@ -49,6 +52,29 @@ function defineTool(name, description, parameters, execute, options = {}) {
 function fmtNum(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number.toLocaleString('zh-CN') : '0'
+}
+
+/** 黄金三章契约要 opener 工件：preload 之后可能给已解析对象，也可能是原始 JSON 串。 */
+function openerOf(read) {
+  const raw = read('opener')
+  if (!raw) return null
+  if (typeof raw === 'object') return raw
+  if (typeof raw !== 'string') return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+/** 契约检查结果折成统一 finding 形状（severity/kind/where/issue/fix 5 键），与全书体检同构。 */
+function openingFindings(outline, read) {
+  try {
+    const result = checkOpeningContract({ outline, opener: openerOf(read) })
+    return Array.isArray(result?.issues) ? result.issues : []
+  } catch {
+    return []
+  }
 }
 
 function fmtDate(value) {
@@ -133,6 +159,20 @@ const projectParam = {
 
 async function resolve(engine, hint) {
   return engine.resolveProject(hint || 'active')
+}
+
+/** 引擎注册的导出格式集合（模型/前端都能传错格式）；取不到时是空集合，调用方据此跳过校验。 */
+function exportFormats(engine) {
+  const recipes = typeof engine?.listRecipes === 'function'
+    ? engine.listRecipes()
+    : engine?.recipes instanceof Map
+      ? [...engine.recipes.values()]
+      : Array.isArray(engine?.recipes) ? engine.recipes : []
+  const formats = new Set()
+  for (const recipe of recipes ?? []) {
+    for (const key of Object.keys(recipe?.exports ?? {})) formats.add(key)
+  }
+  return formats
 }
 
 /** 读一个产物；优先走 store 的 knownMeta 快路径，长书不用每个 key 重解析一次 project.json。 */
@@ -477,12 +517,15 @@ export function createTools(engine) {
         const written = chapterIdsIn(project, 'draft')
         const reviewed = chapterIdsIn(project, 'review')
         const actions = actionsOf({ project, outline, written, reviewed })
+        // 黄金三章契约：写第 1–3 章之前就要看见，写到第 4 章才发现代价太大。
+        const openingIssues = openingFindings(outline, read)
         return {
           ok: true,
           project: { id: project.id, title: project.title },
           outline: outlineSummary(outline),
           progress: { written: written.size, reviewed: reviewed.size },
           actions,
+          opening: { ok: openingIssues.length === 0, issues: openingIssues },
           hint: actions.some(action => action.action === 'write')
             ? '要自己写：novel_context 取材料 → 写正文 → novel_commit 提交。交给引擎：novel_run（长篇每轮只展开一卷）。'
             : '按上面的顺序推进；批量跑可以用 novel_run。',
@@ -490,6 +533,12 @@ export function createTools(engine) {
       },
       { render: (_args, value) => text([
         `《${value.project.title}》 计划 ${fmtNum(value.outline.totalChapters)} 章 · 已展开 ${fmtNum(value.outline.plannedVolumes)} 卷 · 已写 ${fmtNum(value.progress.written)} 章 · 已审 ${fmtNum(value.progress.reviewed)} 章`,
+        ...(value.opening && value.opening.ok === false
+          ? [
+              `黄金三章契约未满足 ${value.opening.issues.length} 条：`,
+              ...value.opening.issues.slice(0, 3).map(issue => `· ${issue.where ?? ''}：${issue.issue ?? ''}`),
+            ]
+          : []),
         '下一步：',
         actionsText(value.actions),
       ].join('\n')) },
@@ -739,7 +788,7 @@ export function createTools(engine) {
             beats: read(`beats/${chapter.id}`) ?? null,
           }
         })
-        const findings = auditChapters({ chapters, canon, outline, params })
+        const findings = [...auditChapters({ chapters, canon, outline, params }), ...openingFindings(outline, read)]
         const problems = canonProblems(canon)
         const drafted = chapters.filter(chapter => chapter.text.trim())
         const words = drafted.reduce((sum, chapter) => sum + countCjk(chapter.text), 0)
@@ -787,6 +836,13 @@ export function createTools(engine) {
             canonLine(value.canon.stats),
           ]
           if (stats.oldestOpen) lines.push(`最久未回收：${stats.oldestOpen.text}（自 ${stats.oldestOpen.opened || '?'} 起${stats.oldestOpen.distance != null ? `，${stats.oldestOpen.distance} 章` : ''}）`)
+          const openingHits = value.findings.filter(finding => finding?.kind === 'opening-contract')
+          if (openingHits.length) {
+            lines.push(`黄金三章契约：${openingHits.length} 条未满足`)
+            for (const finding of openingHits.slice(0, 3)) {
+              lines.push(`· ${finding.where ?? ''}：${finding.issue ?? ''}`)
+            }
+          }
           if (!value.findings.length) {
             lines.push(value.markedAudited ? '审校：没有发现问题。（已记 outline.auditedAt）' : '审校：没有发现问题。')
           } else {
@@ -950,7 +1006,8 @@ export function createTools(engine) {
                 content: '这个项目没有 ledger：v0.2 起连续性状态存在 canon（读 key=canon）。老的 ledger 会在下次运行时自动迁移。',
               }
             }
-            throw new Error(`没有这个产物：${args.key}`)
+            // 和 HTTP 路由同口径：产物不存在是 404 ARTIFACT_MISSING，不是无 code 的 Error（会被当成 500）。
+            throw httpError(404, 'ARTIFACT_MISSING', `没有这个产物：${args.key}`)
           }
           return { ok: true, project: project.title, key: args.key, kind: artifact.kind, content: artifact.content }
         }
@@ -988,6 +1045,10 @@ export function createTools(engine) {
       },
       async args => {
         const project = await resolve(engine, args.project)
+        // content 缺省时存储层会写成字面量 "null"，等于用一次缺参调用覆盖掉整篇产物。
+        if (typeof args.content !== 'string') {
+          throw httpError(400, 'BAD_PARAMS', 'content 必须是字符串')
+        }
         const declared = project.artifacts?.[args.key]?.kind
         const kind = declared === 'json' || JSON_KEYS.has(args.key) || args.key.startsWith('beats/') || args.key.startsWith('review/')
           ? 'json'
@@ -1026,6 +1087,11 @@ export function createTools(engine) {
       },
       async args => {
         const project = await resolve(engine, args.project)
+        // window 声明是 1–200 的整数；引擎会把非正整数静默归一成 null（= 不限章数），
+        // 所以不能把负数透传下去，也不能把它原样回显给调用方。
+        if (args.window !== undefined && args.window !== null && (!Number.isInteger(args.window) || args.window < 1)) {
+          throw httpError(400, 'BAD_PARAMS', 'window 必须是 ≥ 1 的整数')
+        }
         const options = { window: args.window ?? 10 }
         for (const key of ['from', 'to', 'stages', 'items', 'force', 'autoApprove', 'dryRun']) {
           if (args[key] !== undefined) options[key] = args[key]
@@ -1058,24 +1124,164 @@ export function createTools(engine) {
     ),
 
     defineTool(
-      'novel_export',
-      '把书导出成文件：markdown 或 epub。返回落盘路径。',
+      'novel_continue',
+      '接着某一章已有正文的断点往下写（不重写整章、不续跑下一章）。目标字数是 wordsPerChapter 减已有字数；撞输出上限会自动再续，最多再续 2 段。',
       {
         type: 'object',
         properties: {
           project: projectParam,
-          format: { type: 'string', enum: ['markdown', 'epub'], description: '导出格式，默认 markdown。' },
+          chapter: { type: 'string', description: '章节，如 ch03 或 3。' },
+        },
+        required: ['chapter'],
+        additionalProperties: false,
+      },
+      async args => {
+        const project = await resolve(engine, args.project)
+        const params = project.params ?? {}
+        const read = await preloadProject(engine, project, { prefixes: [] })
+        const outline = outlineOf(read, params)
+        if (!outline) {
+          throw httpError(409, 'NO_OUTLINE', '项目还没有大纲：先 novel_run 跑 premise→outline，再续写这一章。')
+        }
+        const knownKeys = Object.keys(project.artifacts ?? {})
+        const chapterId = resolveChapterId(args.chapter, outline, knownKeys, params)
+        if (!chapterId) throw httpError(400, 'BAD_PARAMS', `看不懂章节号：${args.chapter}`)
+        if (!knownKeys.includes(`draft/${chapterId}`)) {
+          throw httpError(
+            409,
+            'NO_DRAFT',
+            `第 ${chapterId} 章还没有正文：先 novel_run 写这一章（或 novel_commit 提交正文）再续写。`,
+          )
+        }
+        const result = await engine.continueChapter(project.id, chapterId)
+        return {
+          ok: true,
+          project: project.title,
+          chapter: result?.chapterId ?? chapterId,
+          beforeChars: result?.beforeChars ?? 0,
+          afterChars: result?.afterChars ?? 0,
+          truncated: result?.truncated === true,
+        }
+      },
+      {
+        timeoutMs: 240_000,
+        render: (_args, value) => text(
+          value.afterChars === value.beforeChars
+            ? `《${value.project}》${value.chapter} 已有 ${fmtNum(value.beforeChars)} 字，达到目标字数，没有再续写。`
+            : `已续写《${value.project}》${value.chapter}：${fmtNum(value.beforeChars)} → ${fmtNum(value.afterChars)} 字${value.truncated ? '（仍撞输出上限，已保存写出的部分）' : ''}。`,
+        ),
+      },
+    ),
+
+    defineTool(
+      'novel_deconstruct',
+      '拆书（本地确定性解析，不调模型）：把一本现成小说的纯文本拆成骨架与文风指纹——章节切分、章长曲线、对话比、场景密度、章末钩子类型、平均句长、高频二字组。text 与 file 二选一；给 project 时把完整结果落成 deconstruct 产物。整本送模型不在本工具范围内。',
+      {
+        type: 'object',
+        properties: {
+          project: projectParam,
+          text: { type: 'string', description: '小说全文（与 file 二选一）。' },
+          file: { type: 'string', description: '本地 UTF-8 文本路径（与 text 二选一），上限 8MB。' },
+          title: { type: 'string', description: '书名；省略时用项目标题或文件名。' },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+      async args => {
+        const text = String(args.text ?? '')
+        const file = String(args.file ?? '').trim()
+        if (text.trim() && file) throw httpError(400, 'BAD_PARAMS', 'text 与 file 只能给一个。')
+        if (!text.trim() && !file) throw httpError(400, 'BAD_PARAMS', 'novel_deconstruct 需要 text 或 file 之一。')
+        const project = args.project ? await resolve(engine, args.project) : null
+        let source = text
+        let title = String(args.title ?? '').trim() || String(project?.title ?? '').trim()
+        if (file) {
+          let info
+          try {
+            info = await stat(file)
+          } catch {
+            throw httpError(404, 'NOT_FOUND', `读不到文件：${file}`)
+          }
+          if (!info.isFile()) throw httpError(400, 'BAD_PARAMS', `不是文件：${file}`)
+          if (info.size > 8 * 1024 * 1024) {
+            throw httpError(413, 'TOO_LARGE', `文件 ${(info.size / 1024 / 1024).toFixed(1)}MB 超过 8MB：先分卷，再逐卷拆。`)
+          }
+          source = await readFile(file, 'utf8')
+          title = title || (file.split('/').pop() ?? '').replace(/\.[^.]+$/, '')
+        }
+        const result = deconstruct({ text: source, title })
+        let saved = null
+        if (project) {
+          const written = await engine.writeArtifact(
+            project.id,
+            'deconstruct',
+            { kind: 'json', content: result },
+            { stage: 'deconstruct' },
+          )
+          saved = { key: written.key, version: written.meta?.version ?? null }
+        }
+        const hookKinds = result.chapters.reduce((acc, chapter) => {
+          const kind = chapter.hooks?.kind ?? 'none'
+          acc[kind] = (acc[kind] ?? 0) + 1
+          return acc
+        }, {})
+        return {
+          ok: true,
+          title: result.meta.title,
+          chars: result.meta.chars,
+          chapters: result.chapters.map(chapter => ({
+            index: chapter.index,
+            title: chapter.title,
+            chars: chapter.chars,
+            dialogueRatio: chapter.dialogueRatio,
+            sceneCount: chapter.sceneCount,
+            hook: chapter.hooks?.kind ?? 'none',
+            hookText: String(chapter.hooks?.text ?? '').slice(0, 120),
+          })),
+          style: result.style,
+          density: result.density,
+          curve: { longest: result.curve.longest, shortest: result.curve.shortest, openingHookKinds: result.curve.openingHookKinds, endingHookKinds: result.curve.endingHookKinds },
+          hookKinds,
+          saved,
+        }
+      },
+      {
+        timeoutMs: 60_000,
+        render: (_args, value) => text(
+          `拆完《${value.title}》：${value.chapters.length} 章 / ${fmtNum(value.chars)} 字；对话比 ${(value.style.dialogueRatio * 100).toFixed(1)}%，平均句长 ${value.style.avgSentenceLen} 字，章末钩子 ${Object.entries(value.hookKinds).map(([kind, count]) => `${kind} ${count}`).join(' / ')}${value.saved ? `；已存 deconstruct（v${value.saved.version}）` : ''}。`,
+        ),
+      },
+    ),
+
+    defineTool(
+      'novel_export',
+      '把书导出成文件：markdown（全书正文）、epub（阅读器）、outline-editor（编辑审稿单，同时落 md 与 csv）。返回落盘路径。',
+      {
+        type: 'object',
+        properties: {
+          project: projectParam,
+          format: { type: 'string', enum: ['markdown', 'epub', 'outline-editor'], description: '导出格式，默认 markdown；outline-editor 是逐章的编辑审稿单（纯表格，不调模型）。' },
         },
         additionalProperties: false,
       },
       async args => {
         const project = await resolve(engine, args.project)
-        const result = await engine.exportProject(project.id, args.format ?? 'markdown')
+        const format = args.format ?? 'markdown'
+        // 未知格式在引擎里是 EXPORT_FAILED(500)，而它其实是参数错误。
+        const formats = exportFormats(engine)
+        if (formats.size && !formats.has(format === 'md' ? 'markdown' : format)) {
+          throw httpError(400, 'BAD_PARAMS', `不支持的导出格式：${String(format)}；可用：${[...formats].join(' / ')}`)
+        }
+        const result = await engine.exportProject(project.id, format)
         return { ok: true, export: result }
       },
       {
         timeoutMs: 120_000,
-        render: (_args, value) => text(`已导出：${value.export.path}\n${fmtNum(value.export.bytes)} 字节 · ${value.export.mime}`),
+        render: (_args, value) => text([
+          `已导出：${value.export.path}`,
+          `${fmtNum(value.export.bytes)} 字节 · ${value.export.mime}`,
+          ...(value.export.extras ?? []).map(extra => `同时导出：${extra.path}（${fmtNum(extra.bytes)} 字节）`),
+        ].join('\n')),
       },
     ),
   ]
