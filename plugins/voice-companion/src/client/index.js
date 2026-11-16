@@ -113,6 +113,7 @@ function apply(ctx) {
     history: [],
     cursor: 0,
     poller: null,
+    polling: false,
     fillers: [],
     fillerIndex: 0,
     active: false,
@@ -171,8 +172,13 @@ function apply(ctx) {
   function dictate(text) {
     const cleaned = typeof polish === 'function' ? polish(text) : text;
     const inserted = runtime.dictation ? runtime.dictation.insert(cleaned) : false;
-    runtime.avatar && runtime.avatar.setPartial(inserted ? '' : cleaned);
-    runtime.avatar && runtime.avatar.setSubtitle(cleaned, { role: 'user' });
+    // dictation.insert already publishes the failure ("输入框不可用，文字已保留")
+    // through onError and keeps the text in `pending`; overwriting the subtitle
+    // with the recognised sentence would hide that the words never landed.
+    if (inserted) {
+      runtime.avatar && runtime.avatar.setPartial('');
+      runtime.avatar && runtime.avatar.setSubtitle(cleaned, { role: 'user' });
+    }
     return inserted;
   }
 
@@ -206,13 +212,17 @@ function apply(ctx) {
       );
     } catch (error) {
       log('turn:error', error && error.message);
+      if (!runtime.active) return;
       runtime.avatar && runtime.avatar.setState('error');
       await runtime.engine.speak(['抱歉，我这边出了点问题。']);
       return;
     }
+    // The user can hang up while the model is still thinking. The reply must not
+    // start speaking (and reopen an AudioContext) after the call ended.
+    if (!runtime.active) return;
     const say = Array.isArray(reply.say) && reply.say.length ? reply.say : [reply.reply || '我在。'];
-    runtime.history.push({ role: 'user', text: utterance });
-    runtime.history.push({ role: 'assistant', text: say.join('') });
+    runtime.history.push({ role: 'user', content: utterance });
+    runtime.history.push({ role: 'assistant', content: say.join('') });
     if (runtime.history.length > 24) runtime.history.splice(0, runtime.history.length - 24);
     runtime.avatar && runtime.avatar.setSubtitle(say.join(''), { role: 'assistant' });
     // Only real background dispatches get a receipt; a plain answer clears it.
@@ -230,11 +240,17 @@ function apply(ctx) {
   }
 
   async function pollEvents() {
-    if (!runtime.active) return;
+    if (!runtime.active || runtime.polling) return;
+    // A poll can outlive the 1.5 s interval (host busy, event speech). Without
+    // this guard the next tick starts from the same cursor and the same event is
+    // announced twice, interrupting the first readback.
+    runtime.polling = true;
     try {
       const body = await requestJson('/events?since=' + runtime.cursor, null, 10000);
+      if (!runtime.active) return;
       runtime.cursor = typeof body.cursor === 'number' ? body.cursor : runtime.cursor;
       for (const event of body.events || []) {
+        if (!runtime.active) return;
         log('event', { id: event.id, type: event.type });
         // /events has no taskId, so the receipt matches on the dispatch session.
         if (runtime.receiptTask && event.sessionId && event.sessionId === runtime.receiptTask.sessionId) {
@@ -252,6 +268,8 @@ function apply(ctx) {
       }
     } catch (error) {
       log('events:error', error && error.message);
+    } finally {
+      runtime.polling = false;
     }
   }
 
@@ -503,6 +521,10 @@ function apply(ctx) {
       },
     };
   }
+
+  // Test seam: lets the client harness drive the single-flight guard directly
+  // instead of waiting for the 1.5 s interval.
+  if (voiceCompanion && voiceCompanion.__test) voiceCompanion.__test.pollEvents = pollEvents;
 
   mount();
 

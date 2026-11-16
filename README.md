@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-2f9e44.svg)](./LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DSH-0.2.1--rc.4%2B-4c6ef5.svg)](https://github.com/deepseek-ai/deepseek-harness)
-[![Plugins](https://img.shields.io/badge/plugins-10-7048e8.svg)](#plugin-catalog)
+[![Plugins](https://img.shields.io/badge/plugins-11-7048e8.svg)](#plugin-catalog)
 [![Topic](https://img.shields.io/badge/topic-dsh--plugin-1c7ed6.svg)](https://github.com/topics/dsh-plugin)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -23,7 +23,7 @@ The plugins cover voice input and speech output, GitHub project management, sess
 https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
 ```
 
-即可搜索并安装全部插件。十条插件分别覆盖：本地连续语音输入、语音看板娘（通话/听写/热键）、GitHub 项目管理、会话归档与 PDCA 炼金、技能与 Agents 说明书体检、无限画布脑图、本机上下文资源库、外置任务账本、版本更新检查、长篇小数流水线。**完整中文说明见 [README.zh-CN.md](README.zh-CN.md)。**
+即可搜索并安装全部插件。十一个插件分别覆盖：本地连续语音输入、语音看板娘（通话/听写/热键）、GitHub 项目管理、会话归档与 PDCA 炼金、技能与 Agents 说明书体检、无限画布脑图、本机上下文资源库、外置任务账本、版本更新检查、长篇小说流水线。**完整中文说明见 [README.zh-CN.md](README.zh-CN.md)。**
 
 ## Contents
 

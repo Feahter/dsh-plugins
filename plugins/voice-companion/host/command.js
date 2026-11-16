@@ -124,7 +124,11 @@ export function createCommandService({ ctx, now = () => Date.now() }) {
     }
 
     if (action === 'cancel') {
-      await bridge.cancel({ sessionId: String(payload?.sessionId ?? '') })
+      // A missing target is the caller's mistake, not a Host failure: without
+      // this check the bridge's plain Error surfaces as HTTP 500.
+      const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : ''
+      if (sessionId === '') throw httpError(404, 'not-found', 'session not found: sessionId is required')
+      await bridge.cancel({ sessionId })
       return { ok: true, action: 'cancel' }
     }
 

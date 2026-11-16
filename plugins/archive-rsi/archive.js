@@ -2107,20 +2107,25 @@ export class ArchiveStore {
   async saveBaseline(runId, metrics) {
     const key = String(runId ?? '');
     if (!key) throw new Error('saveBaseline requires a runId');
-    const file = this.#file('baselines.json');
-    let baselines = {};
-    const raw = await readText(file, null);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (isObject(parsed)) baselines = parsed;
-      } catch {
-        baselines = {};
+    // baselines.json is a read-modify-write document: two runs finishing in the
+    // same tick would both read the old file and the later rename would drop the
+    // other run's entry. Serialize it with every other index mutation.
+    return this.#enqueue(async () => {
+      const file = this.#file('baselines.json');
+      let baselines = {};
+      const raw = await readText(file, null);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (isObject(parsed)) baselines = parsed;
+        } catch {
+          baselines = {};
+        }
       }
-    }
-    baselines[key] = { ts: Date.now(), metrics: isObject(metrics) ? metrics : {} };
-    await atomicWriteJson(file, baselines);
-    return baselines[key];
+      baselines[key] = { ts: Date.now(), metrics: isObject(metrics) ? metrics : {} };
+      await atomicWriteJson(file, baselines);
+      return baselines[key];
+    });
   }
 
   async readBaselines() {

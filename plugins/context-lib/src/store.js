@@ -41,6 +41,39 @@ const MAX_FILES = 4000
 const DEFAULT_DEPTH = 6
 const LOCK_TTL_MS = 10 * 60 * 1000
 const KINDS = new Set(['doc', 'script', 'image', 'data', 'session', 'note', 'other'])
+/**
+ * Every id this store creates is `cl_<hex>`; loading an index that carries some
+ * other id (a hand-edited file, a merge from another tool) must not let that id
+ * steer a filesystem path. `notes/<id>.md` and `blobs/<blob>` are joined below.
+ */
+const SAFE_ENTRY_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+function isSafeEntryId(value) {
+  return typeof value === 'string' && SAFE_ENTRY_ID.test(value)
+}
+
+/** Resolve `relative` under `base`; null when it escapes or is empty. */
+function resolveInside(base, relative) {
+  if (typeof relative !== 'string' || !relative || path.isAbsolute(relative)) return null
+  const root = path.resolve(base)
+  const target = path.resolve(root, relative)
+  const rel = path.relative(root, target)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  return target
+}
+
+/**
+ * `target` 是否严格位于 `base` 之内。
+ * 只用于 linked 条目：扫描器写进索引的路径是 `来源目录 + 相对路径` 拼出来的
+ * 绝对路径，所以这里按字面解析，不做 realpath（与写入形态保持一致）。
+ */
+function isInsideBase(base, target) {
+  if (typeof base !== 'string' || !base || typeof target !== 'string' || !target) return false
+  if (!path.isAbsolute(target)) return false
+  const root = path.resolve(base)
+  const rel = path.relative(root, path.resolve(target))
+  return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
+}
 
 export class LibraryError extends Error {
   constructor(message, { code = 'library-error', hint = '' } = {}) {
@@ -329,10 +362,13 @@ export class Library {
     this.maxPreviewChars = Number.isFinite(options.maxPreviewChars) ? Math.max(0, options.maxPreviewChars) : 1200
     this.maxTextBytes = Number.isFinite(options.maxTextBytes) ? Math.max(1, options.maxTextBytes) : 2 * 1024 * 1024
     this.maxEntries = Number.isFinite(options.maxEntries) ? Math.max(1, options.maxEntries) : 20000
+    // 单次扫描文件上限：默认 MAX_FILES；选项只为测试能造小场景，不改变生产语义。
+    this.maxFiles = Number.isFinite(options.maxFiles) ? Math.max(1, Math.trunc(options.maxFiles)) : MAX_FILES
     this.index = { version: INDEX_VERSION, updatedAt: null, entries: {} }
     this.sourceList = []
     this._queue = Promise.resolve()
     this._initPromise = null
+    this._initialized = false
     this._scanning = false
     // 外部进程（另一个 dsh 实例 / 直接跑 store API 的脚本）改过磁盘时，用它判断要不要重新读。
     this._diskStamps = { index: null, sources: null }
@@ -354,14 +390,18 @@ export class Library {
     await fs.mkdir(this.root, { recursive: true })
     await fs.mkdir(this.notesDir, { recursive: true })
     await fs.mkdir(this.blobsDir, { recursive: true })
-    const loaded = await this._loadIndex()
-    this.index = loaded.index
-    if (loaded.repaired && loaded.existed) await this._saveIndex()
+    // Sources load first: linked entries are only accepted when their path sits
+    // inside a registered source, so the allow-list must exist before the index
+    // is parsed (otherwise every linked entry would look out-of-bounds).
     const sources = await this._loadSources()
     this.sourceList = sources.sources
     if (sources.changed) await this._saveSources()
+    const loaded = await this._loadIndex()
+    this.index = loaded.index
+    if (loaded.repaired && loaded.existed) await this._saveIndex()
     this._diskStamps.index = await this._stampOf(this.indexPath)
     this._diskStamps.sources = await this._stampOf(this.sourcesPath)
+    this._initialized = true
     return this
   }
 
@@ -372,20 +412,62 @@ export class Library {
       throw new Error('index.json 结构不正确')
     }
     const entries = {}
+    const dropped = []
     let repaired = false
     for (const [id, raw] of Object.entries(parsed.entries)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         repaired = true
+        dropped.push({ id, reason: '条目结构不是对象' })
         continue
       }
       const normalized = normalizeEntry(id, raw)
+      if (!isSafeEntryId(id) || !isSafeEntryId(normalized.id) || normalized.id !== id) {
+        // Never expose an entry whose id would resolve outside notes/ or
+        // blobs/ (or collide with a path separator), and never let the map key
+        // disagree with the entry id — drop it, flag a repair.
+        repaired = true
+        dropped.push({ id, reason: 'id 不在安全字符集内或与索引键不一致' })
+        continue
+      }
+      if (normalized.storage === 'linked') {
+        // index.json is untrusted input: a hand-edited `{storage:'linked',
+        // path:'~/.ssh/id_rsa'}` would otherwise let readText/raw serve any file
+        // on the machine. 扫描产出的 linked 路径天然落在其来源目录内。
+        const reason = this.linkedPathReason(normalized.path)
+        if (reason) {
+          repaired = true
+          dropped.push({ id, reason })
+          continue
+        }
+      }
       if (JSON.stringify(normalized) !== JSON.stringify(raw)) repaired = true
       entries[id] = normalized
+    }
+    if (dropped.length) {
+      // One aggregate warn per load: a tampered index can drop many entries and
+      // a per-entry log would flood the host output.
+      const head = dropped.slice(0, 8).map((item) => `${item.id}（${item.reason}）`).join('、')
+      const rest = dropped.length > 8 ? ` 等共 ${dropped.length} 条` : ''
+      console.warn(`[context-lib] index.json 加载时丢弃了 ${dropped.length} 条不符合规则的条目：${head}${rest}`)
     }
     return {
       index: { version: INDEX_VERSION, updatedAt: parsed.updatedAt ?? null, entries },
       repaired,
+      dropped,
     }
+  }
+
+  /**
+   * linked 条目的 path 必须落在某个已注册来源目录之内。
+   * 返回 null 表示合法，否则返回可诊断的原因（用于 warn 与丢弃）。
+   */
+  linkedPathReason(entryPath) {
+    if (typeof entryPath !== 'string' || !entryPath) return 'linked 条目缺少 path'
+    if (!path.isAbsolute(entryPath)) return 'linked path 不是绝对路径'
+    const roots = this.sourceList.map((source) => source?.path).filter(Boolean)
+    if (!roots.length) return '没有任何已注册来源'
+    if (!roots.some((root) => isInsideBase(root, entryPath))) return 'linked path 不在任何已注册来源目录内'
+    return null
   }
 
   async _loadIndex() {
@@ -396,7 +478,11 @@ export class Library {
       text = await fs.readFile(this.indexPath, 'utf8')
       existed = true
     } catch (error) {
-      if (error.code !== 'ENOENT') text = null
+      // A missing file is a first run; any other failure (EACCES, EMFILE,
+      // EISDIR) must be reported. Falling through to an empty index would let
+      // the next write replace a perfectly good index.json with almost nothing.
+      if (error.code !== 'ENOENT') throw error
+      text = null
     }
     if (text !== null) {
       try {
@@ -419,17 +505,27 @@ export class Library {
   }
 
   async _loadSources() {
+    let text
     try {
-      const parsed = JSON.parse(await fs.readFile(this.sourcesPath, 'utf8'))
-      if (!parsed || !Array.isArray(parsed.sources)) throw new Error('sources.json 结构不正确')
-      const normalized = parsed.sources.map((source, index) => normalizeSource(source, index))
-      return { sources: normalized, changed: JSON.stringify(normalized) !== JSON.stringify(parsed.sources) }
+      text = await fs.readFile(this.sourcesPath, 'utf8')
     } catch (error) {
-      if (error.code !== 'ENOENT') {
-        await fs.rename(this.sourcesPath, `${this.sourcesPath}.corrupt-${Date.now()}`).catch(() => {})
-      }
+      if (error.code === 'ENOENT') return { sources: defaultSources(), changed: true }
+      // EACCES/EMFILE/etc.: do not rename or replace the file we merely failed
+      // to read — the next save would persist defaults over the user's sources.
+      throw error
+    }
+    let parsed
+    try {
+      parsed = JSON.parse(text)
+      if (!parsed || !Array.isArray(parsed.sources)) throw new Error('sources.json 结构不正确')
+    } catch {
+      // The bytes are corrupt rather than unreadable: keep them beside the new
+      // file for inspection, then start from the defaults.
+      await fs.rename(this.sourcesPath, `${this.sourcesPath}.corrupt-${Date.now()}`).catch(() => {})
       return { sources: defaultSources(), changed: true }
     }
+    const normalized = parsed.sources.map((source, index) => normalizeSource(source, index))
+    return { sources: normalized, changed: JSON.stringify(normalized) !== JSON.stringify(parsed.sources) }
   }
 
   async _writeFileAtomic(file, content) {
@@ -466,6 +562,10 @@ export class Library {
    */
   async _syncFromDisk() {
     if (!this.index) return
+    // init() 负责第一次加载。未初始化时先不要在这里重载：那时 sourceList 还是
+    // 空表，linked 条目的来源校验会把扫描来的记录误判成越界（虽然 init 随后
+    // 会重载纠正，但会刷一条误导性的 warn）。
+    if (!this._initialized) return
     const indexStamp = await this._stampOf(this.indexPath)
     const sourcesStamp = await this._stampOf(this.sourcesPath)
     if (indexStamp !== this._diskStamps.index) {
@@ -675,9 +775,16 @@ export class Library {
   }
 
   _contentFile(entry) {
-    if (entry.storage === 'note') return path.join(this.notesDir, `${entry.id}.md`)
-    if (entry.storage === 'linked') return entry.path || null
-    if (entry.storage === 'blob' && entry.blob) return path.join(this.blobsDir, entry.blob)
+    // The id in an index file is untrusted input: only ids shaped like the ones
+    // this store mints may name a file under notes/.
+    if (entry.storage === 'note') {
+      return isSafeEntryId(entry.id) ? path.join(this.notesDir, `${entry.id}.md`) : null
+    }
+    // Defense in depth: _parseIndex already drops linked entries outside the
+    // registered sources, but a caller could hand this a hand-built entry.
+    if (entry.storage === 'linked') return this.linkedPathReason(entry.path) === null ? entry.path : null
+    // Blob paths are documented as nested (`ab/cd/<sha>`) but must stay under blobs/.
+    if (entry.storage === 'blob' && entry.blob) return resolveInside(this.blobsDir, entry.blob)
     return null
   }
 
@@ -831,10 +938,10 @@ export class Library {
     await this._syncFromDisk()
       const entry = this.index.entries[id]
       if (!entry) throw new LibraryError(`条目 ${id} 不存在。`, { code: 'item-not-found' })
-      if (entry.storage === 'note') {
-        await fs.rm(path.join(this.notesDir, `${entry.id}.md`), { force: true })
-      } else if (entry.storage === 'blob' && entry.blob) {
-        await fs.rm(path.join(this.blobsDir, entry.blob), { force: true })
+      if (entry.storage === 'note' || entry.storage === 'blob') {
+        const file = this._contentFile(entry)
+        // null = a tampered/unsafe id or blob path: never rm outside the store.
+        if (file) await fs.rm(file, { force: true })
       }
       // linked：只删索引，绝不删除用户原文件。
       delete this.index.entries[id]
@@ -1040,6 +1147,7 @@ export class Library {
         aggregate.errors.push(...result.errors)
       }
       aggregate.errors = aggregate.errors.slice(0, 20)
+      aggregate.incomplete = results.some((result) => result.incomplete === true)
       aggregate.durationMs = Date.now() - startedAt
       return aggregate
     } finally {
@@ -1070,17 +1178,36 @@ export class Library {
 
     const walked = await walkFiles(source, {
       maxDepth: source.depth,
-      maxFiles: MAX_FILES,
+      maxFiles: this.maxFiles,
       hidden: source.hidden,
       include: source.include,
       exclude: source.exclude,
     })
     result.skipped += walked.skipped
-    if (walked.truncated) {
-      result.skipped += 1
+    const walkedErrors = Array.isArray(walked.errors) ? walked.errors : []
+    for (const error of walkedErrors) {
+      if (result.errors.length >= 20) break
+      result.errors.push(error)
+    }
+    // A directory that could not be read is not evidence that its files were
+    // deleted. Skip this run's removal pass so a transient EACCES/EMFILE can't
+    // silently drop (and later re-add without user tags) a whole subtree.
+    // Truncation is the same kind of 「没走完」: files past the cap were never
+    // seen, so they must not be reconciled away either.
+    const incomplete = walkedErrors.length > 0 || walked.truncated === true
+    if (walkedErrors.length > 0) {
+      result.incomplete = true
       result.errors.push({
         path: source.path,
-        message: `达到单次扫描文件上限 ${MAX_FILES}，其余文件本次跳过。`,
+        message: '部分目录读取失败，本次未执行删除对账（避免把暂时读不到的文件当成已删除）。',
+      })
+    }
+    if (walked.truncated) {
+      result.skipped += 1
+      result.incomplete = true
+      result.errors.push({
+        path: source.path,
+        message: `达到单次扫描文件上限 ${this.maxFiles}，其余文件本次跳过；本次未执行删除对账。`,
       })
     }
 
@@ -1197,6 +1324,7 @@ export class Library {
     }
 
     for (const [filePath, entry] of existingByPath) {
+      if (incomplete) break // see above: keep entries this run could not verify
       if (seen.has(filePath)) continue
       delete this.index.entries[entry.id]
       result.removed += 1

@@ -251,6 +251,23 @@ test('dispatch new creates a Session and sends the first instruction', async () 
   assert.equal(prompts[0].sessionId, 's-new')
 })
 
+test('dispatch rejects a prompt or cancel without a target as 400, not 500', async () => {
+  const { routes, prompts } = makeContext()
+  const prompt = await call(routeFor(routes, 'dispatch'), {
+    method: 'POST',
+    body: { action: 'prompt', text: '继续说' },
+  })
+  assert.equal(prompt.status, 400)
+  assert.equal(prompt.json.code, 'invalid')
+  const cancel = await call(routeFor(routes, 'dispatch'), {
+    method: 'POST',
+    body: { action: 'cancel' },
+  })
+  assert.equal(cancel.status, 400)
+  assert.equal(cancel.json.code, 'invalid')
+  assert.equal(prompts.length, 0)
+})
+
 test('dispatch rejects an unknown action', async () => {
   const { routes } = makeContext()
   const result = await call(routeFor(routes, 'dispatch'), { method: 'POST', body: { action: 'explode' } })

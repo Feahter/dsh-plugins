@@ -1,7 +1,7 @@
 {
   "name": "dsh-voice-control",
   "description": "Global voice control for DSH: hold a key, speak, and the utterance is routed to the right Session",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "index.js",
@@ -29,5 +29,25 @@
   "scripts": {
     "test": "node --test \"test/*.test.mjs\"",
     "check": "node --check index.js && node --check host/router.js && node --check host/http.js && node --check host/tts.js && node --check host/sessions.js"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/voice-control"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "voice",
+    "hotkey",
+    "speech",
+    "tts",
+    "session-routing",
+    "中文"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
   }
 }

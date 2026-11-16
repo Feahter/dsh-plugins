@@ -79,22 +79,52 @@ export class Store {
    * @param {object} state - 已经通过 validateState 的状态。
    */
   write(state) {
-    const run = async () => {
-      const payload = JSON.stringify(state, null, 1)
-      const bytes = Buffer.byteLength(payload)
-      if (bytes > MAX_STATE_BYTES) {
-        const error = new Error(`状态太大（${(bytes / 1024 / 1024).toFixed(1)}MB），拒绝保存`)
-        error.status = 413
+    return this.#enqueue(() => this.#writeNow(state))
+  }
+
+  /**
+   * 串行化「读最新状态 → 修改 → 写回」，用于 mind_canvas_add 这类读改写。
+   * 只把写入排进队列不够：两个 add 都先读到同一份旧状态，后写的会把先写的更新吞掉。
+   * mutator 返回 undefined/null 表示没有变化，不写盘。
+   * @param {(current: object|null) => (object|undefined|null|Promise<object|undefined|null>)} mutator
+   */
+  update(mutator) {
+    if (typeof mutator !== 'function') throw new TypeError('update 需要 mutator 函数')
+    return this.#enqueue(async () => {
+      const current = await this.read()
+      const next = await mutator(current)
+      if (next === undefined || next === null) return { state: current, written: false }
+      const problem = validateState(next)
+      if (problem) {
+        const error = new Error(`拒绝写入：${problem}`)
+        error.code = 'invalid-state'
+        error.status = 400
         throw error
       }
-      await this.ensureDir()
-      const tmp = join(this.root, `.state-${randomUUID()}.tmp`)
-      await writeFile(tmp, payload, 'utf8')
-      await rename(tmp, this.file)
-      this.lastGood = state
-      return { bytes, savedAt: new Date().toISOString() }
+      const result = await this.#writeNow(next)
+      return { state: next, written: true, ...result }
+    })
+  }
+
+  #enqueue(run) {
+    const next = this.queue.then(run, run)
+    this.queue = next.then(() => {}, () => {})
+    return next
+  }
+
+  async #writeNow(state) {
+    const payload = JSON.stringify(state, null, 1)
+    const bytes = Buffer.byteLength(payload)
+    if (bytes > MAX_STATE_BYTES) {
+      const error = new Error(`状态太大（${(bytes / 1024 / 1024).toFixed(1)}MB），拒绝保存`)
+      error.status = 413
+      throw error
     }
-    this.queue = this.queue.then(run, run)
-    return this.queue
+    await this.ensureDir()
+    const tmp = join(this.root, `.state-${randomUUID()}.tmp`)
+    await writeFile(tmp, payload, 'utf8')
+    await rename(tmp, this.file)
+    this.lastGood = state
+    return { bytes, savedAt: new Date().toISOString() }
   }
 }

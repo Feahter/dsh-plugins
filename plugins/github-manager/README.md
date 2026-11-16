@@ -27,15 +27,17 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 Host 进程按以下顺序解析凭据，token 从不进入浏览器：
 
-1. **`gh` CLI 登录（推荐，零配置）**：插件执行 `gh auth token --hostname github.com`，
+1. **环境变量 `GH_TOKEN` / `GITHUB_TOKEN`**（优先 `GH_TOKEN`，显式设置时优先级最高）：适用于没有 gh CLI 的环境，
+   但改完环境变量需要重启 DeepSeek Harness。
+2. **`gh` CLI 登录（推荐，零配置）**：环境变量不存在时，插件执行 `gh auth token --hostname github.com`，
    复用本机已有的 `gh auth login`（包括 macOS keyring 中的账号）。登录后无需重启，
    在面板里点“重试”即可；切换账号后下一次请求会自动重新解析。
-2. **环境变量 `GH_TOKEN` / `GITHUB_TOKEN`**（优先 `GH_TOKEN`）：适用于没有 gh CLI 的环境，
-   但改完环境变量需要重启 DeepSeek Harness。
+3. **`~/.config/gh/hosts.yml`**：gh CLI 不可用时直接读该文件里 `github.com` 的 `oauth_token`；
+   其他 host（例如 GitHub Enterprise）的 token 不会被用到 api.github.com。
 
 ```bash
-gh auth login                 # 方式一：复用已有 GitHub 登录
-export GH_TOKEN=<your-token>  # 方式二：环境变量（需重启）
+export GH_TOKEN=<your-token>  # 方式一：环境变量（需重启，优先级最高）
+gh auth login                 # 方式二：复用已有 GitHub 登录
 ```
 
 Windows 上插件会依次探测 `gh.exe`（PATH、`%ProgramFiles%\GitHub CLI`、`%LOCALAPPDATA%\GitHub CLI`），

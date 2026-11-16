@@ -132,6 +132,8 @@ function makeAudioContext() {
 const calls = [];
 let turnPlan = { say: ['收到。', '我去清一下日志。'], task: null, kind: 'chat', reply: '收到。我去清一下日志。' };
 let eventPlan = { events: [], cursor: 0 };
+let eventDelayMs = 0;
+let turnDelayMs = 0;
 let speakCounter = 0;
 
 async function fakeFetch(url, init = {}) {
@@ -154,9 +156,11 @@ async function fakeFetch(url, init = {}) {
     });
   }
   if (String(url).includes('/turn')) {
+    if (turnDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, turnDelayMs));
     return respond({ ok: true, ...turnPlan });
   }
   if (String(url).includes('/events')) {
+    if (eventDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, eventDelayMs));
     return respond({ ok: true, ...eventPlan });
   }
   if (String(url).includes('/transcribe')) {
@@ -205,11 +209,12 @@ globalThis.document = {
 const fakeNavigator = {
   userAgent: 'node-harness',
   mediaDevices: {
-    getUserMedia: async () => {
-      getUserMediaCalls += 1;
-      return { getAudioTracks: () => tracks, getTracks: () => tracks };
-    },
+    getUserMedia: (options) => getUserMediaImpl(options),
   },
+};
+let getUserMediaImpl = async () => {
+  getUserMediaCalls += 1;
+  return { getAudioTracks: () => tracks, getTracks: () => tracks };
 };
 Object.defineProperty(globalThis, 'navigator', { value: fakeNavigator, configurable: true, writable: true });
 const navigator = fakeNavigator;
@@ -297,6 +302,25 @@ check('/turn carries the recognised text', !!turnCall && /日志/.test(turnCall.
 const replySpeaks = calls.filter((c) => c.url.endsWith('/speak') && /收到|清一下/.test(c.body.text));
 check('reply sentences synthesised', replySpeaks.length === 2, replySpeaks.map((c) => c.body.text).concat(calls.map((c) => c.url + ':' + (c.body && c.body.text))));
 
+group('conversation memory');
+const turnCallsBeforeSecond = calls.filter((c) => c.url.endsWith('/turn')).length;
+feedSpeech(900, 0.3);
+feedSpeech(900, 0.001);
+await new Promise((r) => setTimeout(r, 700));
+const turnCalls = calls.filter((c) => c.url.endsWith('/turn'));
+check('a second utterance opens a second turn', turnCalls.length === turnCallsBeforeSecond + 1, turnCalls.length);
+const history = turnCalls.length > 0 ? turnCalls[turnCalls.length - 1].body.history : undefined;
+check(
+  'history uses the protocol `content` field (not `text`)',
+  Array.isArray(history) && history.length === 2 && history.every((entry) => typeof entry.content === 'string' && entry.content !== ''),
+  history,
+);
+check(
+  'history carries the previous exchange',
+  Array.isArray(history) && history[0]?.role === 'user' && /日志/.test(history[0]?.content || '') && history[1]?.role === 'assistant',
+  history,
+);
+
 group('proactive event');
 eventPlan = {
   events: [{ id: 7, type: 'task-done', text: '老板，日志清完了。', summary: 'ok' }],
@@ -304,6 +328,24 @@ eventPlan = {
 };
 await new Promise((r) => setTimeout(r, 1800));
 check('event spoken on poll', calls.some((c) => c.url.endsWith('/speak') && c.body.text === '老板，日志清完了。'));
+
+group('event polling is single-flight');
+eventPlan = {
+  events: [{ id: 9, type: 'task-done', text: '老板，第二个任务完了。', summary: 'ok' }],
+  cursor: 9,
+};
+eventDelayMs = 400;
+const pollCallsBefore = calls.filter((c) => c.url.includes('/events')).length;
+const doublePoll = [plugin.__test.pollEvents(), plugin.__test.pollEvents()];
+await Promise.all(doublePoll);
+const pollCalls = calls.filter((c) => c.url.includes('/events')).length - pollCallsBefore;
+check('concurrent polls collapse into one request', pollCalls === 1, pollCalls);
+const secondEventSpeaks = calls.filter(
+  (c) => c.url.endsWith('/speak') && c.body.text === '老板，第二个任务完了。',
+).length;
+check('the event is announced exactly once', secondEventSpeaks === 1, secondEventSpeaks);
+eventDelayMs = 0;
+eventPlan = { events: [], cursor: 9 };
 
 // ------------------------------------------------------- helpers for tree walks
 function walk(node, visit) {
@@ -358,6 +400,12 @@ check(
   calls.filter((c) => c.url.endsWith('/turn')).length === turnsBefore,
   calls.filter((c) => c.url.endsWith('/turn')).length,
 );
+const dictationBubble = findAll(body, (n) => hasClass(n, 'vc-bubble'))[0] || stub;
+check(
+  'a failed dictation insert keeps its error visible',
+  /输入框不可用/.test(dictationBubble.textContent),
+  dictationBubble.textContent,
+);
 modeButton().dispatch('click');
 check('clicking again returns to 对话', modeButton().textContent === '对话');
 
@@ -394,6 +442,39 @@ byClass('vc-reset').dispatch('click');
 check('reset restores defaults', window.__dshVoiceCompanion.voice().speed === 1 && Object.keys(window.__dshVoiceCompanion.voice().map).length === 0, window.__dshVoiceCompanion.voice());
 gear.dispatch('click');
 check('gear closes the drawer again', sheet.getAttribute('data-open') === '0', sheet.getAttribute('data-open'));
+
+group('hangup during an in-flight turn');
+turnDelayMs = 300;
+const callsBeforeHangup = calls.length;
+feedSpeech(900, 0.3);
+feedSpeech(900, 0.001);
+await new Promise((r) => setTimeout(r, 220));
+window.__dshVoiceCompanion.stop();
+await new Promise((r) => setTimeout(r, 500));
+const staleReplySpeaks = calls
+  .slice(callsBeforeHangup)
+  .filter((c) => c.url.endsWith('/speak') && /收到|清一下/.test(c.body.text || ''));
+check('a reply that resolves after hangup is not spoken', staleReplySpeaks.length === 0, staleReplySpeaks.map((c) => c.body.text));
+check('the engine stays idle after the late reply', window.__dshVoiceCompanion.status().phase === 'idle', window.__dshVoiceCompanion.status());
+turnDelayMs = 0;
+
+group('microphone race: stop during the permission prompt');
+window.__dshVoiceCompanion.stop();
+await new Promise((r) => setTimeout(r, 80));
+const racedTracks = [{ stopped: false, addEventListener() {}, stop() { this.stopped = true; } }];
+let releaseMedia = null;
+getUserMediaImpl = () => new Promise((resolve) => {
+  releaseMedia = () => resolve({ getAudioTracks: () => racedTracks, getTracks: () => racedTracks });
+});
+const cancelledStart = window.__dshVoiceCompanion.start();
+await new Promise((r) => setTimeout(r, 30));
+window.__dshVoiceCompanion.stop();
+releaseMedia();
+await cancelledStart;
+await new Promise((r) => setTimeout(r, 80));
+check('a start cancelled during the permission prompt drops the stream', racedTracks[0].stopped === true);
+check('the cancelled start leaves the call inactive', window.__dshVoiceCompanion.status().active === false);
+check('the cancelled start leaves the engine idle', window.__dshVoiceCompanion.status().phase === 'idle');
 
 group('teardown');
 window.__dshVoiceCompanion.stop();

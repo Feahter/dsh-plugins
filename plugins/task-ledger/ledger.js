@@ -562,8 +562,15 @@ export async function resumeTask(root, taskId, { sessionId = null, label = '', l
   const snapshot = await withTaskLock(dir, async () => {
     const task = await readTask(root, taskId);
     const lease = task.state.lease;
+    // A live lease is a hard stop unless the caller proves it is the same
+    // session. An unbound session (null/empty id) proves no identity at all, so
+    // it must not be able to take a live lease over: that would let a second
+    // writer fork one task onto two runs exactly as the single-writer rule
+    // forbids. Renewal by the same identified session stays allowed.
+    const sameSession =
+      typeof sessionId === 'string' && sessionId !== '' && lease && lease.session_id === sessionId;
     const heldElsewhere =
-      lease && !leaseIsExpired(lease) && lease.run_id && lease.run_id !== runId && lease.session_id !== sessionId;
+      Boolean(lease) && !leaseIsExpired(lease) && Boolean(lease.run_id) && lease.run_id !== runId && !sameSession;
     if (heldElsewhere) {
       throw new LedgerError(
         `Task ${taskId} is leased by ${lease.session_id || lease.run_id} until ${lease.expires_at}.`,
@@ -574,6 +581,7 @@ export async function resumeTask(root, taskId, { sessionId = null, label = '', l
         },
       );
     }
+    const previousState = structuredClone(task.state);
     const at = nowIso();
     task.state.lease = {
       run_id: runId,
@@ -586,11 +594,21 @@ export async function resumeTask(root, taskId, { sessionId = null, label = '', l
     task.state.updated_at = at;
     task.state.last_run_id = runId;
     await atomicWriteJson(path.join(dir, 'state.json'), task.state);
+    // Bind inside the same lock as the lease write: if it fails, the caller
+    // would otherwise hold a lease it cannot renew (no bound session) and wait
+    // out the whole leaseTtlSeconds. Roll the lease write back before rethrowing.
+    if (bind) {
+      try {
+        await setActiveTaskId(root, taskId, { sessionId });
+      } catch (error) {
+        await atomicWriteJson(path.join(dir, 'state.json'), previousState).catch(() => {});
+        throw error;
+      }
+    }
     return { ...task, run_id: runId };
   });
 
   if (bind) {
-    await setActiveTaskId(root, taskId, { sessionId });
     await appendJsonl(path.join(dir, 'runs', 'index.jsonl'), {
       run_id: runId,
       task_id: taskId,

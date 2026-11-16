@@ -1,7 +1,7 @@
 {
   "name": "dsh-realtime-voice",
   "description": "Continuous realtime dictation for the composer, powered by the local SenseVoice recognizer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "main": "index.js",
@@ -39,5 +39,26 @@
     "test": "node test/harness.mjs && node --test test/host-refine.test.mjs",
     "test:client": "node test/harness.mjs",
     "test:host": "node --test test/host-refine.test.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/realtime-voice"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "voice",
+    "speech-to-text",
+    "dictation",
+    "polish",
+    "translation",
+    "sensevoice",
+    "中文"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
   }
 }

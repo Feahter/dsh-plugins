@@ -234,12 +234,25 @@ export function sharedOverlapTerms(a, b) {
 export function findSections(body) {
   const lines = String(body || '').split('\n');
   const sections = [];
-  let fence = false;
+  // Fence state is the opening marker's char + length: a ```` fence may contain
+  // ``` lines, and only a marker of the same char with at least the same length
+  // (and nothing but whitespace after it) closes the block. Tracking a boolean
+  // here read `## ` headings inside code as real sections.
+  let fence = null;
   let current = null;
   let h1 = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const marker = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (marker) {
+      const token = marker[1];
+      if (fence === null) {
+        fence = { char: token[0], length: token.length };
+      } else if (token[0] === fence.char && token.length >= fence.length && marker[2].trim() === '') {
+        fence = null;
+      }
+      continue;
+    }
     if (fence) continue;
     const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (!heading) continue;

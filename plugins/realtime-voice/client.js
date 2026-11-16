@@ -811,6 +811,17 @@ window.__ModuleLoader__.load({
 
       function reportError(message) {
         store.set({ phase: 'error', error: message, partial: '', level: 0, busyText: '', segmentActive: false });
+        // An error ends the capture. Leaving `running` true kept the microphone
+        // open while both the processing loop (phase gate) and toggle() (it saw
+        // alreadyRunning) ignored it, so the user could neither resume nor stop
+        // dictation without reloading the page.
+        if (!running) return;
+        running = false;
+        if (callController) {
+          try { callController.abort(); } catch (_abortError) {}
+          callController = null;
+        }
+        void release();
       }
 
       function playEarcon(kind) {
@@ -1011,8 +1022,10 @@ window.__ModuleLoader__.load({
           const result = await withTimeout(transcribe(samples), 20000, 'speech transcribe');
           if (run !== generation) return;
           if (!result || result.ok !== true) {
-            const message = result && result.error ? result.error.message : 'unknown';
-            reportError(translate('failed', { message }));
+            // A failed preview is not a failed dictation: the final decode for
+            // the segment retries, and reporting here used to kill the session
+            // (error phase, microphone still running) over one slow decode.
+            debugNote('partial:error', result && result.error ? result.error.message : 'unknown');
             return;
           }
           const text = (result.value && result.value.text ? result.value.text : '').trim();
@@ -1020,7 +1033,7 @@ window.__ModuleLoader__.load({
           const preview = settings.polish && lastPartial ? polish(lastPartial, settings).text : lastPartial;
           store.set({ partial: truncated && preview ? '…' + preview : preview });
         } catch (error) {
-          if (run === generation) reportError(translate('failed', { message: (error && error.message) || String(error) }));
+          if (run === generation) debugNote('partial:error', (error && error.message) || String(error));
         } finally {
           if (run === generation) inFlight = false;
         }
@@ -1128,8 +1141,11 @@ window.__ModuleLoader__.load({
         store.set({ phase: 'starting', error: '', partial: '', pending: '', level: 0, warning: '', lastInserted: '', translated: false, waiting: false });
         try {
           const ready = await ensureModel();
-          if (!ready.ok) { reportError(ready.message); return { ok: false, message: ready.message }; }
+          // The user can stop while the model is still preparing (the loop
+          // polls for up to 60 s). That is a cancel, not a model failure, so it
+          // must not paint a red error over the idle state stop() just set.
           if (!running) return { ok: false, message: 'cancelled' };
+          if (!ready.ok) { reportError(ready.message); return { ok: false, message: ready.message }; }
           callController = new AbortController();
           const settings = settingsStore().get();
           const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };

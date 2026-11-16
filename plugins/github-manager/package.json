@@ -1,6 +1,6 @@
 {
   "name": "dsh-github-manager",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "GitHub project manager for the DeepSeek Harness: a sidebar panel for repositories, branches, issues and pull requests, plus github_* agent tools.",
   "license": "MIT",
   "author": "Feahter",
@@ -37,10 +37,16 @@
     "icon.svg",
     "README.md",
     ".verify-host.mjs",
-    ".verify-client.mjs"
+    ".verify-client.mjs",
+    "test"
   ],
+  "scripts": {
+    "test": "node .verify-host.mjs && node .verify-client.mjs && node --test test/*.test.mjs",
+    "verify": "node .verify-host.mjs && node .verify-client.mjs"
+  },
   "engines": {
-    "dsh": ">=0.2.1-rc.4"
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
   },
   "dsh": {
     "bundle": {

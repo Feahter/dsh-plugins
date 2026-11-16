@@ -16,7 +16,7 @@ root/
   scan.lock           扫描互斥锁（内容 {pid, startedAt}），>10 分钟视为陈旧
 ```
 
-原子写：写 `*.tmp-<rand>` → fsync → rename 覆盖；JSON 用 2 空格缩进。并发写用进程内 promise 队列串行化（`withLock`）。
+原子写：写 `*.tmp-<rand>` → fsync → rename 覆盖；JSON 用 2 空格缩进。并发写用进程内 promise 队列串行化（`Library._run`）。索引读失败（ENOENT 以外的 EACCES/EMFILE 等）会直接报错，不会退化成空索引再覆盖原文件。
 
 ## 2. 条目 entry（index.json 的值，也是 `get()` / `items` 的返回单元）
 
@@ -106,6 +106,8 @@ export async function createLibrary(root, options = {})  // -> Library；options
 - 标签：frontmatter `tags:`（数组或逗号分隔）。
 - `links`：正文里所有 `[[target]]` 的 target。
 - 增量：同 `path` 且 `size`+`mtimeMs` 未变 → `unchanged` 且保留原 id；变了且 sha256 变 → 更新并 `updated`；源内已不存在的 path → 从索引移除（`removed`，不进回收站）。
+- 目录读不动（EACCES/EMFILE 等，不是 ENOENT/ENOTDIR）或本次撞到 4000 文件上限：记入 `scan().errors`（`incomplete:true`），并且**本次跳过删除对账**——读不到/没扫完不等于已删除，不能因此丢掉索引项与手工标签。
+- `index.json` 里 `id` 不符合 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` 的条目不加载；`blob` 路径必须解析在 `blobs/` 内；`linked` 条目的 `path` 必须是绝对路径且落在某个已注册来源目录之内，否则加载时丢弃并 warn。文件读写只落在 `notes/<id>.md`、`blobs/<blob>` 与已注册来源目录之内，越界路径一律拒绝。
 - 扫描互斥：`scan.lock` 存在且 <10 分钟 → 抛 `library-busy`；结束（含异常）必须删除锁。
 - 不修改用户原文件，不做引用计数删除。
 

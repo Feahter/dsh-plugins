@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-2f9e44.svg)](./LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DSH-0.2.1--rc.4%2B-4c6ef5.svg)](https://github.com/deepseek-ai/deepseek-harness)
-[![Plugins](https://img.shields.io/badge/plugins-10-7048e8.svg)](#插件目录)
+[![Plugins](https://img.shields.io/badge/plugins-11-7048e8.svg)](#插件目录)
 [![Topic](https://img.shields.io/badge/topic-dsh--plugin-1c7ed6.svg)](https://github.com/topics/dsh-plugin)
 
 [English](README.md) · **简体中文**

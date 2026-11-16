@@ -98,7 +98,9 @@ function outlineChapterTotal(outline, params = {}) {
 function chapterIdWidth(keys = [], total = 0) {
   let width = Math.max(2, String(Math.max(0, Math.floor(Number(total) || 0))).length)
   for (const key of keys) {
-    const matched = String(key ?? '').match(/^draft\/ch(\d+)$/)
+    // 任何章节级产物都能决定补零宽度：先写细纲（beats/ch005）但还没草稿时，
+    // novel_read chapter=5 也必须解析成 ch005，而不是退回两位的 ch05。
+    const matched = String(key ?? '').match(/^(?:beats|draft|review|summary)\/ch(\d+)$/)
     if (matched) width = Math.max(width, matched[1].length)
   }
   return width

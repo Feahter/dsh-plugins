@@ -128,6 +128,25 @@ export function findDoc(state, docId) {
   return state.docs.find(doc => doc.id === docId) ?? null
 }
 
+/**
+ * 首屏选哪份状态。
+ * 宿主 state 缺失（首次安装、路由刚注册）而浏览器本地还留着上一段离线编辑时，
+ * 直接用宿主会得到一张空图，本地那份既看不见、下次保存还会被覆盖。
+ * 宿主没有任何节点才恢复本地；两边都有内容时仍以宿主为准。
+ * @param {unknown} hostRaw GET /mind-canvas/state 的 state（可能为 null）
+ * @param {unknown} localRaw localStorage 里的快照（可能为 null）
+ */
+export function pickInitialState(hostRaw, localRaw) {
+  const host = normalizeState(hostRaw)
+  const local = localRaw == null ? null : normalizeState(localRaw)
+  const hostHasNodes = host.docs.some(doc => doc.nodes.length > 0)
+  const localHasNodes = Boolean(local?.docs.some(doc => doc.nodes.length > 0))
+  if (!hostHasNodes && localHasNodes) {
+    return { state: local, source: 'local', recovered: true }
+  }
+  return { state: host, source: 'host', recovered: false }
+}
+
 export function childIds(doc, id) {
   return doc.nodes.filter(node => node.parentId === id).map(node => node.id)
 }
@@ -311,7 +330,7 @@ export function bounds(doc) {
 }
 
 /**
- * Markdown 大纲只有一份实现，就在 export.js（界面导出、宿主工具、测试共用同一份）。
+ * Markdown 大纲只有一份实现，就在 src/export.js（界面导出、宿主工具、测试共用同一份）。
  * 这里保留旧名字，避免调用点散落两套格式。
  */
 export { toMarkdown as toOutline } from './export.js'

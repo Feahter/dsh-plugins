@@ -698,3 +698,167 @@ test('磁盘被外部进程改写后，本实例在下次操作前自动重载',
   assert.ok(await lib.get(second.id), '外部条目应可读')
   assert.ok(await lib.get(first.id), '自己写过的条目仍在')
 })
+
+test('索引里越界的 id 不会让 purge 删掉 notes/ 之外的文件', async (t) => {
+  const { base, root } = await makeLibrary(t)
+  const victim = await put(base, 'victim.md', 'do not delete\n')
+  const lib = await createLibrary(root)
+  await lib.init()
+  await lib.create({ title: 'seed', content: 'keeps the index file on disk' })
+  const indexPath = path.join(root, 'index.json')
+  const index = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+  index.entries['../../victim'] = {
+    id: '../../victim', title: 'tampered', kind: 'note', ext: 'md', mime: 'text/markdown',
+    collection: 'inbox', tags: [], sourceId: null, storage: 'note', path: null, blob: null,
+    size: 1, mtimeMs: 1, sha256: null, status: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    trashedAt: null, preview: '', lines: 1, links: [], meta: {}, notes: '',
+  }
+  index.entries['cl_aaaaaaaaaaaa'] = { ...index.entries['../../victim'], id: '../../victim2' }
+  await fs.writeFile(indexPath, JSON.stringify(index))
+
+  const reloaded = await createLibrary(root)
+  await reloaded.init()
+  assert.equal(await reloaded.get('../../victim'), null, '越界 id 的条目不应被加载')
+  assert.equal(await reloaded.get('cl_aaaaaaaaaaaa'), null, 'key 与 id 不一致的条目不应被加载')
+  await assert.rejects(reloaded.purge('../../victim'), expectCode('item-not-found'))
+  assert.ok(await fs.stat(victim).then(() => true), 'notes/ 之外的文件必须还在')
+
+  // F3：被篡改的 blob 条目必须走真实 purge 路径；只断言 _contentFile 为 null
+  // 是恒真的（没调用 purge），证明不了「库外文件不会被删」。
+  const blobVictim = await put(root, 'blobs/../../blob-victim.txt', 'keep\n')
+  const blobIndexPath = path.join(root, 'index.json')
+  const blobIndex = JSON.parse(await fs.readFile(blobIndexPath, 'utf8'))
+  const blobRaw = {
+    id: 'cl_bbbbbbbbbbbb', title: 'tampered blob', kind: 'doc', ext: 'txt', mime: 'text/plain',
+    collection: 'inbox', tags: [], sourceId: null, storage: 'blob', path: null, blob: '../../blob-victim.txt',
+    size: 5, mtimeMs: 1, sha256: null, status: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    trashedAt: null, preview: '', lines: 1, links: [], meta: {}, notes: '',
+  }
+  blobIndex.entries[blobRaw.id] = blobRaw
+  await fs.writeFile(blobIndexPath, JSON.stringify(blobIndex))
+
+  const purged = await createLibrary(root)
+  await purged.init()
+  assert.ok(await purged.get(blobRaw.id), 'blob 条目本身会被加载（路径到读取/删除时才校验）')
+  assert.equal(purged._contentFile(blobRaw), null, '越界 blob 路径解析不出文件')
+  await purged.purge(blobRaw.id)
+  assert.ok(await fs.stat(blobVictim).then(() => true), '库外文件必须还在')
+  assert.equal(await purged.get(blobRaw.id), null, '索引条目必须被移除')
+})
+
+test('索引里 linked 条目的越界 path 不会读到来源之外的文件', async (t) => {
+  const { base, lib } = await makeLibrary(t)
+  await pruneDefaultSources(lib)
+  const src = path.join(lib.root, '..', 'linked-src')
+  const outside = await put(base, 'secrets/outside.txt', 'TOP-SECRET\n')
+  await put(src, 'inside.md', '# inside\n')
+  const source = await lib.addSource({ name: 'linked-src', path: src })
+  assert.equal((await scanOnce(lib, source.id)).added, 1)
+
+  const indexPath = path.join(lib.root, 'index.json')
+  const index = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+  const legitId = Object.keys(index.entries)[0]
+  const tamperedId = 'cl_00000000dead'
+  index.entries[tamperedId] = {
+    ...index.entries[legitId], id: tamperedId, title: 'tampered', path: outside, sourceId: null,
+  }
+  await fs.writeFile(indexPath, JSON.stringify(index))
+
+  const reloaded = await createLibrary(lib.root)
+  await reloaded.init()
+  assert.equal(await reloaded.get(tamperedId), null, '来源之外的 linked 条目必须被丢弃')
+  await assert.rejects(reloaded.readText(tamperedId), expectCode('item-not-found'))
+  assert.equal(
+    reloaded._contentFile({ storage: 'linked', id: 'cl_cccccccccccc', path: outside }),
+    null,
+    '读取层的第二道闸也要拦住越界 linked path',
+  )
+  // 正常扫描产出的 linked 条目不能被误杀：仍然在索引里、仍然可读。
+  assert.ok(await reloaded.get(legitId), '扫描产出的 linked 条目必须保留')
+  assert.equal((await reloaded.readText(legitId)).text, '# inside\n')
+  assert.ok(await fs.stat(outside).then(() => true), '来源之外的文件不该被读或删')
+})
+
+test('扫描遇到不可读目录时保留索引项，不把「读不到」当成「已删除」', { skip: typeof process.getuid === 'function' && process.getuid() === 0 }, async (t) => {
+  const { lib } = await makeLibrary(t)
+  await pruneDefaultSources(lib)
+  const src = path.join(lib.root, '..', 'scan-src')
+  await put(src, 'top.md', '# top\n')
+  await put(src, 'locked/inside.md', '# inside\n')
+  const source = await lib.addSource({ name: 'scan-src', path: src })
+  const first = await scanOnce(lib, source.id)
+  assert.equal(first.added, 2)
+
+  const locked = path.join(src, 'locked')
+  await fs.chmod(locked, 0o000)
+  try {
+    const second = await scanOnce(lib, source.id)
+    assert.equal(second.removed, 0, '读不到的子目录不能被当成删除')
+    assert.equal(second.incomplete, true)
+    assert.ok(second.errors.length > 0, '必须把读取失败报出来')
+    const listed = await lib.list({ source: source.id, limit: 50 })
+    assert.equal(listed.total, 2, '两条索引都应保留')
+  } finally {
+    await fs.chmod(locked, 0o755)
+  }
+})
+
+test('扫描被文件上限截断时不做删除对账，已索引文件不会被误删', async (t) => {
+  // 用小上限复现 4000 上限的真实形态（生产语义不变，只是上限可注入）：
+  // 第一次扫描收 a/b/c，看到 d 时截断；第二次扫描 00-first 排最前，把 c 挤出本轮。
+  const { lib } = await makeLibrary(t, { maxFiles: 3 })
+  await pruneDefaultSources(lib)
+  const src = path.join(lib.root, '..', 'trunc-src')
+  for (const name of ['a.md', 'b.md', 'c.md', 'd.md']) await put(src, name, `# ${name}\n`)
+  const source = await lib.addSource({ name: 'trunc-src', path: src })
+  const first = await scanOnce(lib, source.id)
+  assert.equal(first.added, 3)
+
+  await put(src, '00-first.md', '# first\n')
+  const second = await scanOnce(lib, source.id)
+  assert.equal(second.added, 1)
+  assert.equal(second.removed, 0, '截断时没走到的文件不能被当成已删除')
+  assert.equal(second.incomplete, true, '截断必须标成 incomplete')
+  assert.ok(second.errors.some((error) => /上限/.test(error.message)), '要报出截断原因')
+  const listed = await lib.list({ source: source.id, limit: 50 })
+  assert.equal(listed.total, 4, '四条索引都该保留')
+  assert.ok(listed.items.some((item) => item.path === path.join(src, 'c.md')), 'c.md 仍在索引里')
+})
+
+test('index.json 读取失败时报错，而不是用空索引覆盖它', { skip: typeof process.getuid === 'function' && process.getuid() === 0 }, async (t) => {
+  const { root } = await makeLibrary(t)
+  const first = await createLibrary(root)
+  await first.init()
+  const created = await first.create({ title: 'keep me', content: 'survives' })
+  const indexPath = path.join(root, 'index.json')
+  await fs.chmod(indexPath, 0o000)
+  try {
+    const broken = await createLibrary(root)
+    await assert.rejects(broken.init(), (error) => error.code === 'EACCES')
+  } finally {
+    await fs.chmod(indexPath, 0o644)
+  }
+  const reloaded = await createLibrary(root)
+  await reloaded.init()
+  assert.ok(await reloaded.get(created.id), '原条目必须还在')
+})
+
+test('sources.json 读取失败时报错，而不是改名换默认来源', { skip: typeof process.getuid === 'function' && process.getuid() === 0 }, async (t) => {
+  const { lib, root } = await makeLibrary(t)
+  await pruneDefaultSources(lib)
+  const source = await lib.addSource({ name: 'keep', path: root })
+  const sourcesPath = path.join(root, 'sources.json')
+  await fs.chmod(sourcesPath, 0o000)
+  try {
+    const broken = await createLibrary(root)
+    await assert.rejects(broken.init(), (error) => error.code === 'EACCES')
+  } finally {
+    await fs.chmod(sourcesPath, 0o644)
+  }
+  const reloaded = await createLibrary(root)
+  await reloaded.init()
+  const listed = await reloaded.sources()
+  assert.ok(listed.some((item) => item.id === source.id), '原有来源必须还在')
+})

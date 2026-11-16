@@ -325,6 +325,86 @@ await fastToken.stop()
 await fastToken.detach()
 api.settings.patch({ contextMode: 'pair' })
 
+// ------------------------------------------------ failure paths (v0.3.1 fixes)
+// A failed preview decode is transient: the final decode for the same segment
+// retries, so it must not put the engine in `error` (which used to leave the
+// microphone running with no way to restart).
+api.settings.patch({ contextMode: 'off', partialPreview: true })
+{
+  transcripts.push('\u9884\u89c8\u5931\u8d25\u540e\u4ecd\u80fd\u63d2\u5165')
+  speechStub.transcribe = async () => ({ ok: false, error: { code: 'SPEECH_TIMEOUT', message: 'preview boom' } })
+  const probe = []
+  const probeToken = api.attach({
+    id: 'probe', label: 'Probe field',
+    captureInsertion() { return { from: 0, to: 0 } },
+    insertText(text) { probe.push(text); return true },
+    onState() {},
+  })
+  const probeStart = await probeToken.start()
+  ok('probe engine starts', probeStart && probeStart.ok === true, JSON.stringify(probeStart))
+  feedFrames(0.25, 30)
+  await sleep(600)
+  eq('a failed partial preview keeps the engine listening', probeToken.store.get().phase, 'listening')
+  speechStub.transcribe = async () => ({ ok: true, value: { text: transcripts.shift() || '' } })
+  feedFrames(0, 40)
+  await sleep(700)
+  ok('dictation still inserts after a failed preview', probe.length === 1 && /\u9884\u89c8\u5931\u8d25/.test(probe[0] || ''), JSON.stringify(probe))
+  await probeToken.stop()
+  await probeToken.detach()
+}
+
+// A failed final decode is fatal for that capture, but must close the
+// microphone and leave a retry path: phase=error, running=false, toggle works.
+{
+  const errorTracks = []
+  sandbox.navigator.mediaDevices.getUserMedia = async () => {
+    const track = { stopped: false, addEventListener() {}, stop() { this.stopped = true } }
+    errorTracks.push(track)
+    return { getAudioTracks: () => [track], getTracks: () => [track] }
+  }
+  api.settings.patch({ partialPreview: false })
+  speechStub.transcribe = async () => ({ ok: false, error: { code: 'SPEECH_UNAVAILABLE', message: 'asr down' } })
+  const errToken = api.attach({
+    id: 'failing', label: 'Failing field',
+    captureInsertion() { return { from: 0, to: 0 } },
+    insertText() { return true },
+    onState() {},
+  })
+  await errToken.start()
+  feedFrames(0.25, 15)
+  feedFrames(0, 20)
+  await sleep(800)
+  eq('a failed final decode lands in error', errToken.store.get().phase, 'error')
+  ok('a failed final decode releases the microphone', errorTracks.length === 1 && errorTracks[0].stopped === true, JSON.stringify(errorTracks))
+  speechStub.transcribe = async () => ({ ok: true, value: { text: '\u6062\u590d\u540e\u7ee7\u7eed' } })
+  const retry = await errToken.toggle()
+  ok('toggle after an error starts a fresh capture', retry && retry.ok === true, JSON.stringify(retry))
+  eq('the retry is listening', errToken.store.get().phase, 'listening')
+  await errToken.stop()
+  await errToken.detach()
+  api.settings.patch({ partialPreview: true })
+}
+
+// Stopping while the model is still preparing is a cancel, not a failure: the
+// idle state stop() set must not be repainted as an error.
+{
+  speechStub.catalog = async () => ({ ok: true, value: { providers: [{ id: 'p', preparation: { phase: 'preparing' } }], selection: { providerId: 'p' } } })
+  speechStub.prepare = async () => ({ ok: true, value: null })
+  const slowToken = api.attach({
+    id: 'slow', label: 'Slow field',
+    captureInsertion() { return { from: 0, to: 0 } },
+    insertText() { return true },
+    onState() {},
+  })
+  const starting = slowToken.start()
+  await sleep(50)
+  await slowToken.stop()
+  const outcome = await starting
+  ok('stopping during model prep reports cancelled', outcome && outcome.ok === false, JSON.stringify(outcome))
+  eq('stopping during model prep leaves idle, not error', slowToken.store.get().phase, 'idle')
+  await slowToken.detach()
+}
+
 // ------------------------------------------------------------------- report
 if (failures.length > 0) {
   console.error(`\nFAIL ${failures.length}/${checks}`)

@@ -25,6 +25,17 @@ const TOKEN_FAILURE_TTL_MS = 15_000;
 const ENRICH_LIMIT = 8;
 const MAX_TEXT_CHARS = 200000;
 const MAX_FILE_BYTES = 512 * 1024;
+// Every Host-side call gets a bounded budget: without one, a stalled
+// api.github.com leaves the panel route (and the agent tool) waiting forever.
+const REQUEST_TIMEOUT_MS = 20_000;
+// The default budget is mutable so tests can exercise the real default path
+// (no `timeoutMs` passed) without waiting 20s. Production never writes it.
+let defaultTimeoutMs = REQUEST_TIMEOUT_MS;
+
+function setDefaultTimeout(ms) {
+  defaultTimeoutMs = Number.isFinite(ms) && ms > 0 ? ms : REQUEST_TIMEOUT_MS;
+  return defaultTimeoutMs;
+}
 
 class GithubError extends Error {
   constructor(message, { code = 'github-error', status = 0 } = {}) {
@@ -100,14 +111,24 @@ function ghHostsCandidates() {
 
 function pickHostsToken(text) {
   if (typeof text !== 'string' || text === '') return '';
-  // hosts.yml is a top-level mapping keyed by hostname. Split into host blocks
-  // so a token stored for another host can never be picked up for github.com.
-  const blocks = text.split(/\n(?=\S)/);
-  const githubBlock = blocks.find((block) => block.startsWith('github.com:'));
-  const target = githubBlock || text;
-  const match = target.match(/oauth_token:\s*([^\s#]+)/);
-  if (!match) return '';
-  return match[1].trim().replace(/^['"]|['"]$/g, '');
+  // hosts.yml is a top-level mapping keyed by hostname. Walk it line by line and
+  // accept an oauth_token only while the current top-level host is github.com:
+  // a token stored for a GitHub Enterprise host must never be sent to
+  // api.github.com. (The old fallback parsed the whole document when no
+  // github.com block existed, which did exactly that.)
+  let host = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    if (!/^\s/.test(line)) {
+      const key = /^([^:#][^:]*):\s*(?:#.*)?$/.exec(line);
+      host = key ? key[1].trim().replace(/^['"]|['"]$/g, '') : null;
+      continue;
+    }
+    if (host !== 'github.com') continue;
+    const match = /^\s+oauth_token:\s*([^\s#]+)/.exec(line);
+    if (match) return match[1].trim().replace(/^['"]|['"]$/g, '');
+  }
+  return '';
 }
 
 async function readGhHostsToken() {
@@ -180,8 +201,18 @@ async function requireToken(options = {}) {
   return token.value;
 }
 
+function requestSignal(externalSignal, timeoutMs) {
+  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : defaultTimeoutMs;
+  const timeout = AbortSignal.timeout(budget);
+  if (!externalSignal) return timeout;
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([externalSignal, timeout]) : externalSignal;
+}
+
 async function github(pathname, options = {}) {
   const method = options.method || 'GET';
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : defaultTimeoutMs;
   let body;
   const baseHeaders = {
     accept: 'application/vnd.github+json',
@@ -199,10 +230,13 @@ async function github(pathname, options = {}) {
         method,
         headers: { ...baseHeaders, authorization: 'Bearer ' + token },
         body,
-        signal: options.signal,
+        signal: requestSignal(options.signal, timeoutMs),
       });
     } catch (error) {
       if (error && error.name === 'AbortError') throw error;
+      if (error && error.name === 'TimeoutError') {
+        throw new GithubError(`api.github.com did not answer within ${timeoutMs}ms.`, { code: 'timeout' });
+      }
       throw new GithubError(
         'Cannot reach api.github.com: ' + ((error && error.message) || String(error)),
         { code: 'network' },
@@ -1233,4 +1267,4 @@ export function apply(ctx) {
 
 // Test seam: pure helpers used by .verify-host.mjs. Nothing else should rely
 // on these names, so they can change without a plugin-facing migration.
-export const __testing = { ghBinaries, ghHostsCandidates, pickHostsToken };
+export const __testing = { ghBinaries, ghHostsCandidates, pickHostsToken, requestSignal, github, setDefaultTimeout };

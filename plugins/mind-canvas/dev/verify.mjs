@@ -171,17 +171,29 @@ try {
   // 5. 拖拽移动节点（断言落在宿主存储的坐标上，不受相机缩放影响）
   const first = page.locator('.react-flow__node').first()
   const dragId = await first.getAttribute('data-id')
-  // 等防抖把这一轮保存回宿主，再拿基线坐标
-  await page.waitForTimeout(800)
-  const posBefore = saved?.docs?.[0]?.nodes?.find(node => node.id === dragId)
+  const readSavedNode = () => saved?.docs?.[0]?.nodes?.find(node => node.id === dragId) ?? null
+  // 等防抖把这一轮保存回宿主，再拿基线坐标。机器忙时固定 800ms 不够，轮询到出现为止。
+  let posBefore = readSavedNode()
+  for (let attempt = 0; !posBefore && attempt < 50; attempt += 1) {
+    await page.waitForTimeout(100)
+    posBefore = readSavedNode()
+  }
   const before = await first.boundingBox()
   await page.mouse.move(before.x + before.width / 2, before.y + 18)
   await page.mouse.down()
-  await page.mouse.move(before.x + before.width / 2 - 90, before.y + 18 + 70, { steps: 14 })
+  await page.waitForTimeout(60)
+  await page.mouse.move(before.x + before.width / 2 - 90, before.y + 18 + 70, { steps: 20 })
+  await page.waitForTimeout(60)
   await page.mouse.up()
-  await page.waitForTimeout(500)
-  const posAfter = saved?.docs?.[0]?.nodes?.find(node => node.id === dragId)
-  const moved = posBefore && posAfter ? Math.abs(posAfter.x - posBefore.x) + Math.abs(posAfter.y - posBefore.y) : 0
+  // 同样不能只等 500ms：宿主写入是防抖的，负载高时一次保存可能拖到一两秒。
+  let posAfter = readSavedNode()
+  let moved = 0
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    posAfter = readSavedNode()
+    moved = posBefore && posAfter ? Math.abs(posAfter.x - posBefore.x) + Math.abs(posAfter.y - posBefore.y) : 0
+    if (moved > 60) break
+    await page.waitForTimeout(100)
+  }
   check('拖拽能移动节点并写回坐标', moved > 60, `Δ=${Math.round(moved)} (${Math.round(posBefore?.x)},${Math.round(posBefore?.y)} → ${Math.round(posAfter?.x)},${Math.round(posAfter?.y)})`)
 
   // 6. 整理成树：同级不再重叠
@@ -354,6 +366,17 @@ try {
   await page.getByRole('button', { name: '导出' }).click()
   const png = await grab('png')
   check('导出 PNG 图片', png.name.endsWith('.png') && png.size > 4096, `${png.name} / ${png.size} bytes`)
+
+  // 18. 空态点提交按钮（不是回车）也必须用输入框里的文字建节点。
+  // 旧实现固定 addNode(null, '', null)：文字留在即将消失的输入框里，节点是空的。
+  await page.locator('.mc-bar button[title="新建"]').click()
+  await page.waitForSelector('.mc-empty-card input', { timeout: 5000 })
+  await page.locator('.mc-empty-card input').fill('按钮提交的选题')
+  await page.locator('.mc-empty-row button[type="submit"]').click()
+  await page.waitForSelector('.mc-card-edit', { timeout: 5000 })
+  const submitted = await page.locator('.mc-card-edit').inputValue()
+  check('空态点提交按钮也用输入框文字建节点', submitted === '按钮提交的选题', submitted)
+  await page.keyboard.press('Escape')
 
   check('没有未捕获的前端错误', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 } catch (error) {

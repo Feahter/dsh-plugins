@@ -13,7 +13,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 
 import { LibraryError, createLibrary, resolveRoot } from './src/store.js'
-import { preview, previewThumb } from './src/preview.js'
+import { preview, previewThumb, entryFile } from './src/preview.js'
 import { assistStatus, runAssist } from './src/assist.js'
 
 export const DEFAULTS = {
@@ -308,7 +308,7 @@ function buildTools({ getLibrary }) {
       }
       // 文档类格式先走预览层：docx/rtf/odt 用 textutil 抽文本，html 剥标签，pdf/xlsx 只能出缩略图。
       if (CONVERTIBLE_EXTS.test(String(entry.ext || ''))) {
-        const converted = await preview(entry, lib.root, { maxChars: args.maxChars || 20000 })
+        const converted = await preview(entry, lib.root, { maxChars: args.maxChars || 20000, sources: lib.sourceList })
         if (converted.kind === 'text') {
           return {
             id: entry.id,
@@ -692,11 +692,10 @@ async function sendFile(res, method, file, mime, { maxBytes = MAX_RAW_BYTES, cac
   else res.end(bytes)
 }
 
-async function sendRaw(res, method, entry, root) {
-  let file = null
-  if (entry.storage === 'linked') file = entry.path
-  else if (entry.storage === 'note') file = path.join(root, 'notes', `${entry.id}.md`)
-  else if (entry.storage === 'blob' && entry.blob) file = path.join(root, 'blobs', entry.blob)
+async function sendRaw(res, method, entry, root, sources) {
+  // entryFile() also refuses ids/blob paths that would escape notes/ or blobs/,
+  // and (given the registered sources) linked paths outside every source dir.
+  const file = entryFile(entry, root, sources)
   if (!file) throw new LibraryError('该条目没有可读取的字节。', { code: 'invalid-content' })
   await sendFile(res, method, file, entry.mime || 'application/octet-stream')
 }
@@ -790,11 +789,12 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
           return { status: 200, payload: { ok: true, data: { ...text, binary: entry.kind === 'image' && !text.text } } }
         }
         if (segments[2] === 'raw') {
-          return { status: 200, raw: { entry, root } }
+          return { status: 200, raw: { entry, root, sources: lib.sourceList } }
         }
         if (segments[2] === 'preview') {
           const result = await preview(entry, root, {
             maxChars: Number(searchParams.get('maxChars') || 20000) || 20000,
+            sources: lib.sourceList,
           })
           if (result.kind === 'thumb') {
             return {
@@ -812,7 +812,7 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
           return { status: 200, payload: { ok: true, data: result } }
         }
         if (segments[2] === 'thumb') {
-          const result = await previewThumb(entry, root)
+          const result = await previewThumb(entry, root, { sources: lib.sourceList })
           if (result.kind !== 'thumb') {
             throw new LibraryError(result.note || '这个条目无法生成缩略图。', { code: 'preview-unavailable' })
           }
@@ -1005,7 +1005,7 @@ function createRouteHandler(services) {
         ctx: services.ctx,
       })
       if (result.raw) {
-        await sendRaw(res, method, result.raw.entry, result.raw.root)
+        await sendRaw(res, method, result.raw.entry, result.raw.root, result.raw.sources)
         return
       }
       if (result.file) {

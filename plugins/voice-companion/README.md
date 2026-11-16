@@ -163,8 +163,8 @@ v0.4 默认形象是**自研的 3D 科幻核心**（`src/client/core3d.js`）：
 
 | 项 | 证据 |
 | --- | --- |
-| 单元测试 | `npm test` **151/151 通过** = v0.3 的 112 条 + `core3d` 13 + `theme` 11 + `theme-store` 15 |
-| 构建产物 | `client.js` **231,675 B**（v0.3 是 171,098），gzip **60,444 B**；11 个片段，`theme.js`/`theme-store.js`/`core3d.js` 各自行首 export、按 PARTS 顺序拼接 |
+| 单元测试 | `npm test` **153/153 通过** = v0.3 的 112 条 + `core3d` 13 + `theme` 11 + `theme-store` 15 + 2 条回归（history `text` 兼容、cancel 缺 sessionId 走 404） |
+| 构建产物 | `client.js` **232,338 B**（v0.3 是 171,098），gzip **60,760 B**；11 个片段，`theme.js`/`theme-store.js`/`core3d.js` 各自行首 export、按 PARTS 顺序拼接 |
 | 客户端半片 | `test/client-harness.mjs` **23/23 checks + 15 passed**，其中两条断言按 v0.4 契约改写（`stage starts on the core`、`no builtin chip is pressed while the core renders`——默认形象从鲸鱼换成 3D 核心是产品决定，不是测试迁就） |
 | 看板娘 | `test/avatar-harness.mjs` **23/23**（含抽屉、槽位、改名、移除自定义形象） |
 | 3D 核心 | `test/core3d.test.mjs` **13/13**（后端选择五分支、环投影数值、五态、canvas2d 兜底、着色器编译失败回落、无 DOM 惰性、rAF 缺失走 setTimeout、清理幂等）；真 Chrome headless（SwiftShader）跑出 `kind=webgl2` |

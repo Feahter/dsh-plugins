@@ -9,6 +9,7 @@
  * deleting it loses nothing, and it is never read back as canonical.
  */
 
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -108,8 +109,17 @@ export async function regenerateIndex(root, config = {}) {
   await fs.mkdir(root, { recursive: true });
   const file = path.join(root, 'INDEX.md');
   const text = lines.join('\n');
-  const tmp = `${file}.tmp-${process.pid}`;
-  await fs.writeFile(tmp, text, 'utf8');
-  await fs.rename(tmp, file);
+  // Writes to different tasks are serialized per task, not globally, so two
+  // concurrent regenerations of this derived index are normal. A per-process
+  // fixed temp name made them race on the same file (the loser's rename hit
+  // ENOENT); a random suffix gives each writer its own staging file.
+  const tmp = `${file}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
+  try {
+    await fs.writeFile(tmp, text, 'utf8');
+    await fs.rename(tmp, file);
+  } catch (error) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
   return { file, tasks: tasks.length, counts };
 }

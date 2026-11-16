@@ -149,11 +149,7 @@ const docParam = {
   description: '脑图标题（可以是标题的一部分，不区分大小写）。省略时用当前正在看的那张。',
 }
 
-async function resolveDoc(store, hint) {
-  const state = await store.read()
-  if (!state || !Array.isArray(state.docs) || state.docs.length === 0) {
-    throw new Error('还没有任何脑图。先在侧栏的脑图创意画布上建一张。')
-  }
+function findDocInState(state, hint) {
   if (!hint) {
     return state.docs.find(doc => doc.id === state.activeId) ?? state.docs[0]
   }
@@ -161,6 +157,17 @@ async function resolveDoc(store, hint) {
   return state.docs.find(doc => doc.title.toLowerCase().includes(needle))
     ?? state.docs.find(doc => doc.id === hint)
     ?? null
+}
+
+function resolveDocFromState(state, hint) {
+  if (!state || !Array.isArray(state.docs) || state.docs.length === 0) {
+    throw new Error('还没有任何脑图。先在侧栏的脑图创意画布上建一张。')
+  }
+  return findDocInState(state, hint)
+}
+
+async function resolveDoc(store, hint) {
+  return resolveDocFromState(await store.read(), hint)
 }
 
 export function createTools(store) {
@@ -195,21 +202,30 @@ export function createTools(store) {
         additionalProperties: false,
       },
       async args => {
-        const state = await store.read()
-        const doc = await resolveDoc(store, args?.doc)
-        if (!doc) throw new Error(`没找到脑图：${args?.doc ?? ''}`)
-        const parent = findNode(doc, args?.parent)
-        const { doc: next, added } = addChildren(doc, {
-          parentId: parent?.id ?? null,
-          texts: Array.isArray(args?.ideas) ? args.ideas : [],
+        let added = []
+        let parentText = null
+        let docTitle = ''
+        // 读改写必须整体串行：两个并发 add 各自先读旧状态、再写回，后写的会吞掉先写的节点。
+        const outcome = await store.update(state => {
+          const doc = resolveDocFromState(state, args?.doc)
+          if (!doc) throw new Error(`没找到脑图：${args?.doc ?? ''}`)
+          docTitle = doc.title
+          const parent = findNode(doc, args?.parent)
+          const { doc: next, added: texts } = addChildren(doc, {
+            parentId: parent?.id ?? null,
+            texts: Array.isArray(args?.ideas) ? args.ideas : [],
+          })
+          if (texts.length === 0) return undefined
+          added = texts
+          parentText = parent?.text ?? null
+          const docs = state.docs.map(item => (item.id === next.id ? next : item))
+          return { ...state, docs, activeId: next.id, revision: (state.revision ?? 0) + 1 }
         })
-        const docs = state.docs.map(item => (item.id === next.id ? next : item))
-        await store.write({ ...state, docs, activeId: next.id, revision: (state.revision ?? 0) + 1 })
         return {
-          doc: next.title,
-          parent: parent?.text ?? null,
+          doc: docTitle,
+          parent: parentText,
           added,
-          hint: added.length > 1 ? '画布上点「整理成树」会把新节点排整齐。' : undefined,
+          hint: outcome.written && added.length > 1 ? '画布上点「整理成树」会把新节点排整齐。' : undefined,
         }
       },
     ),

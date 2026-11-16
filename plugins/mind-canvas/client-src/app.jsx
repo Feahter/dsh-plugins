@@ -30,6 +30,7 @@ import {
   layoutDoc,
   nextChildPosition,
   normalizeState,
+  pickInitialState,
   roots,
   subtreeIds,
   toneForDoc,
@@ -67,6 +68,17 @@ const TONE_COLORS = {
   a: '#3a5bd9', b: '#0f8f6d', c: '#b1661b', d: '#a03a86', e: '#2f7fa8', f: '#6b5bd0',
 }
 const EMPTY = { version: 1, docs: [], activeId: '', revision: 0 }
+
+const LOCAL_KEY = 'dsh-mind-canvas'
+
+/** 读浏览器里的离线快照；坏 JSON 当作没有。 */
+function readLocalSnapshot() {
+  try {
+    return JSON.parse(window.localStorage.getItem(LOCAL_KEY) ?? 'null')
+  } catch {
+    return null
+  }
+}
 
 export function injectStylesOnce(doc) {
   if (typeof document === 'undefined') return () => {}
@@ -472,18 +484,20 @@ export function MindCanvasPage(props) {
     setLoadError(null)
     try {
       const payload = await api.getState()
-      const next = normalizeState(payload?.state ?? payload)
-      savedRevRef.current = next.revision
-      dirtyRef.current = false
-      setState(next)
+      const picked = pickInitialState(payload?.state ?? payload, readLocalSnapshot())
+      // 恢复本地快照时把已保存版本退一格，让自动保存把它回写到宿主，否则下次刷新又只剩空图。
+      savedRevRef.current = picked.recovered ? picked.state.revision - 1 : picked.state.revision
+      dirtyRef.current = picked.recovered
+      setState(picked.state)
       setStorage('host')
-      setSaveState('idle')
+      setSaveState(picked.recovered ? 'saving' : 'idle')
       setStatus('ready')
+      if (picked.recovered) notify(t('localRecovered'), 'info')
     } catch (error) {
       // 宿主路由还没注册（插件刚装上没重启）时退回本地，至少能画
       let local = null
       try {
-        local = JSON.parse(window.localStorage.getItem('dsh-mind-canvas') ?? 'null')
+        local = readLocalSnapshot()
       } catch { local = null }
       if (local) {
         const next = normalizeState(local)
@@ -499,7 +513,7 @@ export function MindCanvasPage(props) {
       setLoadError(error)
       setStatus('error')
     }
-  }, [])
+  }, [notify, t])
 
   React.useEffect(() => { load() }, [load])
 
@@ -510,8 +524,13 @@ export function MindCanvasPage(props) {
     dirtyRef.current = false
     setSaveState('saving')
     try {
-      if (storageRef.current === 'host') await api.putState(snapshot)
-      else window.localStorage.setItem('dsh-mind-canvas', JSON.stringify(snapshot))
+      if (storageRef.current === 'host') {
+        await api.putState(snapshot)
+        // 本地镜像跟着最新状态走：宿主 state 以后丢了/还是空的时候，恢复的是最近一份而不是旧稿。
+        try { window.localStorage.setItem(LOCAL_KEY, JSON.stringify(snapshot)) } catch { /* 配额满就当没有备份 */ }
+      } else {
+        window.localStorage.setItem(LOCAL_KEY, JSON.stringify(snapshot))
+      }
       savedRevRef.current = snapshot.revision
       setSaveState('saved')
       setLoadError(null)
@@ -541,7 +560,7 @@ export function MindCanvasPage(props) {
     if (dirtyRef.current) {
       const snapshot = stateRef.current
       if (storageRef.current === 'local') {
-        try { window.localStorage.setItem('dsh-mind-canvas', JSON.stringify(snapshot)) } catch { /* 忽略 */ }
+        try { window.localStorage.setItem(LOCAL_KEY, JSON.stringify(snapshot)) } catch { /* 忽略 */ }
       } else if (navigator.sendBeacon) {
         try {
           navigator.sendBeacon('/mind-canvas/state', new Blob([JSON.stringify(snapshot)], { type: 'application/json' }))
@@ -899,6 +918,16 @@ export function MindCanvasPage(props) {
   }, [addNode, deleteSelected, dialog, menu, redo, selectedId, undo])
 
   // ------------------------------------------------------------- 视图
+  // 空态表单的提交按钮：必须读输入框里的文字。以前这里固定 addNode(null, '', null)，
+  // 用户打完字点「加子节点」只会得到一颗空节点，输入框随节点创建一起消失，文字就丢了。
+  const submitEmpty = React.useCallback(event => {
+    event.preventDefault()
+    const element = emptyInputRef.current
+    const value = String(element?.value ?? '').trim()
+    addNode(null, value, null)
+    if (element) element.value = ''
+  }, [addNode])
+
   const onDoublePaneClick = React.useCallback(event => {
     const stage = stageRef.current
     if (!stage) return
@@ -1149,7 +1178,7 @@ export function MindCanvasPage(props) {
             h('h2', null, t('emptyTitle')),
             h('form', {
               className: 'mc-empty-row',
-              onSubmit: event => { event.preventDefault(); addNode(null, '', null) },
+              onSubmit: submitEmpty,
             },
             h('input', {
               ref: emptyInputRef,

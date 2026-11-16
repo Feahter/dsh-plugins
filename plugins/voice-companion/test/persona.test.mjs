@@ -77,6 +77,21 @@ test('buildMessages pins the persona and ends with the utterance', () => {
   assert.ok(messages.every((message) => ['system', 'user', 'assistant'].includes(message.role)))
 })
 
+test('buildMessages keeps history entries that use the legacy `text` field', () => {
+  const messages = buildMessages({
+    utterance: '接着说',
+    history: [
+      { role: 'user', text: '你好' },
+      { role: 'assistant', text: '在呢。' },
+    ],
+  })
+  assert.deepEqual(messages.slice(-3), [
+    { role: 'user', content: '你好' },
+    { role: 'assistant', content: '在呢。' },
+    { role: 'user', content: '接着说' },
+  ])
+})
+
 test('createBrain posts the agreed completion parameters and parses the reply', async () => {
   let captured
   const brain = createBrain({

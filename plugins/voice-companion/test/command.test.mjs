@@ -148,6 +148,20 @@ test('send cancels the addressed Session', async () => {
   assert.deepEqual(cancels, [{ sessionId: 's-voice' }])
 })
 
+test('send rejects a cancel without a target as 404 instead of a Host 500', async () => {
+  const { service, cancels } = makeService()
+
+  await assert.rejects(
+    service.send({ action: 'cancel' }),
+    (error) => error.status === 404 && error.code === 'not-found',
+  )
+  await assert.rejects(
+    service.send({ action: 'cancel', sessionId: '   ' }),
+    (error) => error.status === 404 && error.code === 'not-found',
+  )
+  assert.equal(cancels.length, 0)
+})
+
 test('send rejects a prompt to an unknown Session with 404', async () => {
   const { service, prompts } = makeService()
 

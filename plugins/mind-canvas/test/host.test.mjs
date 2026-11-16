@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events'
 import { Store, validateState } from '../src/store.js'
 import { mapInspirations } from '../src/inspirations.js'
 import { outline, addChildren, findNode, summarize } from '../src/outline.js'
+import { toMarkdown } from '../src/export.js'
 import { buildPrompt, normalizeIdeas, extractJson } from '../src/llm.js'
 import { createTools, route } from '../index.js'
 
@@ -75,6 +76,27 @@ test('并发写不会互相覆盖（串行队列）', async () => {
     await Promise.all(jobs)
     const back = await store.read()
     assert.equal(back.revision, 4)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('update 串行化读改写：两个并发 add 都不丢节点', async () => {
+  const { store, cleanup } = await tempStore()
+  try {
+    await store.write(sampleState())
+    const add = createTools(store).find(tool => tool.name === 'mind_canvas_add')
+    const [first, second] = await Promise.all([
+      add.execute({ parent: '实测', ideas: ['并发一'] }),
+      add.execute({ parent: '实测', ideas: ['并发二'] }),
+    ])
+    assert.deepEqual([...first.added, ...second.added].sort(), ['并发一', '并发二'])
+    const after = await store.read()
+    const texts = after.docs[0].nodes.map(node => node.text)
+    assert.ok(texts.includes('并发一'), texts.join('|'))
+    assert.ok(texts.includes('并发二'), texts.join('|'))
+    assert.equal(after.docs[0].nodes.length, 4)
+    assert.equal(after.revision, 5)
   } finally {
     await cleanup()
   }
@@ -168,6 +190,24 @@ test('客户端别名、导出模块、宿主工具三处生成的 Markdown 完�
   assert.equal(a, b, 'model.toOutline 应该就是 export.toMarkdown')
   assert.equal(b, c, '宿主 outline 应该和导出格式一致')
   assert.match(b, /^  - 实测对比$/m, '子级缩进两格')
+})
+
+test('宿主大纲与界面导出同源：孤儿与环里的节点也要出现，不能静默漏掉', () => {
+  const doc = {
+    id: 'd1',
+    title: '边界',
+    nodes: [
+      { id: 'n1', text: '正常根', parentId: null, x: 0, y: 0, createdAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'n2', text: '孤儿', parentId: 'missing', x: 0, y: 0, createdAt: '2026-01-01T00:01:00.000Z' },
+      { id: 'n3', text: '环A', parentId: 'n4', x: 0, y: 0, createdAt: '2026-01-01T00:02:00.000Z' },
+      { id: 'n4', text: '环B', parentId: 'n3', x: 0, y: 0, createdAt: '2026-01-01T00:03:00.000Z' },
+    ],
+  }
+  const host = outline(doc)
+  assert.equal(host, toMarkdown(doc), '宿主 outline 必须与界面导出逐字一致')
+  assert.match(host, /^## 孤儿$/m)
+  assert.match(host, /^## 环A$/m)
+  assert.match(host, /^  - 环B$/m)
 })
 
 // --------------------------------------------------------------- 路由

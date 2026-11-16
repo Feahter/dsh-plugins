@@ -2,6 +2,7 @@
 // Verifies the README pair, llms.txt and index.json stay internally consistent.
 // Run from the repository root: node docs/verify-readme.mjs
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,6 +126,48 @@ for (const e of entries) {
       bad(`index.json: ${e.name} 最新版本 ${ver.version} ≠ package.json ${pkg.version}`);
   }
   names.push(path.replace(/^plugins\//, ""));
+}
+
+// --- 每个已发版本都能在 git 里落到真实提交，且该提交处 package.json 版本对得上 ---
+// 防的是「索引写了 0.4.0、指到的 commit 里还是 0.3.9」这类发版事故。
+{
+  const git = (args) => {
+    try {
+      return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return null;
+    }
+  };
+  const shallow = git(["rev-parse", "--is-shallow-repository"]);
+  if (shallow === null) {
+    notes.push("info 不在 git 仓库里，跳过版本提交校验");
+  } else if (shallow === "true") {
+    notes.push("info 浅克隆，跳过历史版本提交校验（最新版本仍校验）");
+  } else {
+    let checked = 0;
+    for (const e of entries) {
+      for (const v of e.versions ?? []) {
+        const c = v?.source?.commit ?? "";
+        const p = (v?.source?.path ?? "").replace(/^\.?\//, "");
+        if (!/^[0-9a-f]{40}$/.test(c) || !p) continue;
+        const type = git(["cat-file", "-t", c]);
+        if (type !== "commit") {
+          bad(`index.json: ${e.name} ${v.version} 指向的 commit ${c.slice(0, 7)} 不在仓库里`);
+          continue;
+        }
+        const raw = git(["show", `${c}:${p}/package.json`]);
+        if (raw === null) {
+          bad(`index.json: ${e.name} ${v.version} 指向的 commit 里没有 ${p}/package.json`);
+          continue;
+        }
+        const atCommit = JSON.parse(raw).version;
+        if (atCommit !== v.version)
+          bad(`index.json: ${e.name} ${v.version} 指向的 commit 里 package.json 是 ${atCommit}`);
+        checked++;
+      }
+    }
+    ok(`index.json: ${checked} 个历史版本都能在 git 里对上 package.json`);
+  }
 }
 
 // --- 十个插件在中英 README 与 llms.txt 里都出现 --------------------------------

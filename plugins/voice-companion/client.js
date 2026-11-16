@@ -3550,6 +3550,7 @@ function createAudioEngine(deps) {
   let generation = 0;
   let running = false;
   let disposed = false;
+  let startToken = 0;
 
   let playQueue = [];
   let playing = false;
@@ -3784,18 +3785,25 @@ function createAudioEngine(deps) {
 
   async function start() {
     if (running || disposed) return;
+    const token = ++startToken;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setPhase('error', { error: 'microphone unavailable' });
       return;
     }
+    let stream;
     try {
-      media = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (error) {
       setPhase('error', { error: (error && error.message) || 'microphone permission denied' });
       return;
     }
+    if (token !== startToken || disposed) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    media = stream;
     media.getAudioTracks().forEach((track) => {
       track.addEventListener('ended', () => {
         if (running) stop();
@@ -3805,6 +3813,9 @@ function createAudioEngine(deps) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
     if (audioContext.state === 'suspended') await audioContext.resume();
+    if (token !== startToken || disposed) {
+      return;
+    }
     source = audioContext.createMediaStreamSource(media);
     processor = audioContext.createScriptProcessor(1024, 1, 1);
     sink = audioContext.createGain();
@@ -3847,6 +3858,7 @@ function createAudioEngine(deps) {
 
   function stop() {
     running = false;
+    startToken += 1;
     interrupt();
     if (processor) {
       try {
@@ -5583,6 +5595,7 @@ function apply(ctx) {
     history: [],
     cursor: 0,
     poller: null,
+    polling: false,
     fillers: [],
     fillerIndex: 0,
     active: false,
@@ -5641,8 +5654,10 @@ function apply(ctx) {
   function dictate(text) {
     const cleaned = typeof polish === 'function' ? polish(text) : text;
     const inserted = runtime.dictation ? runtime.dictation.insert(cleaned) : false;
-    runtime.avatar && runtime.avatar.setPartial(inserted ? '' : cleaned);
-    runtime.avatar && runtime.avatar.setSubtitle(cleaned, { role: 'user' });
+    if (inserted) {
+      runtime.avatar && runtime.avatar.setPartial('');
+      runtime.avatar && runtime.avatar.setSubtitle(cleaned, { role: 'user' });
+    }
     return inserted;
   }
 
@@ -5676,13 +5691,15 @@ function apply(ctx) {
       );
     } catch (error) {
       log('turn:error', error && error.message);
+      if (!runtime.active) return;
       runtime.avatar && runtime.avatar.setState('error');
       await runtime.engine.speak(['抱歉，我这边出了点问题。']);
       return;
     }
+    if (!runtime.active) return;
     const say = Array.isArray(reply.say) && reply.say.length ? reply.say : [reply.reply || '我在。'];
-    runtime.history.push({ role: 'user', text: utterance });
-    runtime.history.push({ role: 'assistant', text: say.join('') });
+    runtime.history.push({ role: 'user', content: utterance });
+    runtime.history.push({ role: 'assistant', content: say.join('') });
     if (runtime.history.length > 24) runtime.history.splice(0, runtime.history.length - 24);
     runtime.avatar && runtime.avatar.setSubtitle(say.join(''), { role: 'assistant' });
     const task = reply && reply.task ? reply.task : null;
@@ -5697,11 +5714,14 @@ function apply(ctx) {
   }
 
   async function pollEvents() {
-    if (!runtime.active) return;
+    if (!runtime.active || runtime.polling) return;
+    runtime.polling = true;
     try {
       const body = await requestJson('/events?since=' + runtime.cursor, null, 10000);
+      if (!runtime.active) return;
       runtime.cursor = typeof body.cursor === 'number' ? body.cursor : runtime.cursor;
       for (const event of body.events || []) {
+        if (!runtime.active) return;
         log('event', { id: event.id, type: event.type });
         if (runtime.receiptTask && event.sessionId && event.sessionId === runtime.receiptTask.sessionId) {
           const next = event.type === 'task-done' ? 'done' : event.type === 'task-failed' ? 'failed' : null;
@@ -5718,6 +5738,8 @@ function apply(ctx) {
       }
     } catch (error) {
       log('events:error', error && error.message);
+    } finally {
+      runtime.polling = false;
     }
   }
 
@@ -5958,6 +5980,8 @@ function apply(ctx) {
       },
     };
   }
+
+  if (voiceCompanion && voiceCompanion.__test) voiceCompanion.__test.pollEvents = pollEvents;
 
   mount();
 

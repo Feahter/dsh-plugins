@@ -539,13 +539,13 @@ export default {
 
 ### 5.2 REST
 
-所有响应 `application/json; charset=utf-8`；错误 `{error:{code,message,detail?}}`。鉴权：每个请求先 `const reject = ctx.get('connection')?.requestRejection?.({headers:req.headers}); if (reject) return send(res, 403, {error:{code:'FORBIDDEN',...}})`——注意 `requestRejection` 返回非空即拒绝；无该函数时（测试）放行。实际实现放 `routes.js` 的 `makeHandler({engine, guard})`，guard 可注入。
+所有响应 `application/json; charset=utf-8`；错误 `{error:{code,message,detail?}}`。鉴权：每个请求先 `const reject = ctx.get('connection')?.requestRejection?.({headers:req.headers}); if (reject) return send(res, 403, {error:{code:'FORBIDDEN',...}})`——注意 `requestRejection` 返回非空即拒绝。宿主半片拿不到 `connection` 服务时直接 403（fail closed），只有 `makeHandler` 不传 guard 的测试路径才放行。实际实现放 `routes.js` 的 `makeHandler({engine, guard})`，guard 可注入。
 
 | 方法 | 路径 | body | 返回 |
 |---|---|---|---|
 | GET | `/projects` | — | `{projects:[summary]}` |
 | POST | `/projects` | `{title?, params, recipeId?}` | `{project}` 201 |
-| GET | `/projects/:id` | — | `{project, artifacts: summaryMap, runs: [...]}` |
+| GET | `/projects/:id` | — | `{project, run, runs:[...]}`（产物清单在 `project.artifacts`；`run` 是当前/最近一次完整 run，含 events） |
 | PATCH | `/projects/:id` | `{title?, params?}` | `{project}` |
 | DELETE | `/projects/:id` | — | `{ok:true}` |
 | GET | `/projects/:id/artifact?key=` | — | `{artifact}` |
@@ -558,7 +558,7 @@ export default {
 | POST | `/projects/:id/export` | `{format}` | `{export:{filename,path,mime,bytes}}` |
 | GET | `/recipes` | — | `{recipes:[{id,title,paramsSchema,paramsDefaults,stages:[{id,title,each,review}],artifacts}]}` |
 | GET | `/model` | — | `{available, provider, model, message?}` |
-| POST | `/projects/:id/review/continue` | `{autoApprove?}` | 等价于 startRun({from: pendingReview.nextStages[0]}) |
+| POST | `/projects/:id/review/continue` | `{autoApprove?}` | `{run}` 202；等价于 `startRun({stages: pendingReview.nextStages})`，默认不自动放行后续审稿门 |
 
 - 路由解析：`path` 去掉 `/novel-forge` 前缀，按 `/` 分段；`:id` 允许 `p_xxx` 或前缀。
 - body 上限 10MB；JSON 解析失败 → 400 `BAD_BODY`。
@@ -575,9 +575,9 @@ export default {
 | `novel_status` | `{project?}` | 阶段表、每章状态、字数、当前 run、审稿门 |
 | `novel_read` | `{project?, key?, chapter?}` | key 如 `outline`/`bible`/`draft`；chapter 如 `ch03` 连同读 beats/draft/review/summary |
 | `novel_write` | `{project?, key, content}` | 用户手改某产物（kind 沿用声明）；跑中拒绝 |
-| `novel_run` | `{project?, from?, stages?, items?, autoApprove?}` | 启动后台 run，立即返回 runId + 预计耗时 |
+| `novel_run` | `{project?, window?, from?, to?, stages?, items?, force?, autoApprove?, dryRun?}` | 启动后台 run，立即返回 runId；`window` 默认 10 章 |
 | `novel_cancel` | `{project?}` | 取消当前 run |
-| `novel_export` | `{project?, format:'markdown'|'epub'}` | 导出并返回路径 |
+| `novel_export` | `{project?, format?:'markdown'|'epub'|'outline-editor'}` | 导出并返回路径；outline-editor 同时落 md + csv |
 
 `project` 省略时用 `resolveProject('active')`。工具描述里写清「不要在没建项目时调用 novel_run」这类边界。
 

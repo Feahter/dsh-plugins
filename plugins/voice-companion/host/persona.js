@@ -192,7 +192,9 @@ export function buildMessages({ utterance, history = [], sessionTitles = [] } = 
     for (const entry of history.slice(-8)) {
       if (entry === null || typeof entry !== 'object') continue
       const role = entry.role === 'assistant' ? 'assistant' : entry.role === 'user' ? 'user' : undefined
-      const content = asTrimmedString(entry.content)
+      // `content` is the protocol field; `text` is accepted too so an older
+      // client (or a third-party caller) cannot silently lose its history.
+      const content = asTrimmedString(entry.content) || asTrimmedString(entry.text)
       if (role === undefined || content === '') continue
       messages.push({ role, content: truncate(content, 500) })
     }

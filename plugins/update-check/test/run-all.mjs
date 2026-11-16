@@ -581,6 +581,73 @@ await check('client: outside the Desktop app it says so and offers a download in
   assert.deepEqual(fetchUrls.opened, ['https://download.deepseek.com/x.zip'])
 })
 
+// --------------------------------------------- 5. robustness regressions
+
+await check('host: status never rejects when the version probe throws', async () => {
+  const host = hostModule.createHost({ feedUrl: 'http://127.0.0.1:9/feeds/' }, {
+    readInstalledVersion: async () => {
+      throw new Error('version reader blew up')
+    },
+  })
+  const status = await host.status({ refresh: true })
+  assert.equal(status.ok, false)
+  assert.equal(status.error.kind, 'internal')
+  assert.match(status.error.message, /version reader blew up/)
+  assert.equal(status.updateAvailable, false)
+
+  const handler = hostModule.createRouteHandler({ get: () => ({ requestRejection: () => undefined }) }, host)
+  const server = createServer((req, res) => { handler(req, res).catch(() => res.destroy()) })
+  const port = await listen(server)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${hostModule.__internals.ROUTE_PREFIX}/status?refresh=1`)
+    assert.equal(response.status, 200, 'a throwing probe must not become a 500')
+    assert.equal((await response.json()).error.kind, 'internal')
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+await check('host: an internal probe error is not cached, so the next status retries', async () => {
+  let reads = 0
+  const host = hostModule.createHost({ feedUrl: 'http://127.0.0.1:9/feeds/', cacheSeconds: 3600 }, {
+    readInstalledVersion: async () => {
+      reads += 1
+      if (reads === 1) throw new Error('flaky version reader')
+      return '0.2.1-rc.4'
+    },
+    fetchText: async () => 'version: 0.3.0\nfiles:\n  - url: a.zip\n',
+  })
+  const first = await host.status()
+  assert.equal(first.ok, false)
+  assert.equal(first.error.kind, 'internal')
+
+  // Before the fix this second call was served from the 3600s cache: the
+  // internal failure was stored like a real feed answer.
+  const second = await host.status()
+  assert.equal(reads, 2, 'the internal error was cached: status never re-probed')
+  assert.equal(second.ok, true)
+  assert.equal(second.latest.version, '0.3.0')
+})
+
+await check('route: a malformed request URL answers 400 instead of rejecting', async () => {
+  const host = hostModule.createHost({ feedUrl: 'http://127.0.0.1:9/feeds/' }, {
+    readInstalledVersion: async () => '0.2.1-rc.4',
+  })
+  const handler = hostModule.createRouteHandler({ get: () => ({ requestRejection: () => undefined }) }, host)
+  const written = []
+  const res = {
+    writeHead(status, headers) { written.push({ status, headers }) },
+    end(body) { written.push({ body }) },
+  }
+  // `new URL('http://[::1', ...)` throws: the old code did this outside its try
+  // block, so the handler rejected and the carrier had no response to send.
+  await handler({ url: 'http://[::1', method: 'GET', headers: {} }, res)
+  assert.equal(written[0].status, 400)
+  const payload = JSON.parse(written[1].body)
+  assert.equal(payload.ok, false)
+  assert.equal(payload.error.kind, 'invalid-request')
+})
+
 // ---------------------------------------------------------------------- report
 
 const failed = results.filter((entry) => !entry.ok)

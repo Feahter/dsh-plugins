@@ -154,6 +154,45 @@ test('已有正文达到目标字数：明确返回不续写，也不再调模�
   assert.equal(fresh.artifacts[`draft/${env.chapterId}`].version, 1)
 })
 
+test('续写占住项目：并发续写 / 启动流水线 / 手改产物都被 RUN_ACTIVE 挡住', async t => {
+  const draft = `## 第1章 起：雨夜\n\n${FILLER.repeat(28)}${TAIL}`
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const env = await setup({
+    draft,
+    outputs: [async () => {
+      await gate
+      return { text: '门里有人叫他的名字。' }
+    }],
+  })
+  t.after(env.cleanup)
+
+  const first = env.engine.continueChapter(env.project.id, env.chapterId)
+  const deadline = Date.now() + 3000
+  while (env.calls.length === 0 && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  assert.equal(env.calls.length, 1, '第一枪应已发出并挂起')
+
+  await assert.rejects(
+    () => env.engine.continueChapter(env.project.id, env.chapterId),
+    error => error.code === 'RUN_ACTIVE',
+  )
+  await assert.rejects(
+    () => env.engine.startRun(env.project.id, {}),
+    error => error.code === 'RUN_ACTIVE',
+  )
+  await assert.rejects(
+    () => env.engine.writeArtifact(env.project.id, `draft/${env.chapterId}`, { kind: 'md', content: '手改' }),
+    error => error.code === 'RUN_ACTIVE',
+  )
+
+  release()
+  const result = await first
+  assert.ok(result.afterChars > result.beforeChars)
+  assert.equal(env.calls.length, 1, '锁生效后不应该有第二个模型调用')
+})
+
 test('POST /projects/:id/chapters/:chapterId/continue 分发到 engine.continueChapter', async () => {
   const response = await handle(
     {

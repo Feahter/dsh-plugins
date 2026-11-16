@@ -1,5 +1,10 @@
 # 实时语音输入（realtime-voice）v0.3
 
+> **已被取代（2026-11-16）**：本包的能力已并入 [`dsh-voice-companion`](../voice-companion/README.md) ≥0.4.0
+> （听写 → `src/client/dictation.js`，排版/口头语清理 → `src/client/polish.js`，口述翻译走同一套 `voiceInput` 服务）。
+> 本包不再接新功能；新装用户请直接装 `dsh-voice-companion`。已装用户可继续用，能力不变。
+> 取代惯例见 [`docs/DEPRECATION.md`](../../docs/DEPRECATION.md)。
+
 一个麦克风，一套语音输入：连续听写 + 说完自动排版 + 口述翻译 + 设置面板，
 并把能力暴露成 `voiceInput` 服务，供任何需要输入的插件接入。
 

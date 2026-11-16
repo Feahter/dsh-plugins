@@ -211,7 +211,17 @@ async function main() {
       runningEvents.some(event => event.type === 'run-start'),
       `events=${runningEvents.length}`,
     )
-    ok('假 LLM 首枪挂起（UI 能观察到运行中）', llm.calls.length >= 1 && running?.status === 'running', `calls=${llm.calls.join(',') || '—'}`)
+    // 抽屉一出现就断言「模型已经被调用」是竞态：startRun 先落项目/run，引擎随后
+    // 才异步读产物、拼 prompt、发起第一枪。机器忙时 UI 会先看到运行中。
+    // 等第一枪真的挂到闸门上再断言，避免把「还没轮到调模型」误报成失败。
+    const firstCallDeadline = Date.now() + 15000
+    while (llm.calls.length === 0 && Date.now() < firstCallDeadline) await sleep(20)
+    const stillRunning = await engine.getRun(runId)
+    ok(
+      '假 LLM 首枪挂起（UI 能观察到运行中）',
+      llm.calls.length >= 1 && stillRunning?.status === 'running',
+      `calls=${llm.calls.join(',') || '—'}`,
+    )
 
     // 4. 放行假 LLM，等待完成
     llm.release()

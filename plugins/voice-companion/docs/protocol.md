@@ -9,21 +9,22 @@
 | Host（`index.js` + `host/*`） | 持有 API key、人格 LLM 调用、句子级 TTS、音色选择、任务派发、监听 `agent/status` 生成完成事件 |
 | Client（`client.js` 由 `src/client/*` 打包） | 麦克风、能量 VAD、增量识别、断句、播报与打断、听写落字、全局热键、看板娘与字幕 |
 
-两半只通过下面 9 条同源 HTTP 路由说话，全部挂在 `/api/voice-companion` 下（`/plugins/*` 打不到）。
+两半只通过下面 10 条同源 HTTP 路由说话，全部挂在 `/api/voice-companion` 下（`/plugins/*` 打不到）。
 
 ## 路由
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
 | GET | `/health` | — | `{ok, version, character, characters[], tts:{voices,apiKeyConfigured,catalog}, asr:{providers}, tasks:{tracked,defaults:{permission,reasoningEffort}}, commands:{sessions}}` |
-| GET | `/characters` | — | `{ok, defaultCharacter, characters:[{id,name,tagline,voice,labels}], voices:[{id,label}], speed:{min,max}}` |
-| POST | `/turn` | `{utterance, sessionId?, history?, character?, mode?, voiceId?, voiceMap?}` | `{ok, reply, say:[句子], voices:[voiceId], task:{taskId,sessionId,title,text}\|null, kind:'chat'\|'task'\|'cancel'}` |
-| POST | `/speak` | `{text, character?, mode?, index?, total?, voiceId?, voiceMap?}` | `{ok, audioBase64, mimeType, durationMs, voiceId, cached}` |
+| GET | `/characters` | — | `{ok, defaultCharacter, characters:[{id,name,tagline,voice}], voices:[{id,label,tone}], speed:{min,max}}` |
+| POST | `/turn` | `{utterance, sessionId?, history?, character?, voiceMode?, voiceId?, voiceMap?}` | `{ok, reply, say:[句子], voices:[voiceId], task:{taskId,sessionId,title,text}\|null, kind:'chat'\|'task'\|'cancel'}` |
+| POST | `/speak` | `{text, character?, voiceMode?, index?, total?, voiceId?, voiceMap?}` | `{ok, audioBase64, mimeType, durationMs, voiceId, cached}` |
 | POST | `/plan` | `{utterance, currentSessionId?, pending?}` | `{ok, plan:{action:'ask'\|'new'\|'resume', sessionId?, candidates?, confidence, reason, text}, confirmation}` |
 | POST | `/send` | `{action:'prompt'\|'new'\|'cancel', sessionId?, text?}` | `{ok, action:'prompt'\|'new'\|'cancel', sessionId?, text?}`，动作非法 400，Session 不存在 404 |
-| POST | `/dispatch` | `{text, sessionId?, character?}` | `{ok, taskId, sessionId}`（目标会话先被设成完全权限 + high 推理，见下） |
-| GET | `/events?since=<cursor>` | — | `{ok, events:[{id,type,text,voiceId}], cursor}` |
+| POST | `/dispatch` | `{text, sessionId?, title?}` | `{ok, taskId, sessionId}`（目标会话先被设成完全权限 + high 推理，见下） |
+| GET | `/events?since=<cursor>` | — | `{ok, events:[{id,type,text,summary,sessionId,title}], cursor}` |
 | POST | `/transcribe` | `{audioBase64, providerId?}` | `{ok, text, providerId}` |
+| POST | `/theme/design` | `{utterance, base?, keep?}` | `{ok, theme, changed, dropped, message, model, usage}`（限流 8/min + 60/h） |
 
 错误统一 `{ok:false, code, message}`，HTTP 状态：400 参数、404 不存在、415 音频格式、502 上游、503 本机服务缺失。
 

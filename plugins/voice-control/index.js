@@ -214,6 +214,7 @@ export function apply(ctx) {
           handle: async (payload) => {
             const action = payload?.action
             const text = typeof payload?.text === 'string' ? payload.text : ''
+            const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : ''
             if (action !== 'cancel' && text.trim() === '') {
               return { status: 400, body: { ok: false, code: 'invalid', message: 'text is required' } }
             }
@@ -225,14 +226,22 @@ export function apply(ctx) {
               return { body: { ok: true, ...created } }
             }
             if (action === 'cancel') {
-              const result = await bridge.cancel({ sessionId: String(payload?.sessionId ?? '') })
+              // A missing target is a parameter error; letting the bridge throw
+              // its plain Error turned this into a 500 Host failure.
+              if (sessionId === '') {
+                return { status: 400, body: { ok: false, code: 'invalid', message: 'sessionId is required' } }
+              }
+              const result = await bridge.cancel({ sessionId })
               return { body: { ok: true, ...result } }
             }
             if (action !== 'prompt') {
               return { status: 400, body: { ok: false, code: 'invalid', message: 'action must be prompt, new or cancel' } }
             }
+            if (sessionId === '') {
+              return { status: 400, body: { ok: false, code: 'invalid', message: 'sessionId is required' } }
+            }
             const mode = payload?.mode === 'steer' ? 'steer' : 'queue'
-            const result = await bridge.prompt({ sessionId: String(payload?.sessionId ?? ''), text, mode })
+            const result = await bridge.prompt({ sessionId, text, mode })
             return { body: { ok: true, ...result } }
           },
         }),

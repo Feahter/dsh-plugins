@@ -15,6 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { apply } from './index.js'
+import { createLibrary } from './src/store.js'
 
 const PREFIX = '/api/context-lib'
 let passed = 0
@@ -729,6 +730,57 @@ async function run() {
     await callTool(tools, 'context_lib_delete', { id: doc.id })
     const after = await fs.readFile(doc.path, 'utf8')
     assert.equal(after, before)
+  })
+
+  await checkAsync('索引里的 linked 越界 path 不会从 raw/content 读到库外文件', async () => {
+    const list = await callTool(tools, 'context_lib_search', { source: sourceId, limit: 50 })
+    const doc = list.items.find((item) => item.kind === 'doc' && item.storage === 'linked')
+    assert.ok(doc && doc.path, '需要一个扫描产出的 linked 条目')
+    const secret = path.join(os.tmpdir(), `ctxlib-verify-secret-${process.pid}.txt`)
+    await fs.writeFile(secret, 'TOP-SECRET-OUTSIDE-SOURCE\n')
+    const indexPath = path.join(root, 'index.json')
+    const index = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+    const tamperedId = 'cl_00000000dead'
+    index.entries[tamperedId] = {
+      ...index.entries[doc.id], id: tamperedId, title: 'tampered', path: secret, sourceId: null,
+    }
+    await fs.writeFile(indexPath, JSON.stringify(index))
+    try {
+      const raw = await request(routes, 'GET', `${PREFIX}/items/${tamperedId}/raw`)
+      assert.equal(raw.res.status, 404, '篡改条目的 raw 必须 404')
+      assert.doesNotMatch(String(raw.res.body), /TOP-SECRET/)
+      const content = await request(routes, 'GET', `${PREFIX}/items/${tamperedId}/content`)
+      assert.equal(content.res.status, 404, '篡改条目的 content 必须 404')
+      // 正常扫描产出的 linked 条目仍可读，功能没被改坏。
+      const legit = await request(routes, 'GET', `${PREFIX}/items/${doc.id}/raw`)
+      assert.equal(legit.res.status, 200)
+      assert.match(String(legit.res.body), /KV-Net/)
+    } finally {
+      await fs.rm(secret, { force: true })
+    }
+  })
+
+  await checkAsync('扫描被文件上限截断时不做删除对账', async () => {
+    const box = await fs.mkdtemp(path.join(os.tmpdir(), 'context-lib-trunc-'))
+    try {
+      const lib = await createLibrary(path.join(box, 'library'), { maxFiles: 3 })
+      await lib.init()
+      for (const id of ['workspace', 'docs', 'dsh']) await lib.removeSource(id).catch(() => {})
+      const srcDir = path.join(box, 'src')
+      await fs.mkdir(srcDir, { recursive: true })
+      for (const name of ['a.md', 'b.md', 'c.md', 'd.md']) await fs.writeFile(path.join(srcDir, name), `# ${name}\n`)
+      const source = await lib.addSource({ name: 'trunc', path: srcDir })
+      await lib.scan({ sourceId: source.id })
+      // 新增一个排最前的文件，把 c.md 挤出本轮：截断时绝不能对账删除。
+      await fs.writeFile(path.join(srcDir, '00-first.md'), '# first\n')
+      const second = await lib.scan({ sourceId: source.id })
+      assert.equal(second.removed, 0, '没走到的文件不能被当成已删除')
+      assert.equal(second.incomplete, true)
+      const listed = await lib.list({ source: source.id, limit: 50 })
+      assert.equal(listed.total, 4)
+    } finally {
+      await fs.rm(box, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    }
   })
 
   await checkAsync('config 未知键会告警但不影响加载', async () => {

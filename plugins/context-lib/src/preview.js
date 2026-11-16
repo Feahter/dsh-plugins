@@ -47,12 +47,47 @@ export function previewKind(entry) {
   return 'none'
 }
 
-/** 条目 → 磁盘上的真实文件（note / linked / blob 三种 storage）。 */
-export function entryFile(entry, root) {
+/** Entry ids minted by the store; an index file is untrusted input. */
+const SAFE_ENTRY_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+/** Resolve `relative` under `base`; null when it escapes or is empty. */
+function resolveInside(base, relative) {
+  if (typeof relative !== 'string' || !relative || path.isAbsolute(relative)) return null
+  const root = path.resolve(base)
+  const target = path.resolve(root, relative)
+  const rel = path.relative(root, target)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  return target
+}
+
+/** `target` 是否严格位于 `base` 之内（linked 条目只允许读已注册来源里的文件）。 */
+function isInsideBase(base, target) {
+  if (typeof base !== 'string' || !base || typeof target !== 'string' || !target) return false
+  if (!path.isAbsolute(target)) return false
+  const rel = path.relative(path.resolve(base), path.resolve(target))
+  return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
+}
+
+/**
+ * 条目 → 磁盘上的真实文件（note / linked / blob 三种 storage）。
+ * `sources` 是已注册来源的路径数组：给了就要求 linked path 落在其中某个之内
+ * （store 已在加载索引时丢弃越界条目，这里是读取层的第二道闸）。
+ */
+export function entryFile(entry, root, sources) {
   if (!entry) return null
-  if (entry.storage === 'note') return path.join(root, 'notes', `${entry.id}.md`)
-  if (entry.storage === 'linked') return entry.path || null
-  if (entry.storage === 'blob' && entry.blob) return path.join(root, 'blobs', entry.blob)
+  if (entry.storage === 'note') {
+    return SAFE_ENTRY_ID.test(String(entry.id ?? '')) ? path.join(root, 'notes', `${entry.id}.md`) : null
+  }
+  if (entry.storage === 'linked') {
+    const target = entry.path
+    if (!target) return null
+    if (Array.isArray(sources)) {
+      const roots = sources.map((source) => (typeof source === 'string' ? source : source?.path)).filter(Boolean)
+      if (!roots.some((base) => isInsideBase(base, target))) return null
+    }
+    return target
+  }
+  if (entry.storage === 'blob' && entry.blob) return resolveInside(path.join(root, 'blobs'), entry.blob)
   return null
 }
 
@@ -92,8 +127,8 @@ async function extractWithTextutil(file) {
 /**
  * 文本预览。返回 {kind:'text', text, truncated, note?} 或 {kind:'none', note}。
  */
-export async function previewText(entry, root, { maxChars = MAX_TEXT_CHARS } = {}) {
-  const file = entryFile(entry, root)
+export async function previewText(entry, root, { maxChars = MAX_TEXT_CHARS, sources } = {}) {
+  const file = entryFile(entry, root, sources)
   const kind = previewKind(entry)
   if (kind !== 'text') return { kind: 'none', note: '这个格式没有文本预览，试试缩略图。' }
   let text = ''
@@ -129,8 +164,8 @@ function thumbCacheKey(file, stat) {
 /**
  * Quick Look 缩略图。返回 {kind:'thumb', path, cached} 或 {kind:'none', note}。
  */
-export async function previewThumb(entry, root) {
-  const file = entryFile(entry, root)
+export async function previewThumb(entry, root, { sources } = {}) {
+  const file = entryFile(entry, root, sources)
   if (!file) return { kind: 'none', note: '这条没有原文件。' }
   try {
     const stat = await fs.stat(file)
@@ -164,10 +199,10 @@ export async function previewThumb(entry, root) {
 }
 
 /** 统一入口：面板调一次就知道该渲染什么。 */
-export async function preview(entry, root, { maxChars = MAX_TEXT_CHARS } = {}) {
+export async function preview(entry, root, { maxChars = MAX_TEXT_CHARS, sources } = {}) {
   const kind = previewKind(entry)
   if (kind === 'image') return { kind: 'image' }
-  if (kind === 'text') return previewText(entry, root, { maxChars })
-  if (kind === 'thumb') return previewThumb(entry, root)
+  if (kind === 'text') return previewText(entry, root, { maxChars, sources })
+  if (kind === 'thumb') return previewThumb(entry, root, { sources })
   return { kind: 'none', note: '暂不支持这种格式的预览。' }
 }

@@ -117,6 +117,20 @@ test('novel_read：没有 draft key 时退回两位补零', async () => {
   )
 })
 
+test('novel_read：只有 beats/chNNN 时也按实际宽度解析（细纲先于草稿落盘）', async () => {
+  const project = makeProject({ outline: { kind: 'json' }, 'beats/ch005': { kind: 'json', version: 1 } })
+  const engine = makeEngine(project)
+  const beats = { scenes: [{ no: 1, goal: '确认三号柜里的声音' }] }
+  engine.getArtifact = async (_id, key) => (
+    key === 'beats/ch005' ? { key, kind: 'json', content: beats } : null
+  )
+  const read = createTools(engine).find(item => item.name === 'novel_read')
+  const value = await read.execute({ chapter: '5' })
+  assert.equal(value.chapter, 'ch005')
+  assert.deepEqual(value.beats, beats)
+  assert.equal(value.draft, null)
+})
+
 test('novel_write：bytes 取自 meta.bytes', async () => {
   const write = createTools(makeEngine(makeProject())).find(item => item.name === 'novel_write')
   const saved = await write.execute({ key: 'draft/ch01', content: '新正文' })

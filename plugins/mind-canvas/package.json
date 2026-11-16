@@ -1,6 +1,6 @@
 {
   "name": "dsh-mind-canvas",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "脑图创意画布：无限画布上的选题脑图，从灵感一键长成结构，AI 帮你发散。",
   "type": "module",
   "main": "index.js",
@@ -21,7 +21,8 @@
     "docs"
   ],
   "engines": {
-    "dsh": ">=0.2.1-rc.4"
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
   },
   "dsh": {
     "bundle": {
@@ -62,5 +63,10 @@
   },
   "dependencies": {
     "html-to-image": "^1.11.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/mind-canvas"
   }
 }

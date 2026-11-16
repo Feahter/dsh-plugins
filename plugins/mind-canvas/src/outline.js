@@ -1,6 +1,10 @@
 // 宿主半片的树操作与大纲导出。
-// 客户端有自己的一份（client-src/model.js，含 d3 布局），宿主这边不引第三方依赖：
+// 客户端有自己的一份树操作（client-src/model.js，含 d3 布局），宿主这边不引第三方依赖：
 // 只做「读成大纲」「往下加节点」这类不需要 tidy layout 的事，排整齐留给界面上的「整理成树」。
+// Markdown 大纲不在这里再实现一份：直接复用 src/export.js（与界面导出、测试同一份），
+// 否则孤儿/环节点的处理一旦分叉，mind_canvas_read 会和界面看到的不一样。
+
+import { toMarkdown } from './export.js'
 
 const CARD_WIDTH = 208
 const COL_GAP = 92
@@ -40,29 +44,9 @@ export function findNode(doc, hint) {
   return doc.nodes.find(node => node.text.toLowerCase().includes(needle)) ?? null
 }
 
-/** 和客户端 toOutline 保持同一份格式：一级用 ##，往下用缩进列表。 */
+/** 和界面导出同一份实现：一级用 ##，往下用缩进列表。 */
 export function outline(doc) {
-  const lines = [`# ${doc.title}`, '']
-  const byParent = new Map()
-  for (const node of doc.nodes) {
-    const key = node.parentId ?? null
-    if (!byParent.has(key)) byParent.set(key, [])
-    byParent.get(key).push(node)
-  }
-  for (const list of byParent.values()) {
-    list.sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
-  }
-  const walk = (parentId, depth, guard) => {
-    for (const node of byParent.get(parentId) ?? []) {
-      if (guard.has(node.id)) continue
-      guard.add(node.id)
-      const text = node.text.trim() || '（空）'
-      lines.push(depth === 1 ? `## ${text}` : `${'  '.repeat(depth - 1)}- ${text}`)
-      walk(node.id, depth + 1, guard)
-    }
-  }
-  walk(null, 1, new Set())
-  return lines.join('\n') + '\n'
+  return toMarkdown(doc)
 }
 
 function makeId() {

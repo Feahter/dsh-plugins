@@ -374,6 +374,28 @@ export function createHost(config = {}, deps = {}) {
     }
   }
 
+  /**
+   * `probe` must never reject: the route turns a rejection into a bare 500,
+   * which loses the structured error the panel renders. Every failure inside
+   * the probe is already mapped; this catches the last resort (for example a
+   * dependency-injected version reader throwing).
+   */
+  async function probeSafe() {
+    try {
+      return await probe()
+    } catch (error) {
+      return {
+        ok: false,
+        checkedAt: new Date(now()).toISOString(),
+        currentVersion: typeof installedVersion === 'string' ? installedVersion : null,
+        feed: null,
+        latest: null,
+        updateAvailable: false,
+        error: { kind: 'internal', message: String(error?.message ?? error) },
+      }
+    }
+  }
+
   return {
     config: settings,
     get installedVersion() {
@@ -385,8 +407,12 @@ export function createHost(config = {}, deps = {}) {
       if (!refresh && cached !== null && now() - cached.at < ttl) return cached.value
       if (inflight !== null && !refresh) return await inflight
       const started = ++generation
-      const operation = probe().then((value) => {
-        if (started === generation) cached = { at: now(), value }
+      const operation = probeSafe().then((value) => {
+        // An `internal` error means the probe itself broke (for example the
+        // injected version reader threw), not that the feed answered. Caching it
+        // would serve the same failure for the whole cacheSeconds window and
+        // keep the next status from retrying, so it is never cached.
+        if (started === generation && value?.error?.kind !== 'internal') cached = { at: now(), value }
         return value
       })
       inflight = operation
@@ -428,7 +454,13 @@ export function createRouteHandler(ctx, host) {
       send(res, rejection, { ok: false, error: { kind: 'unauthorized', message: 'Unauthorized' } })
       return
     }
-    const url = new URL(req.url ?? '/', 'http://localhost')
+    let url
+    try {
+      url = new URL(req.url ?? '/', 'http://localhost')
+    } catch {
+      send(res, 400, { ok: false, error: { kind: 'invalid-request', message: 'Malformed request URL.' } })
+      return
+    }
     if (url.pathname !== ROUTE_PREFIX && !url.pathname.startsWith(`${ROUTE_PREFIX}/`)) {
       send(res, 404, { ok: false, error: { kind: 'not-found', message: 'Not found' } })
       return

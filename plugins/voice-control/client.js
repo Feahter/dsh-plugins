@@ -146,6 +146,20 @@ window.__ModuleLoader__.load({
       return false;
     }
 
+    // A chord is released key by key; the user may let go of a modifier before
+    // Space. That keyup no longer matches the full chord, but it must still end
+    // the press or the microphone stays open until the window loses focus.
+    function modifierReleased(event, binding) {
+      if (!event || !binding) return false;
+      const code = typeof event.code === 'string' ? event.code.toLowerCase() : '';
+      const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+      if (binding.ctrl && (code.startsWith('control') || key === 'control')) return true;
+      if (binding.shift && (code.startsWith('shift') || key === 'shift')) return true;
+      if (binding.alt && (code.startsWith('alt') || key === 'alt')) return true;
+      if (binding.meta && (code.startsWith('meta') || key === 'meta' || key === 'os')) return true;
+      return false;
+    }
+
     function readHotkeySpec() {
       try {
         if (typeof localStorage !== 'undefined' && localStorage) {
@@ -915,7 +929,10 @@ window.__ModuleLoader__.load({
         beginPress();
       };
       const onKeyUp = (event) => {
-        if (!matchesHotkey(event, runtime.hotkey)) return;
+        if (!event) return;
+        const matched = matchesHotkey(event, runtime.hotkey);
+        const released = !!runtime.press && modifierReleased(event, runtime.hotkey);
+        if (!matched && !released) return;
         preventDefault(event);
         endPress();
       };
@@ -1050,6 +1067,7 @@ window.__ModuleLoader__.load({
         base64ToBytes,
         parseHotkey,
         matchesHotkey,
+        modifierReleased,
         readCurrentSessionId,
         setClock,
         resetClock,

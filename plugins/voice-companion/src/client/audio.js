@@ -236,6 +236,10 @@ function createAudioEngine(deps) {
   let generation = 0;
   let running = false;
   let disposed = false;
+  // Incremented by stop()/dispose(); a start() awaiting getUserMedia compares it
+  // after every await so a "结束" during the permission prompt cannot turn the
+  // microphone back on once the user grants it.
+  let startToken = 0;
 
   // playback
   let playQueue = [];
@@ -484,18 +488,27 @@ function createAudioEngine(deps) {
 
   async function start() {
     if (running || disposed) return;
+    const token = ++startToken;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setPhase('error', { error: 'microphone unavailable' });
       return;
     }
+    let stream;
     try {
-      media = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (error) {
       setPhase('error', { error: (error && error.message) || 'microphone permission denied' });
       return;
     }
+    if (token !== startToken || disposed) {
+      // stop() ran while the permission prompt was open: drop the freshly
+      // granted stream instead of leaving a hot microphone behind.
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    media = stream;
     media.getAudioTracks().forEach((track) => {
       track.addEventListener('ended', () => {
         if (running) stop();
@@ -505,6 +518,11 @@ function createAudioEngine(deps) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
     if (audioContext.state === 'suspended') await audioContext.resume();
+    if (token !== startToken || disposed) {
+      // stop() closed the context and stopped the stream while resume() was in
+      // flight; the graph below must not be rebuilt.
+      return;
+    }
     source = audioContext.createMediaStreamSource(media);
     processor = audioContext.createScriptProcessor(1024, 1, 1);
     sink = audioContext.createGain();
@@ -547,6 +565,8 @@ function createAudioEngine(deps) {
 
   function stop() {
     running = false;
+    // Invalidate any start() still waiting on getUserMedia()/resume().
+    startToken += 1;
     interrupt();
     if (processor) {
       try {

@@ -13,6 +13,7 @@ import {
   layoutDoc,
   nextChildPosition,
   normalizeState,
+  pickInitialState,
   reparent,
   roots,
   subtreeIds,
@@ -34,6 +35,46 @@ function build() {
   doc = withNode(doc, a1)
   return { doc, root, a, b, a1 }
 }
+
+test('pickInitialState：宿主为空而本地有节点时恢复本地', () => {
+  const local = {
+    version: 1,
+    activeId: 'd1',
+    revision: 7,
+    docs: [{ id: 'd1', title: '离线稿', nodes: [{ id: 'n1', text: '本地写的', parentId: null, x: 0, y: 0 }] }],
+  }
+  const picked = pickInitialState(null, local)
+  assert.equal(picked.recovered, true)
+  assert.equal(picked.state.docs[0].nodes[0].text, '本地写的')
+
+  const emptyHost = { version: 1, activeId: 'd2', revision: 0, docs: [{ id: 'd2', title: '空', nodes: [] }] }
+  assert.equal(pickInitialState(emptyHost, local).recovered, true)
+})
+
+test('pickInitialState：宿主有内容时以宿主为准，不让本地旧稿覆盖', () => {
+  const host = {
+    version: 1,
+    activeId: 'd1',
+    revision: 2,
+    docs: [{ id: 'd1', title: '宿主稿', nodes: [{ id: 'n1', text: '宿主写的', parentId: null, x: 0, y: 0 }] }],
+  }
+  const local = {
+    version: 1,
+    activeId: 'd9',
+    revision: 9,
+    docs: [{ id: 'd9', title: '旧稿', nodes: [{ id: 'n9', text: '本地旧的', parentId: null, x: 0, y: 0 }] }],
+  }
+  const picked = pickInitialState(host, local)
+  assert.equal(picked.recovered, false)
+  assert.equal(picked.state.docs[0].nodes[0].text, '宿主写的')
+})
+
+test('pickInitialState：两边都空时给一张可用的空脑图', () => {
+  const picked = pickInitialState(null, null)
+  assert.equal(picked.recovered, false)
+  assert.equal(picked.state.docs.length, 1)
+  assert.equal(picked.state.docs[0].nodes.length, 0)
+})
 
 test('子树枚举包含自己且不漏层级', () => {
   const { doc, root, a, a1 } = build()

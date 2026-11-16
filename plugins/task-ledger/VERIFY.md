@@ -31,12 +31,17 @@ Source hashes at verification time (re-run the suites if any of these change):
 | File | sha256 |
 | --- | --- |
 | `index.js` | `f1aa9a14fbaaf578eb625d03d2a247d8472ed3ddc83579606a20bd67dcc6b17b` |
-| `ledger.js` | `65f0582f2fb58cef198aa3f428c8df04a4e99cdff019a6b6bd05d412a31fb452` |
-| `index-md.js` | `14301a76db10ed4bb0ba3c19c9b62c1e32d517611ab2da9550c662993a1e8186` |
+| `ledger.js` | `4c14a0a91ba8bf4fbd70335ea775a7153818f8bf5fb5a21c79792cea1ec0da19` |
+| `index-md.js` | `afccdd051074355538878441e11cd1ce3c837772261f5b344ed5b42b11b5016c` |
 | `protocol.js` | `d5890c0fe8b7166fff60ea3879ac38a56d6ad9ca9c759b3087bf7e2c401155c2` |
 | `client.js` | `4f5aee4d99ae8ba42863a3932e39a58c4b217f144b95bf3ddb9ca9023c696699` |
 | `.verify-host.mjs` | `1a8540776c4d8405cfbe806a54274978e1183ea02fc00408fbc85055c8510a03` |
 | `.verify-client.mjs` | `18523607f07cb4f8493d0000045cba761a02213bbe3b232fa932a5dbaffcbfaf` |
+
+2026-11-16 re-verification: `ledger.js` (lease identity) and `index-md.js` (unique
+temp name for INDEX.md) changed. Both suites were re-run on Node 26.2.0:
+host 52/52 PASS, client 7/7 PASS, and the new store-level `node:test` suite
+(`npm test`, 8 tests) passes. The hash table above carries the current values.
 
 ## How to run
 

@@ -1,5 +1,10 @@
 # dsh-voice-control
 
+> **已被取代（2026-11-16）**：本包的能力已并入 [`dsh-voice-companion`](../voice-companion/README.md) ≥0.4.0
+> （按住说话热键与按会话路由 → `src/client/hotkey.js`）。
+> 本包不再接新功能；新装用户请直接装 `dsh-voice-companion`。已装用户可继续用，能力不变。
+> 取代惯例见 [`docs/DEPRECATION.md`](../../docs/DEPRECATION.md)。
+
 按住一个键说话，话被送到「该去的那个 Session」，回复用语音播回来。
 
 插件分两半：Host 半片持有 API key、做语音合成、调度 `ctx.sessionController`；浏览器半片负责录音、HUD、播报。两半之间走同源 HTTP 路由，和 realtime-voice 用的是同一套约定。

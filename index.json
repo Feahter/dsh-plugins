@@ -61,12 +61,12 @@
         "zh": "实时语音输入"
       },
       "description": {
-        "en": "Continuous dictation plus cleanup and dictation-translation: speak, and every two neighbouring phrases are polished together before landing in the field — fillers removed, self-corrections followed, Chinese spoken and English written. Exposes a voiceInput service other plugins can attach to.",
-        "zh": "连续听写 + 自动排版 + 口述翻译：两句相邻的话一起校对了再插入，去口头语、接住「不对，我是说…」、中文说成英文。并把能力暴露成 voiceInput 服务，别的输入插件可直接接入。"
+        "en": "Superseded by dsh-voice-companion ≥0.4.0 — its dictation, polish and translation modes now live in that plugin; this package gets no new features. Continuous dictation plus cleanup and dictation-translation: speak, and every two neighbouring phrases are polished together before landing in the field — fillers removed, self-corrections followed, Chinese spoken and English written. Exposes a voiceInput service other plugins can attach to.",
+        "zh": "已被 dsh-voice-companion ≥0.4.0 取代：听写、排版、口述翻译都并入那个插件，本包不再接新功能。 连续听写 + 自动排版 + 口述翻译：两句相邻的话一起校对了再插入，去口头语、接住「不对，我是说…」、中文说成英文。并把能力暴露成 voiceInput 服务，别的输入插件可直接接入。"
       },
       "icon": "plugins/realtime-voice/icon.svg",
       "author": "Feahter",
-      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion",
       "repository": {
         "url": "https://github.com/Feahter/dsh-plugins",
         "directory": "plugins/realtime-voice"
@@ -805,12 +805,12 @@
         "zh": "语音控制"
       },
       "description": {
-        "zh": "按住 Ctrl+Shift+Space 说话，这句话被送进「该去的那个 Session」，回复用语音播回来。路由是一个纯函数（17 个单测覆盖）：显式新开 → 新建会话；标题强匹配 → 回到那个会话；「继续」这类普通接续 → 最近且唯一的会话；「回到 X」但 X 谁也不是 → 不猜，改成播报候选让你说序号。错路由比不路由更糟，所以 confidence < 0.6 一律转成确认。Host 半片持有 API key、做语音合成与 sessionController 调度，浏览器半片负责录音、HUD 与播报，两边走同源 HTTP（health/plan/dispatch/speak/transcribe）。热键与声音可在 localStorage 覆盖。",
-        "en": "Hold Ctrl+Shift+Space, speak, and the utterance is delivered to the Session it belongs to; the reply is spoken back. Routing is one pure function covered by 17 unit tests: an explicit new-session phrase creates one, a strong title match resumes it, a plain \"continue\" goes to the single most recent candidate, and \"back to X\" where X matches nothing is never guessed — it speaks the candidates and asks for a number. A wrong route is worse than no route, so anything under 0.6 confidence becomes a confirmation. The host half holds the API key, does speech synthesis and drives sessionController; the browser half records, shows the HUD and speaks; both talk over same-origin HTTP (health/plan/dispatch/speak/transcribe). Hotkey and voice are overridable from localStorage."
+        "zh": "已被 dsh-voice-companion ≥0.4.0 取代：按住说话热键与按会话路由都并入那个插件，本包不再接新功能。 按住 Ctrl+Shift+Space 说话，这句话被送进「该去的那个 Session」，回复用语音播回来。路由是一个纯函数（17 个单测覆盖）：显式新开 → 新建会话；标题强匹配 → 回到那个会话；「继续」这类普通接续 → 最近且唯一的会话；「回到 X」但 X 谁也不是 → 不猜，改成播报候选让你说序号。错路由比不路由更糟，所以 confidence < 0.6 一律转成确认。Host 半片持有 API key、做语音合成与 sessionController 调度，浏览器半片负责录音、HUD 与播报，两边走同源 HTTP（health/plan/dispatch/speak/transcribe）。热键与声音可在 localStorage 覆盖。",
+        "en": "Superseded by dsh-voice-companion ≥0.4.0 — its hold-to-talk hotkey and session routing now live in that plugin; this package gets no new features. Hold Ctrl+Shift+Space, speak, and the utterance is delivered to the Session it belongs to; the reply is spoken back. Routing is one pure function covered by 17 unit tests: an explicit new-session phrase creates one, a strong title match resumes it, a plain \"continue\" goes to the single most recent candidate, and \"back to X\" where X matches nothing is never guessed — it speaks the candidates and asks for a number. A wrong route is worse than no route, so anything under 0.6 confidence becomes a confirmation. The host half holds the API key, does speech synthesis and drives sessionController; the browser half records, shows the HUD and speaks; both talk over same-origin HTTP (health/plan/dispatch/speak/transcribe). Hotkey and voice are overridable from localStorage."
       },
       "icon": "plugins/voice-control/icon.svg",
       "author": "Feahter",
-      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion",
       "repository": {
         "url": "https://github.com/Feahter/dsh-plugins",
         "directory": "plugins/voice-control"

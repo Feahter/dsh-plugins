@@ -1,8 +1,15 @@
 {
   "name": "dsh-update-check",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH Desktop 版本更新检查：侧边栏面板显示已安装版本与更新源的最新版本，发现问题时一键交给应用内更新器（下载 → 校验 → 确认重启）。",
   "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "update-check",
+    "electron-updater",
+    "desktop"
+  ],
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -21,7 +28,8 @@
     "test"
   ],
   "engines": {
-    "dsh": ">=0.2.1-rc.4"
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
   },
   "dsh": {
     "bundle": {

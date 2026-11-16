@@ -57,6 +57,18 @@ function stageOrder(run) {
     .map((event) => event.data.stage)
 }
 
+test('resolveProject：中文书名按标题子串解析，不报「非法 id」', async (t) => {
+  const { engine } = await setup(t)
+  const project = await engine.createProject({ title: '长夜将明' })
+  assert.equal((await engine.resolveProject('长夜将明')).id, project.id)
+  assert.equal((await engine.resolveProject('长夜')).id, project.id)
+  assert.equal((await engine.resolveProject(project.id.slice(0, 6))).id, project.id)
+  await assert.rejects(
+    () => engine.resolveProject('不存在的书名'),
+    error => error.code === 'NOT_FOUND',
+  )
+})
+
 // ------------------------------------------------------------------ 执行顺序
 
 test('按 recipe 顺序执行并写出产物', async (t) => {

@@ -501,6 +501,33 @@ async function main() {
   assert.equal(byPath('/plan').length, 0, 'blur makes no /plan call');
   pass('blur', 'state=idle plan=0');
 
+  // --- 5b. releasing a modifier before Space still ends the press ---
+  resetCalls();
+  planResponses.push({
+    ok: true,
+    plan: { action: 'resume', sessionId: 's1', candidates: [], confidence: 0.9, reason: 'modifier release', text: '你好世界' },
+    confirmation: '好，接着「语音控制插件」。',
+  });
+  transcript = '你好世界';
+  const binding = loaded.__test.parseHotkey('Ctrl+Shift+Space');
+  assert.equal(
+    loaded.__test.modifierReleased(pressEvent({ key: 'Shift', code: 'ShiftLeft', shiftKey: false }), binding),
+    true,
+    'a Shift keyup counts as releasing the chord',
+  );
+  now += 5000;
+  fire('document', 'keydown', pressEvent());
+  assert.equal(loaded.__test.status().state, 'listening', 'modifier case: listening');
+  now += 420;
+  const shiftUp = pressEvent({ key: 'Shift', code: 'ShiftLeft', shiftKey: false });
+  fire('document', 'keyup', shiftUp);
+  assert.equal(shiftUp.prevented, true, 'modifier keyup preventDefault');
+  assert.notEqual(loaded.__test.status().state, 'listening', 'modifier keyup ends listening');
+  await loaded.__test.whenIdle();
+  assert.equal(byPath('/plan').length, 1, 'modifier keyup still transcribes and plans');
+  assert.equal(loaded.__test.status().state, 'idle', 'modifier keyup returns to idle');
+  pass('modifier release', 'shift-up ends the press and dispatches');
+
   // --- 6. __dshVoiceControl debug handle + disposer ---
   assert.equal(typeof globalThis.window.__dshVoiceControl.start, 'function', 'window.__dshVoiceControl.start');
   assert.equal(typeof globalThis.window.__dshVoiceControl.stop, 'function', 'window.__dshVoiceControl.stop');

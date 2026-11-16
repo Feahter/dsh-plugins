@@ -1,9 +1,16 @@
 {
   "name": "dsh-task-ledger",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Task-centric ledger for the DeepSeek Harness: an external, canonical task ledger with resume leases, evidence-gated closeout, agent tools, and a management panel.",
   "license": "MIT",
   "author": "Feahter",
+  "keywords": [
+    "dsh-plugin",
+    "dsh-bundle",
+    "task-ledger",
+    "handoff",
+    "agent-memory"
+  ],
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -24,10 +31,16 @@
     "README.md",
     ".verify-host.mjs",
     ".verify-client.mjs",
-    "VERIFY.md"
+    "VERIFY.md",
+    "test"
   ],
+  "scripts": {
+    "test": "node .verify-host.mjs && node .verify-client.mjs && node --test test/*.test.mjs",
+    "verify": "node .verify-host.mjs && node .verify-client.mjs"
+  },
   "engines": {
-    "dsh": ">=0.2.1-rc.4"
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
   },
   "dsh": {
     "bundle": {

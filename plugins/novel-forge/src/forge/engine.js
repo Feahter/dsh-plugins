@@ -101,6 +101,8 @@ export class ForgeEngine {
     }
     /** 活跃 run：projectId → live 对象 */
     this.live = new Map()
+    /** 正在「续写本章」的项目：续写不经过 stage/run，但同样不能和流水线/手改并发 */
+    this.continuing = new Set()
     /** 待合并落盘的 run：runId → timer */
     this.pendingWrites = new Map()
     // 同一个 run 的落盘串成一条链：合并写的 timer 与结构事件的即时写会并发，
@@ -114,6 +116,11 @@ export class ForgeEngine {
 
   #aborted(live) {
     return live.cancelRequested || live.controller.signal.aborted
+  }
+
+  /** 项目是否被一次 run 或一次「续写本章」占着。 */
+  #busy(projectId) {
+    return this.live.has(projectId) || this.continuing.has(projectId)
   }
 
   #recipe(recipeId) {
@@ -253,7 +260,9 @@ export class ForgeEngine {
     try {
       return await this.getProject(q)
     } catch (err) {
-      if (!(err instanceof ForgeError) || err.code !== 'NOT_FOUND') throw err
+      // 书名/标题含中文或空格时 getProject 的 safeId 会先抛 BAD_PARAMS。
+      // 那只是「不像 id」，不是参数错误：继续按标题子串查找。
+      if (!(err instanceof ForgeError) || (err.code !== 'NOT_FOUND' && err.code !== 'BAD_PARAMS')) throw err
     }
     const all = await this.store.listProjects()
     const lower = q.toLowerCase()
@@ -341,8 +350,8 @@ export class ForgeEngine {
    */
   async updateProject(idOrPrefix, patch = {}) {
     const project = await this.getProject(idOrPrefix)
-    if (this.live.has(project.id)) {
-      throw new ForgeError('RUN_ACTIVE', '项目正在运行，不能修改', { projectId: project.id })
+    if (this.#busy(project.id)) {
+      throw new ForgeError('RUN_ACTIVE', '项目正在运行或续写中，不能修改', { projectId: project.id })
     }
     const unknown = Object.keys(patch).filter((key) => key !== 'title' && key !== 'params')
     if (unknown.length) throw new ForgeError('BAD_PARAMS', `不支持的字段：${unknown.join(', ')}`, { fields: unknown })
@@ -366,8 +375,8 @@ export class ForgeEngine {
 
   async deleteProject(idOrPrefix) {
     const project = await this.getProject(idOrPrefix)
-    if (this.live.has(project.id)) {
-      throw new ForgeError('RUN_ACTIVE', '项目正在运行，不能删除', { projectId: project.id })
+    if (this.#busy(project.id)) {
+      throw new ForgeError('RUN_ACTIVE', '项目正在运行或续写中，不能删除', { projectId: project.id })
     }
     return this.store.trashProject(project.id)
   }
@@ -381,8 +390,8 @@ export class ForgeEngine {
    */
   async writeArtifact(idOrPrefix, key, spec, by = {}) {
     const project = await this.getProject(idOrPrefix)
-    if (this.live.has(project.id)) {
-      throw new ForgeError('RUN_ACTIVE', '项目正在运行，不能手动写入产物', { projectId: project.id })
+    if (this.#busy(project.id)) {
+      throw new ForgeError('RUN_ACTIVE', '项目正在运行或续写中，不能手动写入产物', { projectId: project.id })
     }
     const k = safeKey(key)
     if (!spec || typeof spec !== 'object') throw new ForgeError('BAD_PARAMS', '产物必须是对象')
@@ -413,6 +422,9 @@ export class ForgeEngine {
     const project = await this.getProject(idOrPrefix)
     const recipe = this.#recipe(project.recipe)
     const selected = normalizeStageList(recipe, options || {})
+    if (this.continuing.has(project.id)) {
+      throw new ForgeError('RUN_ACTIVE', '项目正在续写这一章，等它写完再启动流水线', { projectId: project.id })
+    }
     if (this.live.has(project.id)) {
       const active = this.live.get(project.id)
       if (active.run.status === 'running') {
@@ -1131,9 +1143,20 @@ export class ForgeEngine {
    */
   async continueChapter(idOrPrefix, chapterId) {
     const project = await this.getProject(idOrPrefix)
-    if (this.live.has(project.id)) {
-      throw new ForgeError('RUN_ACTIVE', '项目正在运行，不能续写这一章', { projectId: project.id })
+    if (this.#busy(project.id)) {
+      throw new ForgeError('RUN_ACTIVE', '项目正在运行或续写中，不能重复操作', { projectId: project.id })
     }
+    // 续写不经过 stage/run，但一样会调模型、写 draft；必须在整个过程中占住项目，
+    // 否则另一个续写或流水线会读到旧正文，两边各写一版，后写的把先写的吞掉。
+    this.continuing.add(project.id)
+    try {
+      return await this.#continueChapter(project, chapterId)
+    } finally {
+      this.continuing.delete(project.id)
+    }
+  }
+
+  async #continueChapter(project, chapterId) {
     const recipe = this.#recipe(project.recipe)
     if (typeof recipe.continueChapter !== 'function') {
       throw new ForgeError('BAD_RECIPE', `recipe ${project.recipe} 不支持续写`, { recipe: project.recipe })

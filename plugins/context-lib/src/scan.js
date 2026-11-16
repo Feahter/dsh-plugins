@@ -17,6 +17,9 @@ export const TEXT_LIMIT_BYTES = 2 * 1024 * 1024
 /** 单次扫描最多处理的候选文件数。 */
 export const MAX_SCAN_FILES = 4000
 
+/** 单次遍历最多记录的读取错误数（防止一棵坏树撑爆返回值）。 */
+export const MAX_SCAN_ERRORS = 20
+
 /** 永远跳过的目录名（契约 §4，逐字对齐）。 */
 export const SKIP_DIRS = new Set([
   'node_modules',
@@ -307,13 +310,23 @@ function patternList(value) {
 /**
  * 递归遍历来源目录。
  * 深度按目录层级计：根目录文件为 0，根下第一层子目录里的文件为 1。
- * 返回 { files, truncated, skipped }；不跟随符号链接。
+ * 返回 { files, truncated, skipped, errors }；不跟随符号链接。
+ * `errors` 只记「读不动」的目录/文件（ENOENT/ENOTDIR 视为真删除，不记）。
  */
 export async function walkFiles(source, options = {}) {
   const root = typeof source === 'string' ? source : source?.path
   const files = []
-  const result = { files, truncated: false, skipped: 0 }
+  const result = { files, truncated: false, skipped: 0, errors: [] }
   if (!root) return result
+  const recordError = (dir, error) => {
+    if (result.errors.length >= MAX_SCAN_ERRORS) return
+    const code = typeof error?.code === 'string' ? error.code : ''
+    // ENOENT/ENOTDIR mean the directory is genuinely gone (or was replaced by
+    // a file): the caller may treat its entries as removed. Anything else is a
+    // transient read failure and must not be mistaken for deletion.
+    if (code === 'ENOENT' || code === 'ENOTDIR') return
+    result.errors.push({ path: dir, message: (error && error.message) || String(error) })
+  }
 
   const maxDepth = Number.isFinite(Number(options.maxDepth)) ? Math.max(0, Math.trunc(Number(options.maxDepth))) : 6
   const maxFiles = Number.isFinite(Number(options.maxFiles)) ? Math.max(1, Math.trunc(Number(options.maxFiles))) : MAX_SCAN_FILES
@@ -327,7 +340,8 @@ export async function walkFiles(source, options = {}) {
     let entries
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
+    } catch (error) {
+      recordError(dir, error)
       return
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
@@ -377,7 +391,8 @@ export async function walkFiles(source, options = {}) {
       let stat
       try {
         stat = await fs.stat(abs)
-      } catch {
+      } catch (error) {
+        recordError(abs, error)
         continue
       }
       if (!stat.isFile()) continue
