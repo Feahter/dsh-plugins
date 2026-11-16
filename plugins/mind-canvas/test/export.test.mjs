@@ -290,16 +290,22 @@ test('父节点缺失的孤儿升格为根；环与自引用不会死循环', ()
   assert.equal((mm.match(/\bTEXT=/g) ?? []).length, 3)
 })
 
-test('EXPORT_FORMATS 恰好四种且顺序、扩展名、MIME 与标签正确', () => {
-  assert.equal(EXPORT_FORMATS.length, 4)
-  assert.deepEqual(EXPORT_FORMATS.map(format => format.id), ['markdown', 'opml', 'freemind', 'json'])
-  assert.deepEqual(EXPORT_FORMATS.map(format => format.ext), ['.md', '.opml', '.mm', '.json'])
+test('EXPORT_FORMATS 恰好五种且顺序、扩展名、MIME 与标签正确', () => {
+  assert.equal(EXPORT_FORMATS.length, 5)
+  assert.deepEqual(EXPORT_FORMATS.map(format => format.id), ['markdown', 'opml', 'freemind', 'json', 'jsoncanvas'])
+  assert.deepEqual(EXPORT_FORMATS.map(format => format.ext), ['.md', '.opml', '.mm', '.json', '.canvas'])
   assert.deepEqual(EXPORT_FORMATS.map(format => format.mime), [
     'text/markdown;charset=utf-8',
     'text/x-opml;charset=utf-8',
     'application/x-freemind;charset=utf-8',
     'application/json;charset=utf-8',
+    'application/json;charset=utf-8',
   ])
+  assert.deepEqual(EXPORT_FORMATS[4].label, {
+    zh: 'JSON Canvas（Obsidian / Heptabase）',
+    en: 'JSON Canvas (Obsidian / Heptabase)',
+  })
+  assert.equal(EXPORT_FORMATS[4].labelKey, 'exportJsonCanvas')
   assert.deepEqual(EXPORT_FORMATS[0].label, { zh: 'Markdown 大纲', en: 'Markdown outline' })
   assert.deepEqual(EXPORT_FORMATS[1].label, {
     zh: 'OPML（XMind / MindNode 可导入）',

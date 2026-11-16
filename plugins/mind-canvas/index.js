@@ -11,6 +11,7 @@ import { Store, validateState, dshHome } from './src/store.js'
 import { readInspirations } from './src/inspirations.js'
 import { buildPrompt, callModel, modelInfo, normalizeIdeas } from './src/llm.js'
 import { outline, addChildren, findNode, summarize } from './src/outline.js'
+import { importJsonCanvas, toJsonCanvas, toJsonCanvasData } from './src/export.js'
 
 export const ROUTE_PREFIX = '/mind-canvas'
 const MAX_BODY_BYTES = 9 * 1024 * 1024
@@ -170,6 +171,24 @@ async function resolveDoc(store, hint) {
   return resolveDocFromState(await store.read(), hint)
 }
 
+/** 新脑图 id；和前端 makeId 同一套形状，避免两边的 id 看起来像两个来源。 */
+function makeDocId() {
+  return `d_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
+
+function newDoc(title, now) {
+  return {
+    id: makeDocId(),
+    title,
+    nodes: [],
+    layout: 'tree-right',
+    theme: { preset: 'auto' },
+    view: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export function createTools(store) {
   return [
     defineTool(
@@ -227,6 +246,128 @@ export function createTools(store) {
           added,
           hint: outcome.written && added.length > 1 ? '画布上点「整理成树」会把新节点排整齐。' : undefined,
         }
+      },
+    ),
+    defineTool(
+      'mind_canvas_export_json_canvas',
+      'Export a mind map as a JSON Canvas 1.0 file (interoperable with Obsidian / Heptabase). Returns the JSON string plus node and edge counts. Pass pretty=false for a compact single line.',
+      {
+        type: 'object',
+        properties: {
+          doc: docParam,
+          pretty: { type: 'boolean', description: '是否输出带缩进的可读 JSON，默认 true。' },
+        },
+        additionalProperties: false,
+      },
+      async args => {
+        const doc = await resolveDoc(store, args?.doc)
+        if (!doc) throw new Error(`没找到脑图：${args?.doc ?? ''}`)
+        const data = toJsonCanvasData(doc)
+        const json = toJsonCanvas(doc, { pretty: args?.pretty !== false })
+        return {
+          doc: doc.title,
+          docId: doc.id,
+          format: 'json-canvas',
+          specVersion: '1.0',
+          nodes: data.nodes.length,
+          edges: data.edges.length,
+          bytes: Buffer.byteLength(json, 'utf8'),
+          json,
+        }
+      },
+    ),
+    defineTool(
+      'mind_canvas_import_json_canvas',
+      'Import a JSON Canvas 1.0 document (Obsidian / Heptabase) into a mind map. text nodes and edges become nodes and parent links; unsupported node types, orphan edges and cycles are skipped and counted, so one bad record never fails the whole import. Returns {imported, skipped, warnings[]}.',
+      {
+        type: 'object',
+        properties: {
+          json: { type: 'string', description: 'JSON Canvas 1.0 文档内容（整份 JSON 字符串）。' },
+          doc: { type: 'string', description: '要合并进的脑图标题（部分匹配即可）。省略或匹配不到时新建一张。' },
+        },
+        required: ['json'],
+        additionalProperties: false,
+      },
+      async args => {
+        let parsed
+        try {
+          parsed = importJsonCanvas(args?.json)
+        } catch (error) {
+          const failure = new Error(`JSON Canvas 解析失败：${error?.message ?? error}`)
+          failure.status = 400
+          failure.code = 'invalid-json-canvas'
+          throw failure
+        }
+        const now = new Date().toISOString()
+        let report = null
+        const outcome = await store.update(state => {
+          const base = state && Array.isArray(state.docs) ? state : null
+          const existing = base && args?.doc ? findDocInState(base, args.doc) : null
+          if (parsed.nodes.length === 0) {
+            report = {
+              doc: existing?.title ?? null,
+              docId: existing?.id ?? null,
+              created: false,
+              imported: 0,
+              skipped: parsed.skipped,
+              skippedNodes: parsed.skippedNodes,
+              skippedEdges: parsed.skippedEdges,
+              warnings: parsed.warnings,
+            }
+            return undefined
+          }
+          const title = String(args?.doc ?? '').trim() || 'JSON Canvas 导入'
+          const target = existing ?? newDoc(title, now)
+          const currentNodes = Array.isArray(target.nodes) ? target.nodes : []
+          const taken = new Set(currentNodes.map(node => node.id))
+          const remap = new Map()
+          for (const node of parsed.nodes) {
+            let id = node.id
+            if (taken.has(id)) {
+              let suffix = 2
+              while (taken.has(`${id}_${suffix}`)) suffix += 1
+              id = `${id}_${suffix}`
+            }
+            taken.add(id)
+            remap.set(node.id, id)
+          }
+          const added = parsed.nodes.map(node => ({
+            id: remap.get(node.id),
+            text: node.text,
+            parentId: node.parentId ? (remap.get(node.parentId) ?? null) : null,
+            x: node.x,
+            y: node.y,
+            tone: node.tone,
+            source: { kind: 'json-canvas' },
+            createdAt: now,
+          }))
+          const nextDoc = {
+            ...target,
+            nodes: [...currentNodes, ...added],
+            updatedAt: now,
+          }
+          const docs = base
+            ? base.docs.map(item => (item.id === nextDoc.id ? nextDoc : item))
+            : []
+          if (!docs.some(item => item.id === nextDoc.id)) docs.push(nextDoc)
+          report = {
+            doc: nextDoc.title,
+            docId: nextDoc.id,
+            created: !existing,
+            imported: parsed.imported,
+            skipped: parsed.skipped,
+            skippedNodes: parsed.skippedNodes,
+            skippedEdges: parsed.skippedEdges,
+            warnings: parsed.warnings,
+          }
+          return {
+            version: base?.version ?? 1,
+            docs,
+            activeId: nextDoc.id,
+            revision: (base?.revision ?? 0) + 1,
+          }
+        })
+        return { ...report, written: outcome.written }
       },
     ),
   ]

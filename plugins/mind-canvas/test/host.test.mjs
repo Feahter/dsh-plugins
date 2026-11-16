@@ -347,3 +347,80 @@ test('没有脑图时工具给出可读的错误', async () => {
     await cleanup()
   }
 })
+
+test('mind_canvas_export_json_canvas 输出可解析、可复现的 JSON Canvas', async () => {
+  const { store, cleanup } = await tempStore()
+  try {
+    await store.write(sampleState())
+    const tools = createTools(store)
+    const exportTool = tools.find(tool => tool.name === 'mind_canvas_export_json_canvas')
+
+    const compact = await exportTool.execute({ pretty: false })
+    assert.equal(compact.doc, '选题')
+    assert.equal(compact.format, 'json-canvas')
+    assert.equal(compact.specVersion, '1.0')
+    assert.equal(compact.nodes, 2)
+    assert.equal(compact.edges, 1)
+    assert.equal(compact.bytes, Buffer.byteLength(compact.json, 'utf8'))
+    const parsed = JSON.parse(compact.json)
+    assert.equal(parsed.nodes.length, 2)
+    assert.equal(parsed.edges.length, 1)
+    assert.equal(parsed.edges[0].fromNode, 'n1')
+    assert.equal(parsed.edges[0].toNode, 'n2')
+
+    const again = await exportTool.execute({ pretty: false })
+    assert.equal(again.json, compact.json)
+    const pretty = await exportTool.execute({ pretty: true })
+    assert.notEqual(pretty.json, compact.json)
+    assert.deepEqual(JSON.parse(pretty.json), parsed)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('mind_canvas_import_json_canvas 新建/合并脑图，脏数据跳过并计数', async () => {
+  const { store, cleanup } = await tempStore()
+  try {
+    const tools = createTools(store)
+    const importTool = tools.find(tool => tool.name === 'mind_canvas_import_json_canvas')
+    const dirty = JSON.stringify({
+      title: 'JSON 里的未知字段，应当被忽略',
+      nodes: [
+        { id: 'a', type: 'text', text: '根', x: 0, y: 0, width: 100, height: 50 },
+        { id: 'b', type: 'text', text: '子', x: 240, y: 0, width: 100, height: 50 },
+        { id: 'f', type: 'file', file: 'note.md', x: 0, y: 0, width: 10, height: 10 },
+      ],
+      edges: [
+        { id: 'e1', fromNode: 'a', toNode: 'b' },
+        { id: 'e2', fromNode: 'a', toNode: 'f' },
+      ],
+    })
+
+    const first = await importTool.execute({ json: dirty, doc: '导入的图' })
+    assert.equal(first.created, true)
+    assert.equal(first.written, true)
+    assert.equal(first.imported, 2)
+    assert.equal(first.skipped, 2)
+    assert.equal(first.skippedNodes, 1)
+    assert.equal(first.skippedEdges, 1)
+    assert.ok(first.warnings.length >= 2)
+    const after = await store.read()
+    assert.equal(after.docs.length, 1)
+    assert.equal(after.docs[0].title, '导入的图')
+    assert.equal(after.activeId, after.docs[0].id)
+    assert.equal(after.docs[0].nodes.length, 2)
+    assert.equal(after.docs[0].nodes.find(node => node.id === 'b').parentId, 'a')
+
+    const merged = await importTool.execute({
+      json: JSON.stringify({ nodes: [{ id: 'c', type: 'text', text: '合并进来的', x: 480, y: 0, width: 100, height: 50 }] }),
+      doc: '导入的图',
+    })
+    assert.equal(merged.created, false)
+    assert.equal(merged.imported, 1)
+    assert.equal((await store.read()).docs[0].nodes.length, 3)
+
+    await assert.rejects(() => importTool.execute({ json: '{ 坏 json' }), /JSON Canvas 解析失败/)
+  } finally {
+    await cleanup()
+  }
+})

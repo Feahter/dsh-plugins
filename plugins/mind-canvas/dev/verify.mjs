@@ -334,8 +334,8 @@ try {
   await page.getByRole('button', { name: '导出' }).click()
   await page.waitForSelector('.mc-menu [data-format]', { timeout: 3000 })
   const formats = await page.evaluate(() => [...document.querySelectorAll('.mc-menu [data-format]')].map(node => node.dataset.format))
-  check('导出菜单包含 4 种脑图格式 + PNG',
-    ['markdown', 'opml', 'freemind', 'json', 'png'].every(id => formats.includes(id)), formats.join(','))
+  check('导出菜单包含 5 种脑图格式 + PNG',
+    ['markdown', 'opml', 'freemind', 'json', 'jsoncanvas', 'png'].every(id => formats.includes(id)), formats.join(','))
 
   const grab = async (format) => {
     const [download] = await Promise.all([
@@ -362,6 +362,24 @@ try {
   await page.getByRole('button', { name: '导出' }).click()
   const json = await grab('json')
   check('导出 JSON 可解析', (() => { try { return Boolean(JSON.parse(json.text).nodes.length) } catch { return false } })())
+
+  await page.getByRole('button', { name: '导出' }).click()
+  const jsonCanvas = await grab('jsoncanvas')
+  check('导出 JSON Canvas 1.0：.canvas 文件结构合法', (() => {
+    try {
+      const data = JSON.parse(jsonCanvas.text)
+      const nodes = Array.isArray(data.nodes) ? data.nodes : []
+      const edges = Array.isArray(data.edges) ? data.edges : []
+      const ids = new Set(nodes.map(node => node.id))
+      return jsonCanvas.name.endsWith('.canvas')
+        && nodes.length >= 5
+        && nodes.every(node => node.type === 'text' && Number.isInteger(node.x) && Number.isInteger(node.y)
+          && Number.isInteger(node.width) && Number.isInteger(node.height))
+        && edges.every(edge => ids.has(edge.fromNode) && ids.has(edge.toNode))
+    } catch {
+      return false
+    }
+  })(), jsonCanvas.name)
 
   await page.getByRole('button', { name: '导出' }).click()
   const png = await grab('png')

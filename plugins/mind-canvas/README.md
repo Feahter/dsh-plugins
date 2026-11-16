@@ -1,6 +1,6 @@
 # 脑图创意画布 · dsh-mind-canvas
 
-DeepSeek Harness 侧栏里的一个无限画布脑图。一句话起根，`Tab` 往右长，差不多了就一键整理成规整的树；可以顺手把自媒体工作台里的灵感拉进来当根节点，也可以让助手把一个节点 AI 发散成几条子想法，最后导出成 Markdown / OPML / FreeMind / JSON / PNG。
+DeepSeek Harness 侧栏里的一个无限画布脑图。一句话起根，`Tab` 往右长，差不多了就一键整理成规整的树；可以顺手把自媒体工作台里的灵感拉进来当根节点，也可以让助手把一个节点 AI 发散成几条子想法，最后导出成 Markdown / OPML / FreeMind / JSON / JSON Canvas / PNG。
 
 ![总览](docs/overview.webp)
 
@@ -16,7 +16,7 @@ DeepSeek Harness 侧栏里的一个无限画布脑图。一句话起根，`Tab` 
 
 **主题：跟随宿主，或自己调。** 5 套预设（纸墨 / 深夜 / 森林 / 落日 / 靛蓝）+ 自定义 13 个颜色位。「跟随宿主」时一个颜色都不覆盖，完全继承应用明暗主题；14 组配色的对比度都过了 WCAG 4.5:1。
 
-**导出真的能进别的工具。** Markdown 大纲、OPML 2.0（XMind / MindNode / 幕布可导入）、FreeMind `.mm`、原始 JSON（带坐标，可再导回）、PNG 图片。
+**导出真的能进别的工具。** Markdown 大纲、OPML 2.0（XMind / MindNode / 幕布可导入）、FreeMind `.mm`、原始 JSON（带坐标，可再导回）、JSON Canvas 1.0 `.canvas`（Obsidian / Heptabase 通用；助手也能导入）、PNG 图片。
 
 **和自媒体工作台联动。** 「从灵感导入」只读 `~/.dsh/media-desk/state.json` 的标题级字段，把选中的灵感落成根节点；「AI 发散」用宿主当前默认模型给出 3–6 个具体子想法，没有可用模型时明确报错，不编数据。
 
@@ -33,7 +33,7 @@ DeepSeek Harness 侧栏里的一个无限画布脑图。一句话起根，`Tab` 
 
 ## 截图
 
-| 换颜色（6 色自选） | 导出（5 种格式） |
+| 换颜色（6 色自选） | 导出（6 种格式） |
 | --- | --- |
 | ![换颜色](docs/colors.webp) | ![导出](docs/export.webp) |
 
@@ -86,19 +86,21 @@ DeepSeek Harness 侧栏里的一个无限画布脑图。一句话起根，`Tab` 
 
 ## 助手工具
 
-装了插件之后，助手多两个工具：
+装了插件之后，助手多四个工具：
 
 - `mind_canvas_read` —— 把某张脑图读成 Markdown 大纲（带节点数 / 根数 / 层数）。
 - `mind_canvas_add` —— 在某个节点下面加子节点（`parent` 用文字部分匹配，匹配不到就落到根上）。
+- `mind_canvas_export_json_canvas` —— 把某张脑图导出成 JSON Canvas 1.0（`pretty` 控制缩进）。
+- `mind_canvas_import_json_canvas` —— 吃一份 JSON Canvas，转成新脑图或合并进已有脑图；file / link / 未知节点、孤边、环跳过并计入 `{imported, skipped, warnings[]}`。
 
-于是「把这几个想法整理成一张脑图」可以直接在对话里做完，画布刷新即见。Markdown 大纲只有一份实现（`src/export.js`），界面导出、宿主工具和测试共用它。
+于是「把这几个想法整理成一张脑图」可以直接在对话里做完，画布刷新即见。Markdown 大纲与 JSON Canvas 都只有一份实现（`src/export.js`），界面导出、宿主工具和测试共用它。
 
 ## 技术选择
 
 - **[@xyflow/react](https://reactflow.dev) 12.12.1**（MIT）：无限画布的平移 / 缩放 / 拖拽 / 连线 / fitView / MiniMap 都是现成的，节点是真 React 组件，卡片内联编辑和中文输入法都可控。
 - **[d3-hierarchy](https://github.com/d3/d3-hierarchy) 3.1.2**（MIT）：`tree()` 的 tidy tree 负责「整理成树」。
 - **html-to-image 1.11.13**（MIT）：只用来导出 PNG。
-- 除 React / ReactDOM 走宿主 seed 模块表外，其余全打进 `client.js`（约 284KB，gzip 后 ~70KB）。
+- 除 React / ReactDOM 走宿主 seed 模块表外，其余全打进 `client.js`（约 290KB，gzip 后 ~93KB）。
 - 宿主半片**零运行时依赖**，只用 Node 内置模块 —— 少一个装不上的包就少一类启动失败。
 - 主题不写死在 CSS 里：每个颜色都是 `var(--mc-*, var(--dsw-…))`，`theme.js` 只产出 `--mc-*` 覆盖。
 

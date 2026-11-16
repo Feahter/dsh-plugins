@@ -1,5 +1,6 @@
 // 脑图的纯数据层：树操作、整理布局、导出。不依赖 React 与 DOM，可在 Node 里直接测。
 import { hierarchy, tree as d3tree } from 'd3-hierarchy'
+import { estimateHeight } from './export.js'
 
 export const SCHEMA_VERSION = 1
 export const CARD_WIDTH = 208
@@ -19,17 +20,8 @@ export function nowIso() {
   return new Date().toISOString()
 }
 
-/** 卡片高度的粗估：按每行 13 个汉字折行，最多 4 行。 */
-export function estimateHeight(text) {
-  const clean = String(text ?? '').trim()
-  if (!clean) return 44
-  const width = 26 // 每行大约 26 个半角字符，中文约 13 个
-  let lines = 0
-  for (const paragraph of clean.split(/\n/)) {
-    lines += Math.max(1, Math.ceil(paragraph.length / width))
-  }
-  return 40 + Math.min(3, Math.max(0, lines - 1)) * 20
-}
+/** 卡片高度估算只有一份，在 src/export.js（JSON Canvas 导出也用它），这里保留旧名字。 */
+export { estimateHeight }
 
 export function createNode({ text = '', parentId = null, x = 0, y = 0, tone = 'a', source = null } = {}) {
   return {

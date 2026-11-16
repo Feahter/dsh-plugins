@@ -1084,7 +1084,7 @@ export function MindCanvasPage(props) {
               className: 'mc-menu-item',
               'data-format': item.id,
               onClick: () => runExport(item.id),
-            }, item.label[lang === 'en' ? 'en' : 'zh'], h('small', null, item.ext))),
+            }, item.labelKey ? t(item.labelKey) : item.label[lang === 'en' ? 'en' : 'zh'], h('small', null, item.ext))),
             h('div', { className: 'mc-menu-sep' }),
             h('button', {
               type: 'button',
