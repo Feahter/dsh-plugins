@@ -91,6 +91,19 @@
       },
       "versions": [
         {
+          "version": "0.3.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/realtime-voice"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "0.3.0",
           "publishTimestamp": 1794482916,
           "source": {
@@ -156,6 +169,19 @@
         }
       },
       "versions": [
+        {
+          "version": "0.4.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/voice-companion"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
         {
           "version": "0.4.0",
           "publishTimestamp": 1794732661,
@@ -232,6 +258,19 @@
       },
       "versions": [
         {
+          "version": "1.1.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/github-manager"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "1.1.0",
           "publishTimestamp": 1794656510,
           "source": {
@@ -298,6 +337,19 @@
         }
       },
       "versions": [
+        {
+          "version": "0.3.3",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/archive-rsi"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
         {
           "version": "0.3.2",
           "publishTimestamp": 1794732661,
@@ -410,6 +462,19 @@
       },
       "versions": [
         {
+          "version": "0.2.4",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/dsh-360"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "0.2.3",
           "publishTimestamp": 1794732661,
           "source": {
@@ -489,6 +554,19 @@
       },
       "versions": [
         {
+          "version": "0.3.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/mind-canvas"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "0.3.0",
           "publishTimestamp": 1794482916,
           "source": {
@@ -555,6 +633,19 @@
       },
       "versions": [
         {
+          "version": "1.0.3",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/task-ledger"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "1.0.2",
           "publishTimestamp": 1794409317,
           "source": {
@@ -618,6 +709,19 @@
         }
       },
       "versions": [
+        {
+          "version": "0.1.2",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/update-check"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
         {
           "version": "0.1.1",
           "publishTimestamp": 1794409317,
@@ -684,6 +788,19 @@
         }
       },
       "versions": [
+        {
+          "version": "0.4.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/novel-forge"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
         {
           "version": "0.4.0",
           "publishTimestamp": 1794832187,
@@ -768,6 +885,19 @@
       },
       "versions": [
         {
+          "version": "0.2.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/context-lib"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "0.2.0",
           "publishTimestamp": 1794666266,
           "source": {
@@ -835,6 +965,19 @@
         }
       },
       "versions": [
+        {
+          "version": "0.1.1",
+          "publishTimestamp": 1794838403,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "c59c921e9892efcc4f67ed702b700d59bbddad72",
+            "path": "plugins/voice-control"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
         {
           "version": "0.1.0",
           "publishTimestamp": 1794732757,
