@@ -554,6 +554,19 @@
       },
       "versions": [
         {
+          "version": "0.3.2",
+          "publishTimestamp": 1794839205,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "a18d9f163345d2852834c761cae825234564492a",
+            "path": "plugins/mind-canvas"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0"
+          }
+        },
+        {
           "version": "0.3.1",
           "publishTimestamp": 1794838403,
           "source": {
