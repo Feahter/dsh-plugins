@@ -8,6 +8,7 @@ import { defaultCraft, severityRank, countCjk } from './craft.js'
 import { chaptersOf } from './outline.js'
 import { characterBrief } from './ledger.js'
 import { buildPacket } from './packet.js'
+import { generateWithContinuation } from './continuation.js'
 import * as plan from './plan.js'
 import * as canonLib from './canon.js'
 import { markdownExport, epubExport } from './export.js'
@@ -688,6 +689,46 @@ async function callText(ctx, stage, promptFn, { phase, maxTokens, temperature } 
   return String(result?.text ?? '').trim()
 }
 
+/**
+ * 生成长正文（草稿 / 修订）：撞到模型输出上限时带着半截稿续写，而不是整章失败。
+ * 中文 1600 字的章按 wordsPerChapter*2.2 要 3520 tokens，换个输出上限低的模型就必撞；
+ * 重跑同参数还会撞在同一条线上，所以只能续写。
+ */
+async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, temperature, targetChars = 0 } = {}) {
+  const spec = promptSpec(ctx, promptFn, stage)
+  const base = {
+    system: spec.system,
+    user: spec.user,
+    maxTokens: Number.isFinite(maxTokens) ? maxTokens : spec.maxTokens,
+    temperature: Number.isFinite(temperature) ? temperature : spec.temperature,
+    stage,
+  }
+  const { text, parts } = await generateWithContinuation({
+    spec: base,
+    targetChars,
+    maxParts: 3,
+    generate: (next) =>
+      ctx.llm.generate({
+        system: next.system,
+        user: next.user,
+        maxTokens: next.maxTokens,
+        temperature: next.temperature,
+        json: false,
+        phase: phase ?? stage,
+        label: stage,
+        // 长章正文由 continuation 负责「接着写」，不让网关再整篇重生成一遍。
+        escalate: false,
+      }),
+    onPart: ({ part, chars }) => {
+      if (typeof ctx.warn === 'function') {
+        ctx.warn(`输出被截断（已写出 ${chars} 字），正在续写第 ${part} 段`)
+      }
+    },
+  })
+  if (parts > 1 && typeof ctx.warn === 'function') ctx.warn(`${stage} 分 ${parts} 段续写完成`)
+  return String(text ?? '').trim()
+}
+
 function parseBlurbMarkdown(text) {
   const source = stripFence(text)
   const pick = (re) => (source.match(re) || [])[1]?.trim() ?? ''
@@ -784,6 +825,11 @@ function collectCastNames(beats, outlineChapter) {
 function draftMaxTokens(params = {}) {
   const words = Number(params.wordsPerChapter) || paramsDefaults.wordsPerChapter
   return Math.min(16000, Math.max(1200, Math.round(words * 2.2)))
+}
+
+/** 续写时用来算「还差多少字」：目标章长（字），不是 token 预算。 */
+function chapterTargetChars(params = {}) {
+  return Math.max(200, Math.round(Number(params.wordsPerChapter) || paramsDefaults.wordsPerChapter))
 }
 
 function clampInt(value, fallback, min, max) {
@@ -1450,7 +1496,11 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           canonText: canonTextFor(canon, castNamesFor(beats, chapter, volume), id),
           language,
         })
-        const raw = await callText(promptCtx, 'draft', prompts.draft, { phase: 'prose', maxTokens: draftMaxTokens(params) + 400 })
+        const raw = await callTextContinued(promptCtx, 'draft', prompts.draft, {
+          phase: 'prose',
+          maxTokens: draftMaxTokens(params) + 400,
+          targetChars: chapterTargetChars(params),
+        })
         const inline = unit.splitInline(raw)
         const body = normalizeProse(inline?.body ?? '', { no: chapterNoOf(ctx, chapter), title: chapter.title ?? item.title })
         if (!body) throw parseError('draft', '草稿正文为空', raw)
@@ -1639,7 +1689,11 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           draft: source,
           draftText: source,
         })
-        const raw = await callText(promptCtx, 'revise', prompts.revise, { phase: 'revise', maxTokens: draftMaxTokens(params) + 400 })
+        const raw = await callTextContinued(promptCtx, 'revise', prompts.revise, {
+          phase: 'revise',
+          maxTokens: draftMaxTokens(params) + 400,
+          targetChars: chapterTargetChars(params),
+        })
         const inline = unit.splitInline(raw)
         const text = normalizeProse(inline?.body ?? '', { no: chapterNoOf(ctx, chapter), title: chapter.title ?? item.title })
 

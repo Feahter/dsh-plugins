@@ -297,10 +297,12 @@ export function createLlmGateway(config = {}) {
       if (kind === 'aborted') throw abortedError(reason)
       if (TRUNCATED_KINDS.has(kind)) {
         // 截断的正文/JSON 是废稿：静默落盘会让后续审校、修订、摘要全部白花钱。
+        // detail.text 带上已经吐出来的半截稿：长章正文可以拿它当锚点接着写
+        // （recipes/novel/continuation.js），不必因为一次撞上限就让整章作废重跑。
         throw new ForgeError(
           'LLM_TRUNCATED',
           `模型输出被截断（达到输出上限 ${opts.maxTokens ?? MAX_OUTPUT_TOKENS} tokens）${TRUNCATE_HINT}`,
-          { maxTokens: opts.maxTokens ?? null, chars: text.length, kind },
+          { maxTokens: opts.maxTokens ?? null, chars: text.length, kind, text: truncate(text, 60000) },
         )
       }
     }
@@ -376,8 +378,9 @@ export function createLlmGateway(config = {}) {
             doublings += 1
           }
           // 截断说明 budget 不够：抬到 1.6× 再试一次；已经在上限就直接报可执行的错。
+          // escalate:false 用于长章正文——那边会带着半截稿续写，重生成一遍整篇纯属白花钱。
           if (fe.code === 'LLM_TRUNCATED') {
-            if (i > 0 || maxTokens >= MAX_OUTPUT_TOKENS) throw fe
+            if (opts.escalate === false || i > 0 || maxTokens >= MAX_OUTPUT_TOKENS) throw fe
             maxTokens = Math.min(MAX_OUTPUT_TOKENS, Math.round(maxTokens * 1.6))
             const delay = delays[Math.min(i, delays.length - 1)] ?? 1000
             await abortableSleep(delay, chosenSignal)

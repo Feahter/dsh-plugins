@@ -159,6 +159,8 @@ test('输出截断：先抬预算重试一次，仍截断就报 LLM_TRUNCATED，
       assert.match(err.message, /截断/)
       assert.match(err.message, /调小每章目标字数|输出上限更高/)
       assert.equal(err.detail.maxTokens, 1600)
+      // 半截稿要带出来：长章正文靠它当锚点续写，不必整章作废
+      assert.equal(err.detail.text, '写到一半')
       return true
     },
   )
@@ -166,6 +168,20 @@ test('输出截断：先抬预算重试一次，仍截断就报 LLM_TRUNCATED，
   // 第二次必须抬了预算，否则重试没有意义
   assert.equal(service.calls[0].args.maxTokens, 1000)
   assert.equal(service.calls[1].args.maxTokens, 1600)
+})
+
+test('escalate:false：长章正文不整篇重生成，直接把半截稿交给调用方续写', async () => {
+  const service = fakeService(() => textStream(['写到一半'], { finish: { kind: 'length' } }))
+  const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
+  await assert.rejects(
+    () => gw.generate({ user: '写一章', maxTokens: 3520, escalate: false }),
+    (err) => {
+      assert.equal(err.code, 'LLM_TRUNCATED')
+      assert.equal(err.detail.text, '写到一半')
+      return true
+    },
+  )
+  assert.equal(service.calls.length, 1, '不该再抬预算重跑一次')
 })
 
 test('截断后抬预算成功：返回正文，并记下尝试次数', async () => {
