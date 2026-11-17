@@ -47,7 +47,8 @@ function verify(root, args, env = {}) {
   const r = spawnSync(process.execPath, [join(root, "scripts", "verify.mjs"), ...args], {
     cwd: root, encoding: "utf8", env: { ...process.env, DSH_VERIFY_SELFTEST: "1", ...env },
   });
-  return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+  // stdout 只放 JSON；stderr 单独保留。两者拼在一起会被 trace/警告前缀污染，导致解析出 null。
+  return { code: r.status, out: r.stdout || "", err: r.stderr || "" };
 }
 const jsonOf = (out) => { try { return JSON.parse(out.slice(out.indexOf("{"))); } catch { return null; } };
 
@@ -71,6 +72,7 @@ test("语法坏文件被 syntax 门抓住", () => {
   const r = verify(root, ["fast", "--json"]);
   assert.equal(r.code, 1, r.out);
   const rep = jsonOf(r.out);
+  assert.ok(rep, r.out + r.err);
   assert.equal(rep.status, "FAIL");
   assert.equal(rep.steps.find((s) => s.id === "syntax").status, "FAIL");
 });
@@ -85,6 +87,7 @@ test("证据篡改与内容变化都判 current 不成立", () => {
   // 内容变回去，再篡改日志
   writeFileSync(join(root, "README.md"), "# demo\n");
   const rep = jsonOf(verify(root, ["fast", "--json"]).out);
+  assert.ok(rep, "fast 报告应为可解析 JSON");
   const log = join(root, rep.steps.find((s) => s.stdout) .stdout);
   writeFileSync(log, "tampered\n");
   const r = verify(root, ["evidence", "--latest", "--assert-current", "--require", "fast"]);
@@ -99,8 +102,8 @@ test("门禁三档：off/observe 不拦，enforce 无证据拦，第三次例外
 
   assert.equal(verify(root, ["gate", "configure", "--mode", "observe"]).code, 0);
   const obs = verify(root, ["gate", "check"]);
-  assert.equal(obs.code, 0, obs.out);
-  assert.match(obs.out, /wouldBlock=true/);
+  assert.equal(obs.code, 0, obs.out + obs.err);
+  assert.match(obs.out + obs.err, /wouldBlock=true/);
   const events = readFileSync(join(root, ".git/dsh-verify/gate-events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
   assert.equal(events.at(-1).wouldBlock, true);
 
@@ -109,8 +112,8 @@ test("门禁三档：off/observe 不拦，enforce 无证据拦，第三次例外
   assert.equal(verify(root, ["gate", "check"]).code, 1);
   // 反卡死：同一 session 第二次被挡后，第三次允许带例外通过
   const third = verify(root, ["gate", "check"]);
-  assert.equal(third.code, 0, third.out);
-  assert.match(third.out, /例外提交/);
+  assert.equal(third.code, 0, third.out + third.err);
+  assert.match(third.out + third.err, /例外提交/);
 });
 
 test("连续三轮失败后 blocked，session resume 后恢复", () => {
@@ -118,8 +121,8 @@ test("连续三轮失败后 blocked，session resume 后恢复", () => {
   writeFileSync(join(root, "plugins/demo/broken.mjs"), "export const = ;\n");
   for (let i = 0; i < 3; i++) assert.equal(verify(root, ["fast", "--json"]).code, 1, `第 ${i + 1} 轮应 FAIL`);
   const blocked = verify(root, ["fast", "--json"]);
-  assert.equal(blocked.code, 2, blocked.out);
-  assert.match(blocked.out, /session resume/);
+  assert.equal(blocked.code, 2, blocked.out + blocked.err);
+  assert.match(blocked.out + blocked.err, /session resume/);
   const sid = readFileSync(join(root, ".git/dsh-verify/sessions/latest-id"), "utf8").trim();
   assert.equal(verify(root, ["session", "resume", "--id", sid, "--human-note", "已修语法"]).code, 0);
   assert.equal(verify(root, ["fast"]).code, 1, "文件仍坏，恢复后应先 FAIL 而不是 PASS");
@@ -129,8 +132,8 @@ test("policy 抓住缺锚点与非法 JSON", () => {
   const root = fixture();
   writeFileSync(join(root, "docs/verification-incidents.md"), "# inc\n- 没有锚点\n");
   const r = verify(root, ["policy", "--check", "--json"]);
-  assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /缺少锚点/);
+  assert.equal(r.code, 1, r.out + r.err);
+  assert.match(r.out + r.err, /缺少锚点/);
   writeFileSync(join(root, "docs/reliability.json"), "{not json");
   assert.equal(verify(root, ["policy", "--check"]).code, 1);
 });
@@ -138,16 +141,17 @@ test("policy 抓住缺锚点与非法 JSON", () => {
 test("heavy 在 P0 明确 BLOCKED，--plan 只输出计划", () => {
   const root = fixture();
   const plan = verify(root, ["heavy", "--plan", "--json"]);
-  assert.equal(plan.code, 0, plan.out);
+  assert.equal(plan.code, 0, plan.out + plan.err);
   assert.ok(plan.out.includes("HEAVY_NOT_IMPLEMENTED") || plan.out.includes("planned"), plan.out);
   const run = verify(root, ["heavy", "--json"]);
-  assert.equal(run.code, 2, run.out);
-  assert.match(run.out, /HEAVY_NOT_IMPLEMENTED/);
+  assert.equal(run.code, 2, run.out + run.err);
+  assert.match(run.out + run.err, /HEAVY_NOT_IMPLEMENTED/);
 });
 
 test("review 轮次链与内容绑定", () => {
   const root = fixture();
   const rep = jsonOf(verify(root, ["fast", "--json"]).out);
+  assert.ok(rep, "fast 报告应为可解析 JSON");
   const round = {
     reviewerId: "reviewer-a", round: 1, previousRoundHash: null,
     subject: { head: rep.git.headSha, subjectHash: rep.git.subjectHash, indexTree: rep.git.indexTree },
