@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "description": "dsh-plugins 可靠性触发目录。只登记有真实来源的规则；路径先筛，再对新删/新增行匹配 addedOrRemovedPattern。status=active 才参与门禁。glob 只支持 *、**、?。",
+  "owner": "feZ",
+  "defaultBranchRefs": ["refs/remotes/origin/main", "refs/heads/main"],
+  "rules": [
+    {
+      "id": "R01",
+      "owner": "feZ",
+      "paths": ["plugins/novel-forge/src/host/**"],
+      "addedOrRemovedPattern": "recipes|listRecipes|Map",
+      "why": "recipes 接口同时接受 listRecipes() 与 Map 形态的 engine.recipes；历史上 Map 被当数组调 .map 导致 /recipes 崩。改 host 的 recipes/Map 行必须回归 host.test.mjs 里那条 Map 断言。",
+      "check": ["node", "--test", "plugins/novel-forge/test/host.test.mjs"],
+      "requiredLevel": "full",
+      "incident": "docs/verification-incidents.md#nf-map",
+      "status": "active"
+    },
+    {
+      "id": "R02",
+      "owner": "feZ",
+      "paths": ["plugins/novel-forge/client-src/**", "plugins/novel-forge/client.js"],
+      "addedOrRemovedPattern": "register|selectPanel|novel-forge",
+      "why": "侧栏 id 与 main key 不一致时，面板注册成功但点不开；Node 语法与 stub 宿主都抓不到。P0 只登记，heavy 真挂载未实现，命中时该项缺 GUI 证据必须如实标 BLOCKED。",
+      "check": ["node", "scripts/verify.mjs", "heavy"],
+      "requiredLevel": "heavy",
+      "incident": "docs/verification-incidents.md#nf-panel",
+      "status": "active",
+      "fallback": {
+        "why": "宿主契约（注册 key、inject 依赖、面板 id、cordis.patch.yml）无法由 Node 语法保证，任一插件的客户端/宿主注册声明变化都要求 heavy 真挂载。这是明示的设计风险规则，不是已发生的跨插件事故。",
+        "paths": ["plugins/*/client.js", "plugins/*/client-src/**", "plugins/*/cordis.patch.yml"],
+        "addedOrRemovedPattern": "",
+        "requiredLevel": "heavy",
+        "incident": "docs/verification-incidents.md#host-contract-risk"
+      }
+    },
+    {
+      "id": "R03",
+      "owner": "feZ",
+      "paths": ["plugins/novel-forge/client-src/**"],
+      "addedOrRemovedPattern": "chapters|chapterIds|volumeRows|chapterMeta",
+      "why": "v2 大纲把章放顶层扁平 chapters、卷上只有 chapterIds，旧代码只读 volume.chapters 导致界面一章不显示；outline.js 的 volumeRows/chapterMeta 是唯一口径，改动必须过 outline-client 的 v1/v2 双形态回归。",
+      "check": ["node", "--test", "plugins/novel-forge/test/outline-client.test.mjs"],
+      "requiredLevel": "full",
+      "incident": "docs/verification-incidents.md#nf-outline",
+      "status": "active"
+    },
+    {
+      "id": "R04",
+      "owner": "feZ",
+      "paths": ["plugins/novel-forge/client-src/api.js"],
+      "addedOrRemovedPattern": "",
+      "why": "api.js 曾把「2xx 但响应体不是 JSON」当成没有内容静默吞掉，用户看到空书架和英文 TypeError。任意行变化都要过 client-audit 的五类错误路径，并确认非 JSON 2xx 不静默空态。",
+      "check": ["node", "--test", "plugins/novel-forge/test/client-audit.test.mjs"],
+      "requiredLevel": "full",
+      "incident": "docs/verification-incidents.md#nf-response",
+      "status": "active"
+    },
+    {
+      "id": "R05",
+      "owner": "feZ",
+      "paths": ["scripts/test-all.sh", "scripts/verify*.mjs"],
+      "addedOrRemovedPattern": "",
+      "why": "验证程序自己最容易被改弱。旧 test-all.sh 的语法门是多文件一次 node --check，实际只检查第一个文件；新入口必须逐文件独立 --check，并由 verify.test.mjs 的语法/门禁/预算负例守住。",
+      "check": ["node", "--test", "scripts/verify.test.mjs"],
+      "requiredLevel": "full",
+      "incident": "docs/verification-incidents.md#verify-syntax",
+      "status": "active"
+    },
+    {
+      "id": "R06",
+      "owner": "feZ",
+      "paths": ["index.json", "plugins/*/package.json"],
+      "addedOrRemovedPattern": "",
+      "why": "索引写过版本、但 source.commit 里 package.json 还是旧版本的事故。任意版本字段变化都要同时跑清单/索引一致性与版本 commit 校验，人工再核 engines 与最新发布版本。",
+      "check": ["node", "scripts/check-manifest.mjs"],
+      "additionalChecks": [["node", "docs/verify-readme.mjs"]],
+      "requiredLevel": "full",
+      "incident": "docs/verification-incidents.md#index-sha",
+      "status": "active"
+    }
+  ]
+}
