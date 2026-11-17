@@ -15,6 +15,12 @@ const HOTKEY_PENDING_TTL_MS = 30000;
 const HOTKEY_HUD_HIDE_MS = 4000;
 const HOTKEY_SPEAK_GUARD_MS = 800;
 const HOTKEY_BUFFER_SIZE = 4096;
+// Combos the browser or the OS has already claimed. addEventListener never
+// throws for these, so they must be skipped before the first bind attempt.
+const HOTKEY_RESERVED_KEYS = new Set([
+  'ctrl+w', 'ctrl+t', 'ctrl+n', 'ctrl+r', 'ctrl+shift+w',
+  'meta+q', 'meta+w', 'meta+m', 'meta+r', 'alt+f4',
+]);
 
 const HOTKEY_LABELS = {
   idle: '待命',
@@ -230,6 +236,100 @@ function hotkeyIsModifierRelease(event, binding) {
   return false;
 }
 
+function hotkeyCanonicalKey(binding) {
+  if (!binding) return '';
+  const mods = [];
+  if (binding.meta) mods.push('meta');
+  if (binding.ctrl) mods.push('ctrl');
+  if (binding.alt) mods.push('alt');
+  if (binding.shift) mods.push('shift');
+  let key = String(binding.key || '').toLowerCase();
+  if (/^key[a-z]$/.test(key)) key = key.slice(3);
+  mods.push(key);
+  return mods.join('+');
+}
+
+/**
+ * Binding attempts, in order: the user's key, the same key plus a modifier, then
+ * the panel button (returned as mode "button" when every attempt fails).
+ */
+function hotkeyCandidateSpecs(spec) {
+  const base = parseHotkey(spec);
+  const list = [base.spec];
+  if (!base.alt) list.push('AltLeft+' + base.spec);
+  if (!base.ctrl) list.push('ControlLeft+' + base.spec);
+  if (!base.alt && !base.ctrl) list.push('ControlLeft+AltLeft+' + base.spec);
+  return list.filter((item, index) => list.indexOf(item) === index);
+}
+
+function hotkeyBindingNotice(result) {
+  if (!result || result.mode === 'hotkey') return '';
+  const original = result.original || HOTKEY_DEFAULT_SPEC;
+  if (result.mode === 'fallback') {
+    return '热键 ' + original + ' 无法注册（可能被其他应用占用），已切换到 ' + result.spec + '。\n'
+      + 'Hotkey ' + original + ' could not be registered (maybe taken by another app); using ' + result.spec + ' instead.\n'
+      + '也可用面板「按住说话」按钮。/ The panel’s “Hold to talk” button always works.';
+  }
+  return '热键不可用（可能被其他应用占用，或只在窗口有焦点时生效）。\n'
+    + 'Hotkey unavailable — it may be taken by another app, and it only works while this window is focused.\n'
+    + '请用面板「按住说话」按钮。/ Use “Hold to talk” on the panel.';
+}
+
+/**
+ * Try each candidate against the real keyboard target. A host that throws from
+ * addEventListener (or a combo reserved by the browser) advances to the next
+ * candidate instead of silently disabling push-to-talk.
+ */
+function hotkeyBind(keyTarget, spec, handlers) {
+  const original = parseHotkey(spec).spec;
+  const candidates = hotkeyCandidateSpecs(original);
+  const tried = [];
+  const failed = () => {
+    const result = { ok: false, mode: 'button', spec: '', binding: null, original, tried, notice: '' };
+    result.notice = hotkeyBindingNotice(result);
+    return result;
+  };
+  if (!keyTarget || typeof keyTarget.addEventListener !== 'function') {
+    tried.push({ spec: original, reason: 'no-target' });
+    return failed();
+  }
+  for (const candidate of candidates) {
+    const parsed = parseHotkey(candidate);
+    if (HOTKEY_RESERVED_KEYS.has(hotkeyCanonicalKey(parsed))) {
+      tried.push({ spec: candidate, reason: 'reserved' });
+      continue;
+    }
+    try {
+      keyTarget.addEventListener('keydown', handlers.onKeyDown);
+      keyTarget.addEventListener('keyup', handlers.onKeyUp);
+      const result = {
+        ok: true,
+        mode: candidate === original ? 'hotkey' : 'fallback',
+        spec: candidate,
+        binding: parsed,
+        original,
+        tried,
+        notice: '',
+      };
+      if (result.mode === 'fallback') result.notice = hotkeyBindingNotice(result);
+      return result;
+    } catch (error) {
+      tried.push({ spec: candidate, reason: 'error', message: hotkeyErrorMessage(error) });
+      try {
+        if (typeof keyTarget.removeEventListener === 'function') keyTarget.removeEventListener('keydown', handlers.onKeyDown);
+      } catch {
+        // A partial registration is already broken; nothing else to do.
+      }
+      try {
+        if (typeof keyTarget.removeEventListener === 'function') keyTarget.removeEventListener('keyup', handlers.onKeyUp);
+      } catch {
+        // Ignore.
+      }
+    }
+  }
+  return failed();
+}
+
 function hotkeyReadSpec() {
   try {
     if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
@@ -386,6 +486,8 @@ export function createHotkey(deps) {
     doc: null,
     win: null,
     listeners: null,
+    binding: null,
+    bindingNotice: '',
     token: 0,
   };
 
@@ -1010,7 +1112,6 @@ export function createHotkey(deps) {
     state.win = win;
     if (doc) hotkeyEnsureStyles(doc);
     const keyTarget = doc && typeof doc.addEventListener === 'function' ? doc : win;
-    if (!keyTarget || typeof keyTarget.addEventListener !== 'function') return hotkeyNoop;
 
     const onKeyDown = (event) => {
       if (!event || event.repeat) return;
@@ -1031,13 +1132,25 @@ export function createHotkey(deps) {
       abortPress();
     };
 
-    try {
-      keyTarget.addEventListener('keydown', onKeyDown);
-      keyTarget.addEventListener('keyup', onKeyUp);
-    } catch (error) {
-      hotkeyNoteError('listeners', error);
+    const bound = hotkeyBind(keyTarget, state.hotkey.spec, { onKeyDown, onKeyUp });
+    state.binding = bound;
+    state.bindingNotice = bound.notice;
+    if (!bound.ok) {
+      hotkeyNoteError('listeners', (bound.tried || []).map((entry) => entry.spec + ':' + entry.reason).join(','));
+      // No key worked: keep the panel usable and surface the in-app alternative.
+      setPhase('idle', bound.notice);
+      hotkeySafeCall(options.onBinding, bound);
       return hotkeyNoop;
     }
+    state.hotkey = bound.binding;
+    if (bound.mode === 'fallback') {
+      // The original chord was reserved or the host refused it. Say which one won
+      // instead of silently listening on a key the user never chose.
+      setPhase('idle', bound.notice);
+    }
+    // Always report the effective binding: the panel can then hide the hold
+    // button again after a later install recovers the primary chord.
+    hotkeySafeCall(options.onBinding, bound);
     const blurTarget = win && win !== keyTarget && typeof win.addEventListener === 'function' ? win : keyTarget;
     try {
       blurTarget.addEventListener('blur', onBlur);
@@ -1089,11 +1202,17 @@ export function createHotkey(deps) {
       pending: Array.isArray(state.pending) ? state.pending.length : 0,
       installed: state.installed,
       recording: !!state.recording,
-      hotkey: state.hotkey.spec,
+      hotkey: state.hotkey && state.hotkey.spec,
+      binding: state.binding,
+      bindingNotice: state.bindingNotice,
     };
   }
 
-  return { install, dispose, status, press, release, abort: abortPress };
+  function binding() {
+    return state.binding;
+  }
+
+  return { install, dispose, status, binding, press, release, abort: abortPress };
 }
 
 // Test hooks only. The name must stay distinct from avatar.js's `__test`
@@ -1106,6 +1225,10 @@ export const __hotkeyTest = {
   setClock: hotkeySetClock,
   resetClock: hotkeyResetClock,
   DEFAULT_HOTKEY: HOTKEY_DEFAULT_SPEC,
+  candidates: hotkeyCandidateSpecs,
+  canonicalKey: hotkeyCanonicalKey,
+  bind: hotkeyBind,
+  bindingNotice: hotkeyBindingNotice,
   MIN_PRESS_MS: HOTKEY_MIN_PRESS_MS,
   HUD_HIDE_MS: HOTKEY_HUD_HIDE_MS,
   PENDING_TTL_MS: HOTKEY_PENDING_TTL_MS,

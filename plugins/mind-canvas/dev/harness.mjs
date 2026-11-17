@@ -13,6 +13,9 @@ const MODULES = {
   'react-dom': ReactDOM,
 }
 
+const mark = name => { try { performance.mark(name) } catch {} }
+const measure = (name, start, end) => { try { performance.measure(name, start, end) } catch {} }
+
 const registry = window.__ModuleLoader__?.pending ?? []
 const registration = registry.find(item => item && item.id === 'dsh-mind-canvas')
 if (!registration) {
@@ -25,7 +28,35 @@ const require = id => {
   throw new Error(`harness: 没有 seed 模块 "${id}"`)
 }
 
+// 复刻宿主 require.async：按需加载 package-local chunk（文件名规则 client.<name>.js）。
+const chunkCache = new Map()
+require.async = async spec => {
+  const fileName = spec.replace(/^\.\//, '')
+  if (chunkCache.has(fileName)) return chunkCache.get(fileName)
+  let registration = window.__ModuleLoader__.pending.find(item => item.chunk === fileName)
+  if (!registration) {
+    performance.mark('mc:chunk-start')
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = new URL(`../${fileName}`, location.href).href
+      script.onload = resolve
+      script.onerror = () => reject(new Error(`harness: chunk 加载失败 ${fileName}`))
+      document.head.append(script)
+    })
+    performance.mark('mc:chunk-end')
+    performance.measure('mc:chunk-load', 'mc:chunk-start', 'mc:chunk-end')
+    registration = window.__ModuleLoader__.pending.find(item => item.chunk === fileName)
+  }
+  if (!registration) throw new Error(`harness: chunk ${fileName} 没有注册`)
+  const exports = registration.factory(require)
+  chunkCache.set(fileName, exports)
+  return exports
+}
+
+mark('mc:factory-start')
 const plugin = registration.factory(require)
+mark('mc:factory-end')
+measure('mc:materialize', 'mc:factory-start', 'mc:factory-end')
 window.__plugin = plugin
 
 // ------------------------------------------------------------------ 假 ctx
@@ -126,7 +157,10 @@ const ctx = {
   layout,
 }
 
+mark('mc:apply-start')
 plugin.apply(ctx)
+mark('mc:apply-end')
+measure('mc:apply', 'mc:apply-start', 'mc:apply-end')
 
 const page = registered.find(item => item.name === 'main')
 if (!page) {
@@ -136,5 +170,13 @@ if (!page) {
 
 window.__slots = registered
 const root = document.getElementById('root')
-ReactDOM.createRoot(root).render(React.createElement(page.Component))
+mark('mc:panel-mount')
+const mount = () => ReactDOM.createRoot(root).render(React.createElement(page.Component))
+// ?manual=1：只跑到「插件注册完」就停，用来验证启动阶段不下载面板 chunk。
+if (new URLSearchParams(location.search).has('manual')) {
+  window.__mountPanel = mount
+} else {
+  mount()
+}
+mark('mc:panel-render-called')
 window.__ready = true

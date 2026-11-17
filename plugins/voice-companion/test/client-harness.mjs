@@ -476,11 +476,125 @@ check('a start cancelled during the permission prompt drops the stream', racedTr
 check('the cancelled start leaves the call inactive', window.__dshVoiceCompanion.status().active === false);
 check('the cancelled start leaves the engine idle', window.__dshVoiceCompanion.status().phase === 'idle');
 
-group('teardown');
+group('microphone consent: explain before the prompt');
 window.__dshVoiceCompanion.stop();
+await new Promise((r) => setTimeout(r, 80));
+const noticeNode = (rootNode) => {
+  const scope = rootNode || body;
+  return findAll(scope, (n) => hasClass(n, 'vc-notice'))[0] || stub;
+};
+const currentRoot = () => findAll(body, (n) => n.attributes && 'data-vc-avatar' in n.attributes).at(-1) || stub;
+let releasePrompt = null;
+getUserMediaImpl = () => new Promise((resolve) => { releasePrompt = resolve; });
+const introStart = window.__dshVoiceCompanion.start();
+await new Promise((r) => setTimeout(r, 30));
+check('the first-call notice explains why the mic is needed', noticeNode().textContent.includes('首次使用') && noticeNode().textContent.includes('First use'), noticeNode().textContent);
+check('the notice promises on-device recognition', noticeNode().textContent.includes('本机') && noticeNode().textContent.includes('this device'));
+releasePrompt({ getAudioTracks: () => tracks, getTracks: () => tracks });
+await introStart;
+await new Promise((r) => setTimeout(r, 80));
+check('a granted start clears the consent notice', noticeNode().textContent === '', noticeNode().textContent);
+window.__dshVoiceCompanion.stop();
+await new Promise((r) => setTimeout(r, 80));
+
+group('microphone permission: denied, missing, busy');
+const deniedBefore = getUserMediaCalls;
+getUserMediaImpl = async () => {
+  getUserMediaCalls += 1;
+  throw Object.assign(new Error('denied'), { name: 'NotAllowedError' });
+};
+await window.__dshVoiceCompanion.start();
 await new Promise((r) => setTimeout(r, 60));
-check('microphone tracks stopped', tracks.every((track) => track.stopped));
-check('status inactive after stop', window.__dshVoiceCompanion.status().active === false);
+check('a denied start does not activate the call', window.__dshVoiceCompanion.status().active === false);
+check('NotAllowedError shows the macOS settings path', noticeNode().textContent.includes('系统设置') && noticeNode().textContent.includes('Privacy & Security'), noticeNode().textContent);
+check('a denied start leaves the panel mounted', body.children.some((node) => node.id === 'dsh-voice-companion-root'));
+check('a denied start keeps other panel actions usable', typeof window.__dshVoiceCompanion.character === 'function');
+check('the mic state is denied, not cached as granted', window.__dshVoiceCompanion.permission().state === 'denied', window.__dshVoiceCompanion.permission());
+
+getUserMediaImpl = async () => {
+  getUserMediaCalls += 1;
+  return { getAudioTracks: () => tracks, getTracks: () => tracks };
+};
+await window.__dshVoiceCompanion.start();
+await new Promise((r) => setTimeout(r, 120));
+check('the next click retries getUserMedia after a denial', getUserMediaCalls === deniedBefore + 2, getUserMediaCalls - deniedBefore);
+check('permission recovery starts the call without a reload', window.__dshVoiceCompanion.status().active === true, window.__dshVoiceCompanion.status());
+check('permission recovery clears the notice', noticeNode().textContent === '');
+window.__dshVoiceCompanion.stop();
+await new Promise((r) => setTimeout(r, 80));
+
+getUserMediaImpl = async () => {
+  getUserMediaCalls += 1;
+  throw Object.assign(new Error('missing'), { name: 'NotFoundError' });
+};
+await window.__dshVoiceCompanion.start();
+await new Promise((r) => setTimeout(r, 60));
+check('NotFoundError has its own copy', noticeNode().textContent.includes('没有检测到麦克风') && noticeNode().textContent.includes('No microphone found'), noticeNode().textContent);
+check('NotFoundError is not reported as a permission denial', !noticeNode().textContent.includes('系统设置'));
+
+getUserMediaImpl = async () => {
+  getUserMediaCalls += 1;
+  throw Object.assign(new Error('busy'), { name: 'NotReadableError' });
+};
+await window.__dshVoiceCompanion.start();
+await new Promise((r) => setTimeout(r, 60));
+check('NotReadableError has its own copy', noticeNode().textContent.includes('被其他应用占用') && noticeNode().textContent.includes('Microphone is busy'), noticeNode().textContent);
+
+group('hotkey binding: candidate fallback is visible in the panel');
+const originalDocumentAdd = document.addEventListener;
+const originalDocumentRemove = document.removeEventListener;
+let bindAttempts = 0;
+document.addEventListener = function patchedAdd(type, handler) {
+  // The avatar registers its own Escape handler first; the hotkey bind is the
+  // second keydown listener and is the one we make fail.
+  if (type === 'keydown') {
+    bindAttempts += 1;
+    if (bindAttempts === 2) throw new Error('taken by another app');
+  }
+  return originalDocumentAdd.call(this, type, handler);
+};
+const disposerFallback = plugin.apply(ctx);
+await new Promise((r) => setTimeout(r, 60));
+const fallbackRoot = currentRoot();
+check('a throwing bind switches to the next candidate', window.__dshVoiceCompanion.hotkey().binding.mode === 'fallback', window.__dshVoiceCompanion.hotkey().binding);
+check('the fallback candidate is shown', window.__dshVoiceCompanion.hotkey().binding.spec.startsWith('AltLeft+'), window.__dshVoiceCompanion.hotkey().binding.spec);
+check('the fallback notice is bilingual', noticeNode(fallbackRoot).textContent.includes('已切换到') && noticeNode(fallbackRoot).textContent.includes('instead'), noticeNode(fallbackRoot).textContent);
+check('the in-app hold button appears with the fallback', findAll(fallbackRoot, (n) => hasClass(n, 'vc-hold-row'))[0].getAttribute('data-visible') === '1');
+disposerFallback();
+await new Promise((r) => setTimeout(r, 40));
+check('the fallback panel disposes cleanly', !body.children.includes(fallbackRoot));
+
+let keydownCalls = 0;
+document.addEventListener = function alwaysThrows(type, handler) {
+  if (type === 'keydown') {
+    keydownCalls += 1;
+    if (keydownCalls >= 2) throw new Error('no keyboard access');
+  }
+  return originalDocumentAdd.call(this, type, handler);
+};
+const disposerButton = plugin.apply(ctx);
+await new Promise((r) => setTimeout(r, 60));
+const buttonRoot = currentRoot();
+check('all candidates failing leaves hotkey mode button', window.__dshVoiceCompanion.hotkey().binding.mode === 'button', window.__dshVoiceCompanion.hotkey().binding);
+check('the button-mode notice points at the panel control', noticeNode(buttonRoot).textContent.includes('按住说话') && noticeNode(buttonRoot).textContent.includes('Hold to talk'), noticeNode(buttonRoot).textContent);
+check('the panel still mounts in button mode', body.children.some((node) => node.id === 'dsh-voice-companion-root'));
+disposerButton();
+await new Promise((r) => setTimeout(r, 40));
+document.addEventListener = originalDocumentAdd;
+document.removeEventListener = originalDocumentRemove;
+const disposer2 = plugin.apply(ctx);
+await new Promise((r) => setTimeout(r, 40));
+check('a healthy re-apply restores the primary hotkey', window.__dshVoiceCompanion.hotkey().binding.mode === 'hotkey', window.__dshVoiceCompanion.hotkey().binding);
+disposer2();
+await new Promise((r) => setTimeout(r, 40));
+
+group('teardown');
+if (window.__dshVoiceCompanion) {
+  window.__dshVoiceCompanion.stop();
+  await new Promise((r) => setTimeout(r, 60));
+  check('microphone tracks stopped', tracks.every((track) => track.stopped));
+  check('status inactive after stop', window.__dshVoiceCompanion.status().active === false);
+}
 disposer();
 check('root removed on dispose', !body.children.some((node) => node.id === 'dsh-voice-companion-root'));
 check('debug handle deleted', window.__dshVoiceCompanion === undefined);

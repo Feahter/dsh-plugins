@@ -1,7 +1,5 @@
 import React from 'react'
-import { MindCanvasPage, injectStylesOnce } from './app.jsx'
 import { en, zh } from './strings.js'
-import { bindVoiceApi } from './voice.jsx'
 
 const NS = 'mind-canvas'
 const PANEL_KEY = 'mind-canvas'
@@ -13,6 +11,21 @@ let runtime = {
 
 /** 由 apply 里绑定：返回对话（activePanelId = null）。 */
 let exitPanel = () => {}
+let pluginCtx = null
+let stopVoice = null
+
+/**
+ * 画布本体放在 package-local 动态 chunk 里，首次打开面板才下载/执行。
+ * require.async 由宿主模块系统注入（build.mjs 的 __DSH_REQUIRE__ 定义）。
+ */
+let panelPromise
+function loadPanel() {
+  panelPromise ??= __DSH_REQUIRE__.async('./client.panel.js').catch(error => {
+    panelPromise = null
+    throw error
+  })
+  return panelPromise
+}
 
 function PanelIcon({ size = 16 }) {
   return React.createElement('svg', {
@@ -29,7 +42,30 @@ function PanelIcon({ size = 16 }) {
 }
 
 function Page() {
-  return React.createElement(MindCanvasPage, { t: runtime.t, lang: runtime.lang, onExit: exitPanel })
+  const [Panel, setPanel] = React.useState(null)
+
+  React.useEffect(() => {
+    let alive = true
+    loadPanel().then(module => {
+      if (!alive) return
+      stopVoice = module.startVoice(pluginCtx)
+      setPanel(() => module.Panel)
+    }).catch(error => {
+      console.error('[mind-canvas] 面板加载失败：', error)
+    })
+    return () => {
+      alive = false
+      if (stopVoice) stopVoice()
+      stopVoice = null
+    }
+  }, [])
+
+  if (!Panel) {
+    return React.createElement('div', {
+      style: { padding: '24px', color: 'var(--dsw-alias-label-secondary, #666)' },
+    }, '加载画布…')
+  }
+  return React.createElement(Panel, { t: runtime.t, lang: runtime.lang, onExit: exitPanel })
 }
 
 /**
@@ -58,17 +94,7 @@ export function apply(ctx) {
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'mind-canvas: dictionaries')
 
-  // 语音输入是可选增强：realtime-voice 晚加载也能补上，最多等 30 秒。
-  ctx.effect(() => {
-    bindVoiceApi(ctx)
-    let tries = 0
-    const timer = setInterval(() => {
-      tries += 1
-      if (bindVoiceApi(ctx) || tries > 30) clearInterval(timer)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, 'mind-canvas: voice bridge')
-  ctx.effect(() => injectStylesOnce(document), 'mind-canvas: styles')
+  pluginCtx = ctx
   ctx.effect(() => () => {
     runtime = { t: key => key, lang: 'zh' }
     exitPanel = () => {}

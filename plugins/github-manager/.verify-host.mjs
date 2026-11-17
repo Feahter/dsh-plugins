@@ -6,6 +6,14 @@
  */
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// Keep the credential vault pointed at a throwaway path: this script must never
+// read or write the user's real <DSH_HOME>/github-manager/credentials.json.
+const verifyDir = join(tmpdir(), 'ghm-verify-' + process.pid);
+process.env.GITHUB_MANAGER_TOKEN_FILE = join(verifyDir, 'credentials.json');
+process.env.GITHUB_MANAGER_GH_HOSTS_FILE = join(verifyDir, 'missing-hosts.yml');
 
 const captured = { tools: new Map(), route: null, effects: 0, rejection: undefined, connection: true };
 const fakeConnection = {
@@ -87,15 +95,43 @@ const pull = {
   merged_at: null,
   user: { login: 'bob' },
   labels: [{ name: 'enhancement', color: 'a2eeef' }],
-  head: { ref: 'feature' },
-  base: { ref: 'main' },
+  head: { ref: 'feature', sha: 'head-sha' },
+  base: { ref: 'main', sha: 'base-sha' },
   comments: 1,
   review_comments: 2,
+  commits: 3,
+  additions: 24,
+  deletions: 6,
+  changed_files: 1,
+  mergeable: true,
+  mergeable_state: 'clean',
   created_at: '2026-10-03T00:00:00Z',
   updated_at: '2026-10-04T00:00:00Z',
   html_url: 'https://github.com/octocat/Hello-World/pull/34',
   body: 'This adds a feature.',
 };
+
+const pullFiles = [{
+  filename: 'src/a.js',
+  status: 'modified',
+  additions: 24,
+  deletions: 6,
+  changes: 30,
+  patch: '@@ -1 +1 @@\n-old\n+feature',
+}];
+const pullReviews = [{
+  id: 900,
+  user: { login: 'alice' },
+  state: 'APPROVED',
+  submitted_at: '2026-10-05T00:00:00Z',
+  body: 'LGTM',
+}];
+const pullComments = [{
+  id: 901,
+  user: { login: 'bob' },
+  body: 'Ready for review.',
+  created_at: '2026-10-04T01:00:00Z',
+}];
 
 const calls = [];
 const issuePages = [];
@@ -209,6 +245,12 @@ globalThis.fetch = async (input, init) => {
     return json(201, { id: 777, html_url: 'https://github.com/octocat/Hello-World/issues/12#issuecomment-777', created_at: '2026-11-05T00:00:00Z' });
   }
   if (url.pathname === '/repos/octocat/Hello-World/pulls') return json(200, [pull]);
+  if (url.pathname === '/repos/octocat/Hello-World/pulls/34') return json(200, pull);
+  if (url.pathname === '/repos/octocat/Hello-World/pulls/34/files') return json(200, pullFiles);
+  if (url.pathname === '/repos/octocat/Hello-World/pulls/34/reviews') return json(200, pullReviews);
+  if (url.pathname === '/repos/octocat/Hello-World/issues/34/comments' && method === 'GET') {
+    return json(200, pullComments);
+  }
   if (url.pathname === '/repos/private/repo/issues' && method === 'POST') {
     return json(401, { message: 'Bad credentials', documentation_url: 'https://docs.github.com/rest' });
   }
@@ -222,9 +264,9 @@ const plugin = await import(new URL('./index.js', import.meta.url).href + '?veri
 plugin.apply(ctx);
 
 // Registration
-assert.equal(captured.tools.size, 12, 'all github_* tools registered');
+assert.equal(captured.tools.size, 13, 'all github_* tools registered');
 assert.deepEqual([...captured.tools.keys()].sort(), [
-  'github_comment_issue', 'github_create_issue', 'github_get_file', 'github_get_repo',
+  'github_comment_issue', 'github_create_issue', 'github_get_file', 'github_get_pull', 'github_get_repo',
   'github_list_branches', 'github_list_commits', 'github_list_issues', 'github_list_pulls',
   'github_list_repos', 'github_list_tree', 'github_status', 'github_update_issue',
 ]);
@@ -241,6 +283,8 @@ assert.equal(status.configured, true);
 assert.equal(status.login, 'octocat');
 assert.equal(status.scopes, 'repo');
 assert.equal(status.rateLimit.remaining, 4999);
+assert.equal(status.tokenStorage, 'environment');
+assert.equal(JSON.stringify(status).includes('test-token'), false, 'status must not serialize the token');
 
 const repos = await captured.tools.get('github_list_repos').execute({ limit: 5, visibility: 'public' });
 assert.equal(repos.count, 1);
@@ -277,6 +321,27 @@ assert.equal(comment.id, 777);
 const pulls = await captured.tools.get('github_list_pulls').execute({ repo: 'octocat/Hello-World' });
 assert.equal(pulls.items[0].number, 34);
 assert.equal(pulls.items[0].base, 'main');
+
+const pullDetail = await captured.tools.get('github_get_pull').execute({
+  repo: 'octocat/Hello-World',
+  number: 34,
+});
+assert.equal(pullDetail.pull.title, 'Add a feature');
+assert.equal(pullDetail.pull.additions, 24);
+assert.equal(pullDetail.pull.deletions, 6);
+assert.equal(pullDetail.pull.changedFiles, 1);
+assert.equal(pullDetail.pull.mergeableState, 'clean');
+assert.equal(pullDetail.files.count, 1);
+assert.equal(pullDetail.files.items[0].path, 'src/a.js');
+assert.equal(pullDetail.files.items[0].patchAvailable, true);
+assert.equal('patch' in pullDetail.files.items[0], false, 'detail must not inline the patch');
+assert.equal(pullDetail.reviews.items[0].state, 'APPROVED');
+assert.equal(pullDetail.reviews.summary.approved, 1);
+assert.equal(pullDetail.conversation.count, 1);
+assert.equal(pullDetail.conversation.items[0].author, 'bob');
+assert.equal(pullDetail.truncated, false);
+assert.deepEqual(pullDetail.missing, []);
+assert.equal(JSON.stringify(pullDetail).includes('test-token'), false, 'tool result must not serialize the token');
 
 const branches = await captured.tools.get('github_list_branches').execute({ repo: 'octocat/Hello-World', limit: 5 });
 assert.equal(branches.defaultBranch, 'main');
@@ -386,6 +451,21 @@ assert.equal(response.body.data.items.length, 2);
 response = await request('GET', '/api/github-manager/pulls?full_name=octocat/Hello-World');
 assert.equal(response.body.data.items[0].draft, false);
 
+response = await request('GET', '/api/github-manager/pull?full_name=octocat/Hello-World&number=34');
+assert.equal(response.status, 200);
+assert.equal(response.body.data.pull.title, 'Add a feature');
+assert.equal(response.body.data.files.items[0].path, 'src/a.js');
+assert.equal('patch' in response.body.data.files.items[0], false);
+assert.equal(response.body.data.reviews.items[0].state, 'APPROVED');
+assert.equal(response.body.data.conversation.count, 1);
+assert.equal(response.body.data.missing.length, 0);
+
+response = await request('GET', '/api/github-manager/pull-file?full_name=octocat/Hello-World&number=34&path=src%2Fa.js');
+assert.equal(response.status, 200);
+assert.equal(response.body.data.path, 'src/a.js');
+assert.equal(response.body.data.patchAvailable, true);
+assert.match(response.body.data.patch, /\+feature/);
+
 response = await request('GET', '/api/github-manager/branches?full_name=octocat/Hello-World&limit=5');
 assert.equal(response.status, 200);
 assert.equal(response.body.data.items[0].name, 'main');
@@ -470,11 +550,9 @@ captured.rejection = undefined;
 
 // gh CLI fallback: a fake `gh auth token` must be picked up without a restart.
 const { mkdtemp, writeFile, chmod, rm } = await import('node:fs/promises');
-const { tmpdir } = await import('node:os');
-const { join: joinPath } = await import('node:path');
-const ghDir = await mkdtemp(joinPath(tmpdir(), 'ghm-gh-'));
+const ghDir = await mkdtemp(join(tmpdir(), 'ghm-gh-'));
 try {
-  const ghBin = joinPath(ghDir, 'gh');
+  const ghBin = join(ghDir, 'gh');
   await writeFile(ghBin, '#!/bin/sh\necho gho_fake_token\n');
   await chmod(ghBin, 0o755);
   delete process.env.GH_TOKEN;
@@ -506,6 +584,16 @@ await assert.rejects(
 response = await request('POST', '/api/github-manager/issue', { full_name: 'octocat/Hello-World', title: 'x' });
 assert.equal(response.status, 502, 'unconfigured token maps to a bad-gateway response');
 
+// The token route stores through safeStorage; in plain Node that degrades to
+// memory and must not write a plaintext file. The response must not echo it.
+response = await request('POST', '/api/github-manager/token', { token: 'ghp_route_fixture_token' });
+assert.equal(response.status, 200);
+assert.equal(response.body.data.storage, 'memory-degraded');
+assert.equal(response.body.data.persisted, false);
+assert.equal(JSON.stringify(response.body).includes('ghp_route_fixture_token'), false);
+const { access } = await import('node:fs/promises');
+await assert.rejects(access(join(verifyDir, 'credentials.json')), /ENOENT/, 'no plaintext credential file');
+
 // Pure credential helpers exposed through the __testing seam.
 const { __testing } = plugin;
 assert.equal(
@@ -514,14 +602,16 @@ assert.equal(
   'the github.com host block wins over an earlier host',
 );
 assert.equal(__testing.pickHostsToken('github.com:\n    user: octocat\n'), '');
+const previousHostsFile = process.env.GITHUB_MANAGER_GH_HOSTS_FILE;
+delete process.env.GITHUB_MANAGER_GH_HOSTS_FILE;
 const hostsCandidates = __testing.ghHostsCandidates();
 assert.ok(!process.env.GITHUB_MANAGER_GH_HOSTS_FILE);
 assert.match(hostsCandidates[hostsCandidates.length - 1].replace(/\\/g, '/'), /\.config\/gh\/hosts\.yml$/);
-const previousHostsFile = process.env.GITHUB_MANAGER_GH_HOSTS_FILE;
 process.env.GITHUB_MANAGER_GH_HOSTS_FILE = '/tmp/ghm-custom-hosts.yml';
 assert.deepEqual(__testing.ghHostsCandidates(), ['/tmp/ghm-custom-hosts.yml']);
 if (previousHostsFile === undefined) delete process.env.GITHUB_MANAGER_GH_HOSTS_FILE;
 else process.env.GITHUB_MANAGER_GH_HOSTS_FILE = previousHostsFile;
 if (process.platform !== 'win32') assert.ok(__testing.ghBinaries().includes('gh'));
 
+await rm(verifyDir, { recursive: true, force: true });
 console.log('host verification passed:', captured.tools.size, 'tools,', calls.length, 'stubbed GitHub calls,', issuePages.length, 'issue pages');

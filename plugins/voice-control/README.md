@@ -5,6 +5,8 @@
 > 本包不再接新功能；新装用户请直接装 `dsh-voice-companion`。已装用户可继续用，能力不变。
 > 取代惯例见 [`docs/DEPRECATION.md`](../../docs/DEPRECATION.md)。
 
+热键只在 DSH 窗口有焦点时生效；绑定失败时会尝试「加修饰键」的候选键，并把结果写在 HUD 上。都不行时右下角始终有「按住说话 / Hold to talk」按钮，功能不丢。麦克风被拒、没设备、被占用各有独立文案（macOS 拒绝时给出「系统设置 → 隐私与安全性 → 麦克风」路径）；权限不会被缓存，处理后重新按键即可。宿主桌面壳仍需收紧权限请求。
+
 按住一个键说话，话被送到「该去的那个 Session」，回复用语音播回来。
 
 插件分两半：Host 半片持有 API key、做语音合成、调度 `ctx.sessionController`；浏览器半片负责录音、HUD、播报。两半之间走同源 HTTP 路由，和 realtime-voice 用的是同一套约定。
@@ -101,7 +103,7 @@ node test/client-harness.mjs   # 浏览器半片的离线 harness
 
 ## 已知限制
 
-- 热键只在 DSH 窗口有焦点时生效。真正的系统级全局热键（DSH 后台也能按）需要改桌面原生壳，插件侧没有入口——asar 里 `Tray|globalShortcut|setAlwaysOnTop|BrowserWindow` 零命中，桌面壳是原生实现。
+- 热键只在 DSH 窗口有焦点时生效。真正的系统级全局热键（DSH 后台也能按）需要改桌面原生壳，插件侧没有入口——asar 里 `Tray|globalShortcut|setAlwaysOnTop|BrowserWindow` 零命中，桌面壳是原生实现。插件侧能做的是把「没绑上」显示出来，并提供右下角「按住说话」作为替代。
 - 服务端 TTS 首音 0.96–1.37 s，所以「听到回复」最快也在 2 s 上下；完全零延迟的打断式对话不成立。
 - 单次识别是整段 WAV（≤120 s / 8 MiB 是服务端 ASR 的限制；本机没有这个限制，但也只做整段）。
 - 没有唤醒词，没有常驻监听：必须按键说话。

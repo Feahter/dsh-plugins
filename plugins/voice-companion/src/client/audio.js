@@ -200,6 +200,41 @@ function createVad(config) {
 }
 
 /**
+ * Microphone failures are not interchangeable: a denied permission needs the OS
+ * settings path, a missing device needs hardware advice, and a busy device needs
+ * the other app quit. Keep the copy bilingual so it works in both locales.
+ */
+function microphoneErrorInfo(error) {
+  const name = error && typeof error.name === 'string' ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+    return {
+      state: 'denied',
+      code: 'permission',
+      message: '麦克风权限被拒绝 · Microphone access denied — macOS：系统设置 → 隐私与安全性 → 麦克风，允许 DeepSeek Harness 后点「开始通话」重试 / allow DeepSeek Harness in System Settings → Privacy & Security → Microphone, then retry.',
+    };
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+    return {
+      state: 'missing',
+      code: 'no-device',
+      message: '没有检测到麦克风 · No microphone found — 请连接麦克风，或在系统声音设置里确认输入设备后重试 / connect a microphone and check the input device, then retry.',
+    };
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+    return {
+      state: 'busy',
+      code: 'busy',
+      message: '麦克风被其他应用占用 · Microphone is busy — 关掉正在使用麦克风的应用后重试 / quit the app using the mic, then retry.',
+    };
+  }
+  return {
+    state: 'error',
+    code: 'capture',
+    message: '麦克风不可用 · Microphone unavailable — ' + ((error && error.message) || 'unknown error') + ' / retry after checking the device.',
+  };
+}
+
+/**
  * Engine: one microphone stream, one VAD, partial re-decoding every `cadenceMs`,
  * a sentence playback queue that can be interrupted by the next user turn.
  */
@@ -209,6 +244,8 @@ function createAudioEngine(deps) {
     level: 0,
     partial: '',
     error: '',
+    // idle | prompting | granted | denied | missing | busy | error
+    mic: { state: 'idle', code: '', message: '' },
   };
   const vadConfig = {
     threshold: 0.012,
@@ -256,6 +293,7 @@ function createAudioEngine(deps) {
     state.phase = phase;
     if (extra && typeof extra.partial === 'string') state.partial = extra.partial;
     if (extra && typeof extra.error === 'string') state.error = extra.error;
+    if (extra && extra.mic && typeof extra.mic === 'object') state.mic = extra.mic;
     if (phase !== 'speaking') state.level = 0;
     emit();
   }
@@ -490,16 +528,22 @@ function createAudioEngine(deps) {
     if (running || disposed) return;
     const token = ++startToken;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setPhase('error', { error: 'microphone unavailable' });
+      const info = { state: 'error', code: 'unavailable', message: '这个窗口拿不到麦克风接口 · Microphone API unavailable in this window.' };
+      setPhase('error', { error: info.message, mic: info });
       return;
     }
     let stream;
+    // Always attempt getUserMedia again: a denial is not cached, so the user can
+    // grant access in System Settings and retry without reloading the page.
+    state.mic = { state: 'prompting', code: '', message: '' };
+    emit();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (error) {
-      setPhase('error', { error: (error && error.message) || 'microphone permission denied' });
+      const info = microphoneErrorInfo(error);
+      setPhase('error', { error: info.message, mic: info });
       return;
     }
     if (token !== startToken || disposed) {
@@ -560,6 +604,7 @@ function createAudioEngine(deps) {
     processor.connect(sink);
     sink.connect(audioContext.destination);
     running = true;
+    state.mic = { state: 'granted', code: '', message: '' };
     setPhase('listening');
   }
 
@@ -625,6 +670,9 @@ function createAudioEngine(deps) {
     },
     get listening() {
       return running;
+    },
+    get mic() {
+      return { ...state.mic };
     },
   };
 }

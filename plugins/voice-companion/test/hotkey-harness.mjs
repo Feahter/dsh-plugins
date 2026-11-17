@@ -569,6 +569,56 @@ async function main() {
     assert.equal(doc.head.children.filter((child) => child.getAttribute('data-vc-hotkey-style') !== null).length, 1);
   });
 
+  await check('hotkey bind: a throwing host falls back to the next candidate', () => {
+    let attempts = 0;
+    const attached = [];
+    const target = {
+      addEventListener(type, handler) {
+        attempts += 1;
+        if (attempts === 1) throw new Error('taken by another app');
+        attached.push({ type, handler });
+      },
+      removeEventListener() {},
+    };
+    const handlers = { onKeyDown() {}, onKeyUp() {} };
+    const result = __hotkeyTest.bind(target, 'ControlLeft+ShiftLeft+Space', handlers);
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, 'fallback');
+    assert.equal(result.spec, 'AltLeft+ControlLeft+ShiftLeft+Space');
+    assert.equal(result.tried[0].reason, 'error');
+    assert.ok(result.notice.includes('已切换到'));
+    assert.ok(result.notice.includes('instead'));
+    assert.ok(result.notice.includes('按住说话') && result.notice.includes('Hold to talk'));
+    assert.deepEqual(attached.map((entry) => entry.type), ['keydown', 'keyup']);
+  });
+
+  await check('hotkey bind: every candidate failing leaves the in-app button', () => {
+    const target = {
+      addEventListener() { throw new Error('no keyboard access'); },
+      removeEventListener() {},
+    };
+    const result = __hotkeyTest.bind(target, 'ControlLeft+ShiftLeft+Space', { onKeyDown() {}, onKeyUp() {} });
+    assert.equal(result.ok, false);
+    assert.equal(result.mode, 'button');
+    assert.equal(result.binding, null);
+    assert.ok(result.tried.length >= 2);
+    assert.ok(result.notice.includes('热键不可用') && result.notice.includes('Hotkey unavailable'));
+    assert.ok(result.notice.includes('按住说话') && result.notice.includes('Hold to talk'));
+  });
+
+  await check('hotkey bind: a browser-reserved chord is skipped before binding', () => {
+    const attached = [];
+    const target = {
+      addEventListener(type, handler) { attached.push({ type, handler }); },
+      removeEventListener() {},
+    };
+    const result = __hotkeyTest.bind(target, 'ControlLeft+KeyW', { onKeyDown() {}, onKeyUp() {} });
+    assert.equal(result.ok, true);
+    assert.equal(result.mode, 'fallback');
+    assert.equal(result.spec, 'AltLeft+ControlLeft+KeyW');
+    assert.equal(result.tried[0].reason, 'reserved');
+  });
+
   await check('hold → release: transcribe → plan → send with a 16 kHz WAV', async () => {
     resetScenario();
     phases.length = 0;

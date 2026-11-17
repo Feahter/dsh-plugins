@@ -286,6 +286,21 @@ function makeSnippet(preview, q) {
   return text.slice(0, 160)
 }
 
+/** hybrid 的 snippet：按「原文 → term → 分词变体」顺序找第一个命中位置。 */
+function makeHybridSnippet(preview, analysis) {
+  const text = collapse(preview)
+  if (!text) return ''
+  const probes = [analysis.raw, ...analysis.terms.map((term) => term.term), ...analysis.variants]
+  const lower = text.toLowerCase()
+  for (const probe of probes) {
+    if (!probe || probe.length < 2) continue
+    const index = lower.indexOf(probe)
+    if (index < 0) continue
+    return text.slice(Math.max(0, index - 80), Math.min(text.length, index + 80))
+  }
+  return text.slice(0, 160)
+}
+
 function scoreEntry(entry, tokens, rawQuery) {
   const title = String(entry.title ?? '').toLowerCase()
   const tags = entry.tags.join(' ').toLowerCase()
@@ -324,8 +339,281 @@ function scoreEntry(entry, tokens, rawQuery) {
   return score
 }
 
-function summaryOf(entry, q) {
+// ------------------------------------------------------- hybrid search
+//
+// 检索分两段，避免为每个 query 全量分词 3862 条正文：
+// 1) 粗扫：每条 entry 缓存一条「检索串」——正文原样（CJK 子串命中）+
+//    拉丁词用 \u0001 包起来（整词命中，避免 js 命中 json）。在这条串上算
+//    候选（仍要求每个 query term 至少一个变体命中，保持 AND）和 BM25 的 df。
+// 2) 精算：只对候选条目分词（title/meta/body 三字段 tf），算 BM25；分词结果
+//    进 this._tokenCache（key 是 id + updatedAt），宽查询第二次起不再分词。
+//
+// 排序分 = weights.phrase * 短语分 + weights.bm25 * BM25 分；同分按 id 升序，
+// 保证同数据同 query 两次结果完全一致。
+
+const LATIN_MARK = '\u0001'
+const SEARCH_BM25_K1 = 1.2
+const SEARCH_BM25_B = Object.freeze({ title: 0.5, meta: 0.5, body: 0.75 })
+const SEARCH_TOKEN_CACHE_SIZE = 3000
+// 行号只对返回的这一页找。索引里的 preview 只取正文前 1200 字符，所以命中行
+// 基本都在文件头部；读前 64KB 足够，也避免一次 query 读几 MB。
+const LINE_SCAN_BYTES = 64 * 1024
+const SEARCH_FIELDS = Object.freeze(['title', 'meta', 'body'])
+const DEFAULT_SEARCH_WEIGHTS = Object.freeze({
+  phrase: 3,
+  bm25: 1,
+  fieldBoost: Object.freeze({ title: 2, meta: 1.2, body: 1 }),
+  phraseField: Object.freeze({ title: 4, tags: 3, path: 2, body: 1 }),
+})
+
+function isCjkCode(code) {
+  return (code >= 0x3400 && code <= 0x4dbf)
+    || (code >= 0x4e00 && code <= 0x9fff)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0x3040 && code <= 0x30ff)
+    || (code >= 0xac00 && code <= 0xd7af)
+}
+
+function containsCjk(text) {
+  for (let index = 0; index < text.length; index += 1) {
+    if (isCjkCode(text.charCodeAt(index))) return true
+  }
+  return false
+}
+
+function isAsciiWordCode(code) {
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+function isLatinRunCode(code) {
+  return isAsciiWordCode(code) || code === 95 /* _ */ || code === 45 /* - */ || code === 46 /* . */
+}
+
+/** 把一段拉丁字母 run 按 camelCase / 缩写边界切开，输出小写词（长度 >=2）。 */
+function pushLatinWords(out, source, start, end) {
+  if (end - start < 2) return
+  let wordStart = start
+  for (let cursor = start + 1; cursor <= end; cursor += 1) {
+    const previous = source.charCodeAt(cursor - 1)
+    const current = cursor < end ? source.charCodeAt(cursor) : -1
+    const previousLower = previous >= 97 && previous <= 122
+    const previousUpper = previous >= 65 && previous <= 90
+    const currentUpper = current >= 65 && current <= 90
+    const camelBreak = previousLower && currentUpper
+    const acronymBreak = previousUpper && currentUpper
+      && cursor + 1 < end
+      && source.charCodeAt(cursor + 1) >= 97
+      && source.charCodeAt(cursor + 1) <= 122
+    if (camelBreak || acronymBreak) {
+      if (cursor - wordStart >= 2) out.push(source.slice(wordStart, cursor).toLowerCase())
+      wordStart = cursor
+    }
+  }
+  if (end - wordStart >= 2) out.push(source.slice(wordStart, end).toLowerCase())
+}
+
+/**
+ * 分词：CJK 按 bigram（长度 2 的整词只取一次；2<长度<=8 额外保留整词），
+ * 拉丁按 `_ - .` 与 camelCase 拆词。两字以上才进词表，减少噪声。
+ */
+function tokenizeSearchText(text) {
+  const out = []
+  if (typeof text !== 'string' || !text) return out
+  const source = text.normalize('NFKC')
+  let index = 0
+  while (index < source.length) {
+    const code = source.charCodeAt(index)
+    if (isCjkCode(code)) {
+      let end = index + 1
+      while (end < source.length && isCjkCode(source.charCodeAt(end))) end += 1
+      const runLength = end - index
+      if (runLength === 1) out.push(source.slice(index, end))
+      else {
+        for (let cursor = index; cursor + 1 < end; cursor += 1) {
+          out.push(source.slice(cursor, cursor + 2))
+        }
+        if (runLength > 2 && runLength <= 8) out.push(source.slice(index, end))
+      }
+      index = end
+      continue
+    }
+    if (isAsciiWordCode(code)) {
+      let end = index + 1
+      while (end < source.length && isLatinRunCode(source.charCodeAt(end))) end += 1
+      let start = index
+      for (let cursor = index; cursor <= end; cursor += 1) {
+        const next = cursor < end ? source.charCodeAt(cursor) : -1
+        if (cursor === end || !isAsciiWordCode(next)) {
+          pushLatinWords(out, source, start, cursor)
+          start = cursor + 1
+        }
+      }
+      index = end
+      continue
+    }
+    index += 1
+  }
+  return out
+}
+
+/** 把一段拉丁 run 的整词、分隔符片段、camelCase 片段都写入检索串（重复无害）。 */
+function appendLatinMarks(chunks, run) {
+  const lower = run.toLowerCase()
+  chunks.push(LATIN_MARK, lower, LATIN_MARK)
+  let start = 0
+  for (let cursor = 0; cursor <= run.length; cursor += 1) {
+    const code = cursor < run.length ? run.charCodeAt(cursor) : -1
+    if (cursor < run.length && code !== 95 && code !== 45 && code !== 46) continue
+    if (cursor - start >= 2) {
+      const piece = run.slice(start, cursor).toLowerCase()
+      if (piece !== lower) chunks.push(LATIN_MARK, piece, LATIN_MARK)
+      const words = []
+      pushLatinWords(words, run, start, cursor)
+      for (const word of words) {
+        if (word !== lower && word !== piece) chunks.push(LATIN_MARK, word, LATIN_MARK)
+      }
+    }
+    start = cursor + 1
+  }
+}
+
+/**
+ * 一条 entry 的检索串，拆成两段：
+ * - text：原文字段 + 小写（CJK 子串匹配、混合词匹配用）；
+ * - latin：`\u0001整词\u0001` 串（拉丁整词匹配用，避免 js 命中 json）。
+ * 两段都只在第一次查询时建，之后挂在 _haystackCache 上。
+ */
+function buildSearchHaystack(entry) {
+  const textChunks = []
+  const latinChunks = []
+  const parts = [entry.title, entry.tags.join(' '), entry.collection, entry.path || '', entry.preview]
+  for (const part of parts) {
+    const source = String(part ?? '').normalize('NFKC')
+    let last = 0
+    let index = 0
+    while (index < source.length) {
+      if (!isAsciiWordCode(source.charCodeAt(index))) {
+        index += 1
+        continue
+      }
+      let end = index + 1
+      while (end < source.length && isLatinRunCode(source.charCodeAt(end))) end += 1
+      textChunks.push(source.slice(last, index))
+      appendLatinMarks(latinChunks, source.slice(index, end))
+      index = end
+      last = end
+    }
+    textChunks.push(source.slice(last))
+    textChunks.push('\n')
+  }
+  return { text: textChunks.join('').toLowerCase(), latin: latinChunks.join('') }
+}
+
+/** query 原文 → 每个空白 term 的变体（全局去重，供 df 与 BM25 共用）。 */
+function analyzeQuery(rawQuery) {
+  const raw = String(rawQuery ?? '').normalize('NFKC').trim()
+  const variants = []
+  const variantIndex = new Map()
+  const intern = (value) => {
+    if (variantIndex.has(value)) return variantIndex.get(value)
+    const index = variants.length
+    variants.push(value)
+    variantIndex.set(value, index)
+    return index
+  }
+  // 注意：camelCase 必须在原文上切，先 toLowerCase 会丢掉 safeStorage 的边界。
+  const terms = raw.split(/\s+/).filter(Boolean).map((piece) => {
+    const term = piece.toLowerCase()
+    const indexes = []
+    const seen = new Set()
+    for (const token of tokenizeSearchText(piece)) {
+      if (seen.has(token)) continue
+      seen.add(token)
+      indexes.push(intern(token))
+    }
+    // 分词已经拆出多个词时不再额外保留整串（safeStorage / context_lib 的整串
+    // 对候选筛选没有增益，只会多扫一遍 3862 条）。分词无结果时兜底成整串。
+    if (!indexes.length) indexes.push(intern(term))
+    // 拉丁 camel/snake/kebab 拆出来的多个词必须全部命中（safeStorage 不能只靠
+    // 一个 storage 就召回）；CJK 的 bigram 仍是任一命中（「热 更新」只有「更新」）。
+    const matchAll = indexes.length > 1 && !containsCjk(piece) && /[A-Za-z0-9]/.test(piece)
+    return { term, variants: indexes, matchAll }
+  })
   return {
+    raw: raw.toLowerCase().replace(/\s+/g, ' '),
+    terms,
+    variants,
+    needles: variants.map((variant) => {
+      // 单字符拉丁词不进 latin 词表（最少 2 字），退回 text 子串匹配。
+      if (containsCjk(variant) || variant.length < 2) return { field: 'text', value: variant }
+      return { field: 'latin', value: `${LATIN_MARK}${variant}${LATIN_MARK}` }
+    }),
+  }
+}
+
+function mergeSearchWeights(base, override) {
+  if (!override || typeof override !== 'object' || Array.isArray(override)) return base
+  const number = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback)
+  const overrideFieldBoost = override.fieldBoost && typeof override.fieldBoost === 'object' ? override.fieldBoost : {}
+  const overridePhraseField = override.phraseField && typeof override.phraseField === 'object' ? override.phraseField : {}
+  return {
+    phrase: number(override.phrase, base.phrase),
+    bm25: number(override.bm25, base.bm25),
+    fieldBoost: {
+      title: number(overrideFieldBoost.title, base.fieldBoost.title),
+      meta: number(overrideFieldBoost.meta, base.fieldBoost.meta),
+      body: number(overrideFieldBoost.body, base.fieldBoost.body),
+    },
+    phraseField: {
+      title: number(overridePhraseField.title, base.phraseField.title),
+      tags: number(overridePhraseField.tags, base.phraseField.tags),
+      path: number(overridePhraseField.path, base.phraseField.path),
+      body: number(overridePhraseField.body, base.phraseField.body),
+    },
+  }
+}
+
+function tokenCounts(tokens) {
+  const counts = new Map()
+  for (const token of tokens) counts.set(token, (counts.get(token) || 0) + 1)
+  return counts
+}
+
+function buildSearchTokenRecord(entry) {
+  const title = tokenizeSearchText(entry.title)
+  const meta = tokenizeSearchText(`${entry.tags.join(' ')} ${entry.collection} ${entry.path || ''}`)
+  const body = tokenizeSearchText(entry.preview)
+  return {
+    title: tokenCounts(title),
+    meta: tokenCounts(meta),
+    body: tokenCounts(body),
+    titleLength: title.length,
+    metaLength: meta.length,
+    bodyLength: body.length,
+  }
+}
+
+function roundScore(value) {
+  return Math.round(value * 1e6) / 1e6
+}
+
+/** 以固定并发跑 map，避免一页 200 条时同时打开太多文件。 */
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await mapper(items[index], index)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+function summaryOf(entry, q, extras) {
+  const item = {
     id: entry.id,
     title: entry.title,
     kind: entry.kind,
@@ -340,6 +628,8 @@ function summaryOf(entry, q) {
     updatedAt: entry.updatedAt,
     snippet: q ? makeSnippet(entry.preview, q) : collapse(entry.preview).slice(0, 160),
   }
+  if (extras) Object.assign(item, extras)
+  return item
 }
 
 function collectionForKind(kind) {
@@ -372,6 +662,13 @@ export class Library {
     this._scanning = false
     // 外部进程（另一个 dsh 实例 / 直接跑 store API 的脚本）改过磁盘时，用它判断要不要重新读。
     this._diskStamps = { index: null, sources: null }
+    // 混合检索缓存：检索串按 id+updatedAt 缓存；分词只缓存真正命中的条目（LRU 上限防膨胀）。
+    this.searchWeights = mergeSearchWeights(DEFAULT_SEARCH_WEIGHTS, options.searchWeights)
+    this.maxSearchTokenCache = Number.isFinite(options.searchTokenCacheSize)
+      ? Math.max(16, Math.trunc(options.searchTokenCacheSize))
+      : SEARCH_TOKEN_CACHE_SIZE
+    this._haystackCache = new Map()
+    this._tokenCache = new Map()
   }
 
   // -------------------------------------------------------------- lifecycle
@@ -413,6 +710,7 @@ export class Library {
     }
     const entries = {}
     const dropped = []
+    const kept = []
     let repaired = false
     for (const [id, raw] of Object.entries(parsed.entries)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -421,13 +719,20 @@ export class Library {
         continue
       }
       const normalized = normalizeEntry(id, raw)
-      if (!isSafeEntryId(id) || !isSafeEntryId(normalized.id) || normalized.id !== id) {
-        // Never expose an entry whose id would resolve outside notes/ or
-        // blobs/ (or collide with a path separator), and never let the map key
-        // disagree with the entry id — drop it, flag a repair.
+      if (!isSafeEntryId(id) || !isSafeEntryId(normalized.id)) {
+        // Never expose an entry whose id would resolve outside notes/ or blobs/
+        // (or collide with a path separator) — drop it, flag a repair.
         repaired = true
-        dropped.push({ id, reason: 'id 不在安全字符集内或与索引键不一致' })
+        dropped.push({ id, reason: 'id 不在安全字符集内' })
         continue
+      }
+      if (normalized.id !== id) {
+        // 键只是查找索引，磁盘路径用的是 entry.id（notes/<entry.id>.md 等），
+        // 所以键与 id 不一致不构成越界风险。真实库里确实有这类历史条目
+        // （同一文件分两批扫描过，键与 id 各自都是合法 id）：保留它，按原键收录，
+        // 否则下一次加载会连同索引项与手工标签一起丢掉。
+        repaired = true
+        kept.push({ id, entryId: normalized.id })
       }
       if (normalized.storage === 'linked') {
         // index.json is untrusted input: a hand-edited `{storage:'linked',
@@ -450,10 +755,15 @@ export class Library {
       const rest = dropped.length > 8 ? ` 等共 ${dropped.length} 条` : ''
       console.warn(`[context-lib] index.json 加载时丢弃了 ${dropped.length} 条不符合规则的条目：${head}${rest}`)
     }
+    if (kept.length) {
+      // 只是键与条目 id 不一致，条目本身已保留；提示一次便于排查历史数据的来源。
+      console.warn(`[context-lib] index.json 有 ${kept.length} 条条目的索引键与自身 id 不一致，已按原键保留（不是数据丢失）`)
+    }
     return {
       index: { version: INDEX_VERSION, updatedAt: parsed.updatedAt ?? null, entries },
       repaired,
       dropped,
+      kept,
     }
   }
 
@@ -653,23 +963,231 @@ export class Library {
     }
   }
 
+  // ------------------------------------------------------------ hybrid search
+
+  _searchHaystack(entry) {
+    const key = `${entry.id}\u0000${entry.updatedAt}`
+    const cached = this._haystackCache.get(key)
+    if (cached !== undefined) return cached
+    const haystack = buildSearchHaystack(entry)
+    if (this._haystackCache.size >= this.maxEntries + 1000) this._haystackCache.clear()
+    this._haystackCache.set(key, haystack)
+    return haystack
+  }
+
+  _searchTokens(entry) {
+    const key = `${entry.id}\u0000${entry.updatedAt}`
+    const cached = this._tokenCache.get(key)
+    if (cached) {
+      // 命中就挪到队尾：Map 的插入顺序当 LRU 用。
+      this._tokenCache.delete(key)
+      this._tokenCache.set(key, cached)
+      return cached
+    }
+    const record = buildSearchTokenRecord(entry)
+    this._tokenCache.set(key, record)
+    while (this._tokenCache.size > this.maxSearchTokenCache) {
+      const oldest = this._tokenCache.keys().next().value
+      this._tokenCache.delete(oldest)
+    }
+    return record
+  }
+
+  /**
+   * 返回 `{matched:[{entry,score,scoreParts}], analysis}`。
+   * df / idf 在本次 status 过滤后的候选池上算；排序只用分数，最终同分由 list() 按 id 兜底。
+   */
+  _hybridSearch(base, rawQuery, weightsOverride) {
+    const weights = mergeSearchWeights(this.searchWeights, weightsOverride)
+    const analysis = analyzeQuery(rawQuery)
+    const { variants, needles } = analysis
+    const df = new Uint32Array(variants.length)
+    const matchedEntries = []
+    for (const entry of base) {
+      const haystack = this._searchHaystack(entry)
+      const hit = new Uint8Array(variants.length)
+      let allTerms = true
+      for (const term of analysis.terms) {
+        let termHit = term.matchAll
+        for (const variantIndex of term.variants) {
+          if (!hit[variantIndex]) {
+            const needle = needles[variantIndex]
+            const field = needle.field === 'latin' ? haystack.latin : haystack.text
+            hit[variantIndex] = field.includes(needle.value) ? 1 : 0
+          }
+          if (term.matchAll) {
+            if (!hit[variantIndex]) termHit = false
+          } else if (hit[variantIndex]) {
+            termHit = true
+          }
+        }
+        if (!termHit) allTerms = false
+      }
+      for (let index = 0; index < hit.length; index += 1) {
+        if (hit[index]) df[index] += 1
+      }
+      if (allTerms) matchedEntries.push(entry)
+    }
+
+    const idf = new Float64Array(variants.length)
+    for (let index = 0; index < variants.length; index += 1) {
+      if (df[index] > 0) {
+        idf[index] = Math.log(1 + (base.length - df[index] + 0.5) / (df[index] + 0.5))
+      }
+    }
+
+    const records = matchedEntries.map((entry) => this._searchTokens(entry))
+    const sums = { title: 0, meta: 0, body: 0 }
+    for (const record of records) {
+      for (const field of SEARCH_FIELDS) sums[field] += record[`${field}Length`]
+    }
+    const average = {}
+    for (const field of SEARCH_FIELDS) {
+      average[field] = records.length ? sums[field] / records.length : 1
+    }
+
+    const matched = matchedEntries.map((entry, position) => {
+      const record = records[position]
+      const titleLower = entry.title.toLowerCase()
+      const tagsLower = entry.tags.join(' ').toLowerCase()
+      const pathLower = String(entry.path ?? '').toLowerCase()
+      const bodyLower = String(entry.preview ?? '').toLowerCase()
+      const parts = { phrase: 0, bm25: 0, title: 0, meta: 0, body: 0 }
+
+      // 精确短语：query 原文出现在字段里；标题 > 标签/路径 > 正文。
+      if (analysis.raw.length >= 2) {
+        if (titleLower.includes(analysis.raw)) parts.phrase += weights.phraseField.title
+        if (tagsLower.includes(analysis.raw)) parts.phrase += weights.phraseField.tags
+        if (pathLower.includes(analysis.raw)) parts.phrase += weights.phraseField.path
+        if (bodyLower.includes(analysis.raw)) parts.phrase += weights.phraseField.body
+      }
+      // 多词 query：每个 term 的整词命中再加一份，弥补拆分后丢掉的“原词”信号。
+      if (analysis.terms.length > 1) {
+        for (const term of analysis.terms) {
+          if (term.term.length < 2) continue
+          if (titleLower.includes(term.term)) parts.phrase += 1.5
+          if (tagsLower.includes(term.term)) parts.phrase += 1
+          if (pathLower.includes(term.term)) parts.phrase += 1
+          if (bodyLower.includes(term.term)) parts.phrase += 0.5
+        }
+      }
+
+      // BM25：变体是全局去重的（同一个 bigram 不因 query 重复写两次而重复计分）。
+      for (let variantIndex = 0; variantIndex < variants.length; variantIndex += 1) {
+        const variantIdf = idf[variantIndex]
+        if (!variantIdf) continue
+        const variant = variants[variantIndex]
+        for (const field of SEARCH_FIELDS) {
+          const tf = record[field].get(variant)
+          if (!tf) continue
+          const length = record[`${field}Length`]
+          const fieldAverage = average[field] || 1
+          const norm = 1 - SEARCH_BM25_B[field] + SEARCH_BM25_B[field] * (length / fieldAverage)
+          const contribution = weights.fieldBoost[field] * variantIdf
+            * (tf * (SEARCH_BM25_K1 + 1)) / (tf + SEARCH_BM25_K1 * norm)
+          parts[field] += contribution
+          parts.bm25 += contribution
+        }
+      }
+
+      const score = weights.phrase * parts.phrase + weights.bm25 * parts.bm25
+      return {
+        entry,
+        score,
+        scoreParts: {
+          phrase: roundScore(parts.phrase),
+          bm25: roundScore(parts.bm25),
+          title: roundScore(parts.title),
+          meta: roundScore(parts.meta),
+          body: roundScore(parts.body),
+        },
+      }
+    })
+    return { matched, analysis }
+  }
+
+  /** 只给这一页算 source / line（行号按 query 命中强度取最强的一行）。 */
+  async _attachSearchLocations(items, page, analysis, query) {
+    const locate = query.line !== false
+    const locations = await mapWithConcurrency(page, 8, async ({ entry }) => {
+      const source = this._contentFile(entry)
+      if (!source) return { source: null, line: null }
+      if (!locate) return { source, line: null }
+      return { source, line: await this._bestLine(entry, source, analysis) }
+    })
+    for (let index = 0; index < items.length; index += 1) {
+      items[index].source = locations[index].source
+      items[index].line = locations[index].line
+    }
+  }
+
+  async _bestLine(entry, file, analysis) {
+    if (entry.storage !== 'note' && !isTextFile(entry.path || entry.blob || '')) return null
+    let handle = null
+    try {
+      handle = await fs.open(file, 'r')
+      const stat = await handle.stat()
+      if (!stat.isFile() || stat.size === 0) return null
+      const bytes = Math.min(stat.size, LINE_SCAN_BYTES)
+      const buffer = Buffer.alloc(bytes)
+      await handle.read(buffer, 0, bytes, 0)
+      const lines = buffer.toString('utf8').split(/\r?\n/)
+      let bestIndex = -1
+      let bestScore = 0
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index].toLowerCase()
+        if (!line.trim()) continue
+        let score = 0
+        if (analysis.raw.length >= 2 && line.includes(analysis.raw)) score += 10
+        for (const term of analysis.terms) {
+          if (term.term && line.includes(term.term)) score += 3
+        }
+        if (!score) {
+          for (const variant of analysis.variants) {
+            if (line.includes(variant)) {
+              score += 1
+              break
+            }
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score
+          bestIndex = index
+        }
+      }
+      // 只有标题/路径命中、正文没有命中时，给第 1 行当“打开位置”（而不是 null）：
+      // 调用方拿到的 line 始终是可跳转的行号；空文件/二进制仍是 null。
+      return bestScore > 0 ? bestIndex + 1 : (lines.some((line) => line.trim()) ? 1 : null)
+    } catch {
+      return null
+    } finally {
+      if (handle) await handle.close().catch(() => {})
+    }
+  }
+
   async list(query = {}) {
     await this.init()
     await this._syncFromDisk()
     const q = typeof query.q === 'string' ? query.q : ''
     const tokens = q.toLowerCase().split(/\s+/).filter(Boolean)
+    // 只有显式传 mode:'keyword' 才走旧逻辑；默认 hybrid（q 为空时两者等价）。
+    const mode = query.mode === 'keyword' ? 'keyword' : 'hybrid'
     let base = Object.values(this.index.entries)
     const status = query.status || 'active'
     if (status === 'active' || status === 'trashed') base = base.filter((entry) => entry.status === status)
 
-    const matched = []
-    for (const entry of base) {
-      if (!tokens.length) {
-        matched.push({ entry, score: 0 })
-        continue
+    let matched = []
+    let search = null
+    if (!tokens.length) {
+      matched = base.map((entry) => ({ entry, score: 0 }))
+    } else if (mode === 'keyword') {
+      for (const entry of base) {
+        const score = scoreEntry(entry, tokens, q)
+        if (score !== null) matched.push({ entry, score })
       }
-      const score = scoreEntry(entry, tokens, q)
-      if (score !== null) matched.push({ entry, score })
+    } else {
+      search = this._hybridSearch(base, q, query.weights)
+      matched = search.matched
     }
 
     const facets = {
@@ -688,7 +1206,11 @@ export class Library {
     filtered.sort((a, b) => {
       if (sort === 'title') return a.entry.title.localeCompare(b.entry.title, 'zh-Hans-CN')
       if (sort === 'size') return (b.entry.size || 0) - (a.entry.size || 0)
-      if (sort === 'relevance' && tokens.length && b.score !== a.score) return b.score - a.score
+      if (sort === 'relevance' && tokens.length) {
+        if (b.score !== a.score) return b.score - a.score
+        // hybrid 同分按 id 定序（keyword 保持旧行为：落到 updatedAt）。
+        if (search) return a.entry.id < b.entry.id ? -1 : a.entry.id > b.entry.id ? 1 : 0
+      }
       return String(b.entry.updatedAt).localeCompare(String(a.entry.updatedAt))
     })
 
@@ -698,13 +1220,17 @@ export class Library {
     const offsetValue = Number(query.offset)
     const offset = Number.isFinite(offsetValue) ? Math.max(0, Math.trunc(offsetValue)) : 0
     const page = filtered.slice(offset, offset + limit)
-    return {
-      total,
-      limit,
-      offset,
-      items: page.map(({ entry }) => summaryOf(entry, tokens.length ? q : '')),
-      facets,
-    }
+    const items = page.map(({ entry, score, scoreParts }) => {
+      if (!search) return summaryOf(entry, tokens.length ? q : '')
+      const extras = {
+        score: roundScore(score),
+        snippet: makeHybridSnippet(entry.preview, search.analysis),
+      }
+      if (query.scoreParts !== false && query.debug !== false) extras.scoreParts = scoreParts
+      return summaryOf(entry, q, extras)
+    })
+    if (search) await this._attachSearchLocations(items, page, search.analysis, query)
+    return { total, limit, offset, items, facets }
   }
 
   async listTrash({ limit = 50, offset = 0 } = {}) {

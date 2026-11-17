@@ -12,7 +12,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 自动整合 | 扫描来源目录（默认 workspace / ~/Documents / ~/.dsh），按扩展名归类 doc / script / image / data，解析 frontmatter 标题标签、`[[wiki]]` 链接 |
-| 检索 | AND 关键词 + 字段加权（标题 > 标签 > 归类 > 路径 > 摘要），中文整词支持，类型 / 归类 / 标签 / 来源过滤 |
+| 检索 | 混合打分：精确短语 + BM25（标题权重 > 正文、长度归一、idf 来自候选池）+ CJK bigram / camelCase 拆词；AND 语义与旧关键词模式（`mode:'keyword'`）保留；命中带 `score` / `scoreParts` / `source` / `line`；类型 / 归类 / 标签 / 来源过滤 |
 | 文件管理 | 浏览、详情、行范围读正文、改标题标签归类、软删 / 恢复 / 彻底删除、原始字节与缩略图预览 |
 | 格式预览 | docx/rtf/odt 用 `textutil` 转文本，html 剥标签，pdf/xlsx/ppt/key/pages 用 `qlmanage` 出 PNG 缩略图（缓存到 `<root>/cache/thumbs`） |
 | 展示形式 | 列表 / 卡片 / 表格 / 图库四视图，工具栏下拉切换（选择记在 `localStorage` 的 `clib:view`）；表格可按标题 / 大小 / 时间点表头排序，图库只铺图片；Markdown 笔记与 `ext=md` 条目在详情里可切「渲染 / 源码」，渲染器是自带的 94 行轻量实现（只用 React 文本节点，不用 `innerHTML`、不引依赖）；预览可一键全屏（Esc / 点遮罩 / 右上按钮退出，内容在卡片内滚动） |
@@ -86,9 +86,10 @@ dsh plugin --profile desktop add link:$HOME/Documents/deepseek-harness/dsh-plugi
 
 ```bash
 node build.mjs                    # 构建 client.js（esbuild，57 KB）
-node --test test/store.test.mjs   # 数据层：索引/检索/扫描锁/回收站（12 项）
+node --test test/store.test.mjs test/search-hybrid.test.mjs   # 数据层 + 混合检索（19 + 9 项）
 node test/client-smoke.mjs        # 浏览器半片：在 Node 里加载 client.js，校验槽位注册
-node .verify-host.mjs             # 宿主半片：9 工具 + HTTP 路由 + 简报（stub ctx，32 项）
+node .verify-host.mjs             # 宿主半片：9 工具 + HTTP 路由 + 简报（stub ctx，46 项）
+node test/bench-search.mjs        # 复制真实索引到临时目录，打印 keyword vs hybrid top5 与耗时
 npm test                          # 上面三项一起跑
 ```
 

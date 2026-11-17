@@ -103,6 +103,47 @@ window.__ModuleLoader__.load({
       branchReload: '重新加载',
       moreRepos: '最多显示 100 个仓库。',
       toggleFailed: '操作失败：{message}',
+      pullOpenDetail: '详情',
+      pullDetail: 'Pull Request 详情',
+      pullBack: '返回列表',
+      pullBodyEmpty: '没有描述',
+      pullChangedFiles: '{count} 个文件变更',
+      pullFiles: '变更文件',
+      pullNoFiles: '这个 Pull Request 没有文件变更',
+      pullFilesTruncated: '文件较多，只显示前 {count} 个文件。',
+      pullShowPatch: '查看 diff',
+      pullHidePatch: '收起 diff',
+      pullPatchUnavailable: '这个文件没有可显示的文本 diff（二进制、重命名或内容过大）。',
+      pullPatchFailed: '加载 diff 失败：{message}',
+      pullPatchTruncated: 'diff 较大，只显示前 200 KB。',
+      pullReviews: 'Review',
+      pullNoReviews: '还没有 review',
+      pullReviewApproved: '已批准',
+      pullReviewChanges: '要求修改',
+      pullReviewCommented: '已评论',
+      pullReviewDismissed: '已驳回',
+      pullReviewPending: '待处理',
+      pullReviewSummary: '批准 {approved} · 要求修改 {changes} · 评论 {comments}',
+      pullConversation: '对话',
+      pullConversationTotal: '{count} 条评论',
+      pullNoConversation: '还没有评论',
+      pullConversationTruncated: '只显示最近 {count} 条评论。',
+      pullMergeable: '可合并',
+      pullConflicts: '有冲突',
+      pullDetailFailed: '加载 Pull Request 详情失败：{message}',
+      pullMissing: '部分数据没有加载：{sections}',
+      pullMissingFiles: '文件列表',
+      pullMissingReviews: 'Review',
+      pullMissingConversation: '对话',
+      storageWarningTitle: '凭据存储降级',
+      storageWarningBody: '系统安全存储（Electron safeStorage）不可用，或凭据文件无法读取/迁移。token 不会以明文写入磁盘：本次运行内仍可使用，重启后可能需要重新输入。',
+      storageSaveTitle: '加密保存 token',
+      storageSaveHint: '粘贴一个具有 repo 权限的 GitHub token。有系统安全存储时加密落盘；没有时只保存在内存中，重启后失效。',
+      storageSave: '保存 token',
+      storageTokenRequired: '请填写 token',
+      storageSaved: 'token 已加密保存',
+      storageSavedMemory: 'token 只保存在内存中（本次运行有效，重启后失效）',
+      storageSaveFailed: '保存 token 失败：{message}',
     };
 
     const en = {
@@ -198,6 +239,47 @@ window.__ModuleLoader__.load({
       branchReload: 'Reload',
       moreRepos: 'Showing at most 100 repositories.',
       toggleFailed: 'Action failed: {message}',
+      pullOpenDetail: 'Details',
+      pullDetail: 'Pull request details',
+      pullBack: 'Back to list',
+      pullBodyEmpty: 'No description',
+      pullChangedFiles: '{count} files changed',
+      pullFiles: 'Changed files',
+      pullNoFiles: 'This pull request changes no files',
+      pullFilesTruncated: 'Large pull request — showing the first {count} files.',
+      pullShowPatch: 'Show diff',
+      pullHidePatch: 'Hide diff',
+      pullPatchUnavailable: 'No text diff to show for this file (binary, rename, or too large).',
+      pullPatchFailed: 'Failed to load the diff: {message}',
+      pullPatchTruncated: 'Large diff — showing the first 200 KB.',
+      pullReviews: 'Reviews',
+      pullNoReviews: 'No reviews yet',
+      pullReviewApproved: 'Approved',
+      pullReviewChanges: 'Changes requested',
+      pullReviewCommented: 'Commented',
+      pullReviewDismissed: 'Dismissed',
+      pullReviewPending: 'Pending',
+      pullReviewSummary: '{approved} approved · {changes} changes requested · {comments} commented',
+      pullConversation: 'Conversation',
+      pullConversationTotal: '{count} comments',
+      pullNoConversation: 'No comments yet',
+      pullConversationTruncated: 'Showing the latest {count} comments.',
+      pullMergeable: 'Mergeable',
+      pullConflicts: 'Conflicts',
+      pullDetailFailed: 'Failed to load the pull request: {message}',
+      pullMissing: 'Some sections could not be loaded: {sections}',
+      pullMissingFiles: 'files',
+      pullMissingReviews: 'reviews',
+      pullMissingConversation: 'conversation',
+      storageWarningTitle: 'Credential storage degraded',
+      storageWarningBody: 'Electron safeStorage is unavailable, or the credential file could not be read/migrated. The token is never written to disk in plaintext: it stays usable for this run only and may need to be entered again after a restart.',
+      storageSaveTitle: 'Save a token securely',
+      storageSaveHint: 'Paste a GitHub token with repo scope. With system secure storage it is encrypted at rest; without it the token stays in memory and is lost on restart.',
+      storageSave: 'Save token',
+      storageTokenRequired: 'Enter a token',
+      storageSaved: 'Token saved and encrypted',
+      storageSavedMemory: 'Token kept in memory only (valid for this run, lost on restart)',
+      storageSaveFailed: 'Failed to save the token: {message}',
     };
 
     let runtime = null;
@@ -456,6 +538,31 @@ window.__ModuleLoader__.load({
 
     function SetupCard(props) {
       const t = props.t;
+      const [token, setToken] = React.useState('');
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState('');
+
+      async function submitToken(event) {
+        event.preventDefault();
+        const value = token.trim();
+        if (!value) {
+          setError(t('storageTokenRequired'));
+          return;
+        }
+        if (busy || typeof props.onSaveToken !== 'function') return;
+        setBusy(true);
+        setError('');
+        try {
+          const result = await props.onSaveToken(value);
+          setToken('');
+          if (props.onSaved) props.onSaved(result);
+        } catch (err) {
+          setError(t('storageSaveFailed', { message: (err && err.message) || String(err) }));
+        } finally {
+          setBusy(false);
+        }
+      }
+
       return h('div', { className: 'ghm-setup' },
         h('div', { className: 'ghm-setupIcon' }, h(KeyIcon, { size: 26 })),
         h('h2', { className: 'ghm-setupTitle' }, t('notConfiguredTitle')),
@@ -473,7 +580,28 @@ window.__ModuleLoader__.load({
           className: 'ghm-btn ghm-btnPrimary',
           onClick: props.onRetry,
           disabled: props.busy,
-        }, props.busy ? t('loading') : t('retry')));
+        }, props.busy ? t('loading') : t('retry')),
+        typeof props.onSaveToken === 'function'
+          ? h('form', { className: 'ghm-tokenForm', onSubmit: submitToken },
+            h('div', { className: 'ghm-subHead' },
+              h('span', { className: 'ghm-subTitle' }, h(KeyIcon, { size: 14 }), t('storageSaveTitle'))),
+            h('input', {
+              type: 'password',
+              className: 'ghm-input',
+              value: token,
+              placeholder: 'ghp_… / github_pat_…',
+              autoComplete: 'off',
+              spellCheck: false,
+              onChange: (event) => setToken(event.target.value),
+            }),
+            h('p', { className: 'ghm-setupHint' }, t('storageSaveHint')),
+            error ? h('div', { className: 'ghm-errorText' }, error) : null,
+            h('button', {
+              type: 'submit',
+              className: 'ghm-btn ghm-btnPrimary ghm-tokenSave',
+              disabled: busy || props.busy,
+            }, busy ? t('creating') : t('storageSave')))
+          : null);
     }
 
     function RepoRow(props) {
@@ -542,7 +670,11 @@ window.__ModuleLoader__.load({
       const pull = props.pull;
       const t = props.t;
       const localeId = props.localeId;
-      return h('div', { className: 'ghm-row', 'data-state': pull.state },
+      return h('div', {
+        className: 'ghm-row ghm-pullRow',
+        'data-state': pull.state,
+        onClick: () => props.onOpen(pull),
+      },
         h('span', { className: 'ghm-rowIcon', 'data-merged': pull.merged ? 'true' : 'false' }, h(PullIcon, { size: 16 })),
         h('div', { className: 'ghm-rowMain' },
           h('div', { className: 'ghm-rowTitleLine' },
@@ -551,7 +683,11 @@ window.__ModuleLoader__.load({
               href: pull.htmlUrl || undefined,
               target: '_blank',
               rel: 'noopener noreferrer',
-              onClick: (event) => { event.preventDefault(); openExternal(pull.htmlUrl); },
+              onClick: (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openExternal(pull.htmlUrl);
+              },
             }, pull.title),
             h('span', { className: 'ghm-rowNumber' }, '#' + pull.number),
             pull.draft ? h('span', { className: 'ghm-chip' }, t('draft')) : null,
@@ -565,10 +701,242 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'ghm-btn ghm-btnGhost',
+            title: t('pullOpenDetail'),
+            'aria-label': t('pullOpenDetail'),
+            onClick: (event) => {
+              event.stopPropagation();
+              props.onOpen(pull);
+            },
+          }, t('pullOpenDetail')),
+          h('button', {
+            type: 'button',
+            className: 'ghm-btn ghm-btnGhost',
             title: t('openOnGithub'),
             'aria-label': t('openOnGithub'),
-            onClick: () => openExternal(pull.htmlUrl),
+            onClick: (event) => {
+              event.stopPropagation();
+              openExternal(pull.htmlUrl);
+            },
           }, h(ExternalIcon, { size: 14 }))));
+    }
+
+    function reviewLabel(state, t) {
+      if (state === 'APPROVED') return t('pullReviewApproved');
+      if (state === 'CHANGES_REQUESTED') return t('pullReviewChanges');
+      if (state === 'COMMENTED') return t('pullReviewCommented');
+      if (state === 'DISMISSED') return t('pullReviewDismissed');
+      if (state === 'PENDING') return t('pullReviewPending');
+      return state || '';
+    }
+
+    function sectionLabel(section, t) {
+      if (section === 'files') return t('pullMissingFiles');
+      if (section === 'reviews') return t('pullMissingReviews');
+      if (section === 'conversation') return t('pullMissingConversation');
+      return section;
+    }
+
+    function PullFileRow(props) {
+      const file = props.file;
+      const t = props.t;
+      const expanded = props.expanded;
+      const patch = props.patch;
+      return h('div', { className: 'ghm-prFile', 'data-open': expanded ? 'true' : 'false' },
+        h('button', {
+          type: 'button',
+          className: 'ghm-prFileHead',
+          onClick: () => props.onToggle(file),
+        },
+          h(FileIcon, { size: 13 }),
+          h('span', { className: 'ghm-prFilePath', title: file.path }, file.path),
+          h('span', { className: 'ghm-prStat' },
+            h('span', { className: 'ghm-add' }, '+' + (file.additions ?? 0)),
+            h('span', { className: 'ghm-del' }, '−' + (file.deletions ?? 0))),
+          h('span', { className: 'ghm-metaMuted' }, expanded ? t('pullHidePatch') : t('pullShowPatch'))),
+        expanded
+          ? h('div', { className: 'ghm-prPatch' },
+            patch && patch.loading
+              ? h('div', { className: 'ghm-center ghm-centerInline' }, h(Spinner), h('span', null, t('loading')))
+              : null,
+            patch && patch.error
+              ? h('div', { className: 'ghm-errorText' }, t('pullPatchFailed', { message: patch.error }))
+              : null,
+            patch && !patch.loading && !patch.error
+              ? (patch.data && patch.data.patchAvailable
+                ? h('div', { className: 'ghm-prPatchBody' },
+                  patch.data.truncated
+                    ? h('div', { className: 'ghm-inlineEmpty' }, t('pullPatchTruncated'))
+                    : null,
+                  h('pre', { className: 'ghm-fileText' }, patch.data.patch))
+                : h('div', { className: 'ghm-mutedBox' }, t('pullPatchUnavailable')))
+              : null)
+          : null);
+    }
+
+    function PullDetail(props) {
+      const view = props.view;
+      const t = props.t;
+      const localeId = props.localeId;
+      const [expanded, setExpanded] = React.useState('');
+      const [patch, setPatch] = React.useState(null);
+
+      function togglePatch(file) {
+        if (expanded === file.path) {
+          setExpanded('');
+          setPatch(null);
+          return;
+        }
+        setExpanded(file.path);
+        setPatch({ path: file.path, loading: true, error: '', data: null });
+        Promise.resolve(props.onLoadPatch(file.path)).then(
+          (data) => setPatch((previous) => (previous && previous.path === file.path
+            ? { path: file.path, loading: false, error: '', data }
+            : previous)),
+          (error) => setPatch((previous) => (previous && previous.path === file.path
+            ? { path: file.path, loading: false, error: (error && error.message) || String(error), data: null }
+            : previous)),
+        );
+      }
+
+      if (!view) return null;
+      const head = h('div', { className: 'ghm-prHead' },
+        h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: props.onBack },
+          '← ' + t('pullBack')),
+        h('span', { className: 'ghm-subTitle' }, t('pullDetail') + (view.number ? ' #' + view.number : '')));
+
+      if (view.loading) {
+        return h('div', { className: 'ghm-prPane' }, head,
+          h('div', { className: 'ghm-center ghm-centerInline' }, h(Spinner), h('span', null, t('loading'))));
+      }
+      if (view.error) {
+        return h('div', { className: 'ghm-prPane' }, head,
+          h('div', { className: 'ghm-center ghm-centerInline' },
+            h('div', { className: 'ghm-errorText' }, t('pullDetailFailed', { message: view.error })),
+            h('button', { type: 'button', className: 'ghm-btn ghm-btnGhost', onClick: props.onRetry }, t('retry'))));
+      }
+      const data = view.data;
+      if (!data || !data.pull) return h('div', { className: 'ghm-prPane' }, head);
+      const pull = data.pull;
+      const files = data.files;
+      const reviews = data.reviews;
+      const conversation = data.conversation;
+      const missing = Array.isArray(data.missing) ? data.missing : [];
+      const mergeText = pull.mergeableState === 'dirty'
+        ? t('pullConflicts')
+        : (pull.mergeable === true ? t('pullMergeable') : (pull.mergeableState || ''));
+
+      return h('div', { className: 'ghm-prPane' },
+        head,
+        h('div', { className: 'ghm-prTitleLine' },
+          h('a', {
+            className: 'ghm-prTitle',
+            href: pull.htmlUrl || undefined,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            onClick: (event) => { event.preventDefault(); openExternal(pull.htmlUrl); },
+          }, pull.title || ('#' + pull.number)),
+          h('span', { className: 'ghm-rowNumber' }, '#' + pull.number),
+          pull.draft ? h('span', { className: 'ghm-chip' }, t('draft')) : null,
+          pull.merged ? h('span', { className: 'ghm-chip ghm-chipMerged' }, t('merged')) : null,
+          h('span', { className: 'ghm-chip' }, pull.state || '')),
+        h('div', { className: 'ghm-detailMeta ghm-prMeta' },
+          h('span', { className: 'ghm-metaItem' }, pull.author || ''),
+          h('span', { className: 'ghm-metaItem' }, formatRelative(pull.updatedAt, localeId)),
+          h('span', { className: 'ghm-metaItem ghm-branch' }, t('branches', { head: pull.head || '?', base: pull.base || '?' })),
+          h('span', { className: 'ghm-metaItem ghm-diffAdd' }, '+' + (pull.additions ?? 0)),
+          h('span', { className: 'ghm-metaItem ghm-diffDel' }, '−' + (pull.deletions ?? 0)),
+          h('span', { className: 'ghm-metaItem' }, t('pullChangedFiles', { count: pull.changedFiles ?? 0 })),
+          mergeText ? h('span', { className: 'ghm-metaItem ghm-metaMuted' }, mergeText) : null),
+        pull.bodyPreview
+          ? h('p', { className: 'ghm-prBody' }, pull.bodyPreview)
+          : h('p', { className: 'ghm-prBody ghm-metaMuted' }, t('pullBodyEmpty')),
+        missing.length
+          ? h('div', { className: 'ghm-warn ghm-warnInline' },
+            t('pullMissing', { sections: missing.map((entry) => sectionLabel(entry.section, t)).join(', ') }))
+          : null,
+        h('div', { className: 'ghm-prSection' },
+          h('div', { className: 'ghm-subHead' },
+            h('span', { className: 'ghm-subTitle' }, h(FileIcon, { size: 14 }), t('pullFiles')),
+            files && !files.failed
+              ? h('span', { className: 'ghm-metaMuted' }, String(files.count ?? (files.items || []).length))
+              : null),
+          files && files.failed
+            ? h('div', { className: 'ghm-inlineEmpty' }, t('pullMissing', { sections: t('pullMissingFiles') }))
+            : null,
+          files && !files.failed && (!files.items || files.items.length === 0)
+            ? h('div', { className: 'ghm-inlineEmpty' }, t('pullNoFiles'))
+            : null,
+          files && !files.failed && files.items && files.items.length
+            ? h('div', { className: 'ghm-prFiles' },
+              files.truncated
+                ? h('div', { className: 'ghm-inlineEmpty' }, t('pullFilesTruncated', { count: files.items.length }))
+                : null,
+              files.items.map((file) => h(PullFileRow, {
+                key: file.path,
+                file,
+                t,
+                expanded: expanded === file.path,
+                patch: patch && patch.path === file.path ? patch : null,
+                onToggle: togglePatch,
+              })))
+            : null),
+        h('div', { className: 'ghm-prSection' },
+          h('div', { className: 'ghm-subHead' },
+            h('span', { className: 'ghm-subTitle' }, t('pullReviews')),
+            reviews && !reviews.failed && reviews.summary
+              ? h('span', { className: 'ghm-metaMuted' }, t('pullReviewSummary', {
+                approved: reviews.summary.approved,
+                changes: reviews.summary.changesRequested,
+                comments: reviews.summary.commented,
+              }))
+              : null),
+          reviews && reviews.failed
+            ? h('div', { className: 'ghm-inlineEmpty' }, t('pullMissing', { sections: t('pullMissingReviews') }))
+            : null,
+          reviews && !reviews.failed && (!reviews.items || reviews.items.length === 0)
+            ? h('div', { className: 'ghm-inlineEmpty' }, t('pullNoReviews'))
+            : null,
+          reviews && !reviews.failed && reviews.items
+            ? h('div', { className: 'ghm-prReviews' },
+              reviews.items.map((review) => h('div', {
+                key: String(review.id || (review.author + review.submittedAt)),
+                className: 'ghm-prReview',
+                'data-state': review.state,
+              },
+                h('span', { className: 'ghm-prReviewAuthor' }, review.author || ''),
+                h('span', {
+                  className: 'ghm-chip',
+                  'data-state': review.state,
+                }, reviewLabel(review.state, t)),
+                h('span', { className: 'ghm-metaMuted' }, review.submittedAt ? formatRelative(review.submittedAt, localeId) : ''),
+                review.bodyPreview ? h('span', { className: 'ghm-prReviewBody' }, review.bodyPreview) : null)))
+            : null),
+        h('div', { className: 'ghm-prSection' },
+          h('div', { className: 'ghm-subHead' },
+            h('span', { className: 'ghm-subTitle' }, t('pullConversation')),
+            conversation && !conversation.failed && typeof conversation.total === 'number'
+              ? h('span', { className: 'ghm-metaMuted' }, t('pullConversationTotal', { count: conversation.total }))
+              : null),
+          conversation && conversation.failed
+            ? h('div', { className: 'ghm-inlineEmpty' }, t('pullMissing', { sections: t('pullMissingConversation') }))
+            : null,
+          conversation && !conversation.failed && (!conversation.items || conversation.items.length === 0)
+            ? h('div', { className: 'ghm-inlineEmpty' }, t('pullNoConversation'))
+            : null,
+          conversation && !conversation.failed && conversation.items
+            ? h('div', { className: 'ghm-prComments' },
+              conversation.truncated
+                ? h('div', { className: 'ghm-inlineEmpty' }, t('pullConversationTruncated', { count: conversation.count }))
+                : null,
+              conversation.items.map((comment) => h('div', {
+                key: String(comment.id || (comment.author + comment.createdAt)),
+                className: 'ghm-prComment',
+              },
+                h('div', { className: 'ghm-prCommentHead' },
+                  h('span', { className: 'ghm-prReviewAuthor' }, comment.author || ''),
+                  h('span', { className: 'ghm-metaMuted' }, comment.createdAt ? formatRelative(comment.createdAt, localeId) : '')),
+                h('div', { className: 'ghm-prCommentBody' }, comment.bodyPreview || ''))))
+            : null));
     }
 
     function EmptyState(props) {
@@ -773,6 +1141,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState(null);
       const [editor, setEditor] = React.useState(null);
       const [pendingIssue, setPendingIssue] = React.useState(null);
+      const [pullView, setPullView] = React.useState(null);
       const submittingRef = React.useRef(false);
 
       const refresh = React.useCallback(() => setRefreshKey((value) => value + 1), []);
@@ -836,6 +1205,7 @@ window.__ModuleLoader__.load({
         setBranchView(null);
         setBranches(null);
         setBranchesError('');
+        setPullView(null);
       }, [selectedRepo]);
 
       React.useEffect(() => {
@@ -870,11 +1240,13 @@ window.__ModuleLoader__.load({
       function selectRepo(fullName) {
         setSelected(fullName);
         setEditor(null);
+        setPullView(null);
       }
 
       function selectTab(nextTab) {
         setTab(nextTab);
         setEditor(null);
+        setPullView(null);
       }
 
       // Opening a branch never touches a working tree: it only points the panel
@@ -947,6 +1319,53 @@ window.__ModuleLoader__.load({
 
       function closeBranchFile() {
         setBranchView((previous) => (previous ? { ...previous, file: null } : previous));
+      }
+
+      // The pull-request detail is a separate read: the list stays as-is and
+      // this pane replaces it until the user goes back. A subrequest failure is
+      // already handled Host-side (data.missing), so an error here means the PR
+      // record itself could not be loaded.
+      async function openPull(pull) {
+        if (!selectedRepo) return;
+        const fullName = selectedRepo.fullName;
+        setPullView({ number: pull.number, loading: true, error: '', data: null });
+        try {
+          const data = await api(
+            '/pull?full_name=' + encodeURIComponent(fullName)
+            + '&number=' + pull.number
+            + '&include=files,reviews,conversation',
+          );
+          setPullView((previous) => (previous && previous.number === pull.number
+            ? { number: pull.number, loading: false, error: '', data }
+            : previous));
+        } catch (error) {
+          setPullView((previous) => (previous && previous.number === pull.number
+            ? { number: pull.number, loading: false, error: (error && error.message) || String(error), data: null }
+            : previous));
+        }
+      }
+
+      function closePull() {
+        setPullView(null);
+      }
+
+      async function loadPullPatch(path) {
+        if (!selectedRepo || !pullView) return null;
+        return api(
+          '/pull-file?full_name=' + encodeURIComponent(selectedRepo.fullName)
+          + '&number=' + pullView.number
+          + '&path=' + encodeURIComponent(path),
+        );
+      }
+
+      async function saveToken(rawToken) {
+        const result = await api('/token', { method: 'POST', body: { token: rawToken } });
+        setNotice({
+          kind: 'success',
+          text: result && result.storage === 'safeStorage' ? t('storageSaved') : t('storageSavedMemory'),
+        });
+        setRefreshKey((value) => value + 1);
+        return result;
       }
 
       function reloadBranch() {
@@ -1029,6 +1448,13 @@ window.__ModuleLoader__.load({
       }
 
       const configured = Boolean(status && status.configured);
+      const storageWarning = status && status.storageWarning
+        ? h('div', { className: 'ghm-warn', role: 'status' },
+          h(KeyIcon, { size: 14 }),
+          h('div', null,
+            h('strong', null, t('storageWarningTitle') + ' '),
+            t('storageWarningBody')))
+        : null;
 
       const header = h('div', { className: 'ghm-header' },
         h('div', { className: 'ghm-heading' },
@@ -1069,7 +1495,16 @@ window.__ModuleLoader__.load({
           h('div', { className: 'ghm-errorText' }, t('loadFailed', { message: loadError })),
           h('button', { type: 'button', className: 'ghm-btn ghm-btnPrimary', onClick: refresh }, t('retry')));
       } else if (!configured) {
-        body = h(SetupCard, { t, onRetry: refresh, busy: loading });
+        body = h(SetupCard, {
+          t,
+          onRetry: refresh,
+          busy: loading,
+          onSaveToken: saveToken,
+          onSaved: (result) => setNotice({
+            kind: 'success',
+            text: result && result.storage === 'safeStorage' ? t('storageSaved') : t('storageSavedMemory'),
+          }),
+        });
       } else {
         const listPane = h('aside', { className: 'ghm-col ghm-sidebar', 'aria-label': t('repos') },
           h('div', { className: 'ghm-sidebarHead' },
@@ -1148,7 +1583,7 @@ window.__ModuleLoader__.load({
                     type: 'button',
                     className: 'ghm-stateChip',
                     'data-active': stateFilter === value ? 'true' : 'false',
-                    onClick: () => setStateFilter(value),
+                    onClick: () => { setStateFilter(value); setPullView(null); },
                   }, label))));
 
           let listContent;
@@ -1219,7 +1654,13 @@ window.__ModuleLoader__.load({
                 pending: pendingIssue,
                 onToggle: toggleIssue,
               }))
-              : items.map((pull) => h(PullRow, { key: pull.number, pull, t, localeId }));
+              : items.map((pull) => h(PullRow, {
+                key: pull.number,
+                pull,
+                t,
+                localeId,
+                onOpen: openPull,
+              }));
           }
 
           detail = h('section', { className: 'ghm-col ghm-detail' },
@@ -1312,13 +1753,23 @@ window.__ModuleLoader__.load({
               : null,
             h(Notice, { notice }),
             tabs,
-            h('div', { className: 'ghm-list' }, listContent));
+            h('div', { className: 'ghm-list' },
+              tab === 'pulls' && pullView
+                ? h(PullDetail, {
+                  view: pullView,
+                  t,
+                  localeId,
+                  onBack: closePull,
+                  onRetry: () => openPull({ number: pullView.number }),
+                  onLoadPatch: loadPullPatch,
+                })
+                : listContent));
         }
 
         body = h('div', { className: 'ghm-body' }, listPane, detail);
       }
 
-      return h('div', { className: 'ghm-page' }, header, body);
+      return h('div', { className: 'ghm-page' }, header, storageWarning, body);
     }
 
     // ------------------------------------------------------------------ styles
@@ -1470,6 +1921,41 @@ window.__ModuleLoader__.load({
       '.ghm-crumb:hover{color:var(--dsw-alias-brand-primary);text-decoration:underline}',
       '.ghm-inlineEmpty{font-size:11px;color:var(--dsw-alias-label-secondary);padding:4px 6px}',
       '.ghm-mono{font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace)}',
+      '.ghm-warn{display:flex;align-items:flex-start;gap:8px;flex:none;padding:8px 12px;border:0.5px solid var(--dsw-alias-state-warning-primary, #b8860b);border-radius:9px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:11.5px;line-height:1.55}',
+      '.ghm-warn svg{flex:none;margin-top:2px;color:var(--dsw-alias-state-warning-primary, #b8860b)}',
+      '.ghm-warnInline{margin:4px 0 2px;padding:6px 9px}',
+      '.ghm-tokenForm{display:flex;flex-direction:column;gap:7px;width:100%;max-width:460px;margin-top:4px;padding-top:12px;border-top:0.5px solid var(--dsw-alias-border-l1)}',
+      '.ghm-tokenSave{align-self:flex-start}',
+      '.ghm-pullRow{cursor:pointer}',
+      '.ghm-prPane{display:flex;flex-direction:column;gap:10px;padding:12px 16px 18px}',
+      '.ghm-prHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:4px;border-bottom:0.5px solid var(--dsw-alias-border-l1)}',
+      '.ghm-prTitleLine{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
+      '.ghm-prTitle{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;text-decoration:none;overflow-wrap:anywhere}',
+      '.ghm-prTitle:hover{color:var(--dsw-alias-brand-primary);text-decoration:underline}',
+      '.ghm-prMeta{gap:10px}',
+      '.ghm-prBody{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere;max-height:140px;overflow:auto}',
+      '.ghm-prSection{display:flex;flex-direction:column;gap:4px;padding-top:6px;border-top:0.5px solid var(--dsw-alias-border-l1)}',
+      '.ghm-prFiles,.ghm-prReviews,.ghm-prComments{display:flex;flex-direction:column;gap:2px;min-width:0}',
+      '.ghm-prFile{border-radius:7px;border:0.5px solid transparent}',
+      '.ghm-prFile[data-open="true"]{border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}',
+      '.ghm-prFileHead{display:flex;align-items:center;gap:8px;width:100%;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:11.5px;padding:5px 6px;cursor:pointer;text-align:left;min-width:0}',
+      '.ghm-prFileHead:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.ghm-prFilePath{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);font-size:11px}',
+      '.ghm-prStat{display:inline-flex;gap:6px;flex:none;font-size:10.5px;font-family:var(--dsh-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace)}',
+      '.ghm-add,.ghm-diffAdd{color:var(--dsw-alias-state-success-primary)}',
+      '.ghm-del,.ghm-diffDel{color:var(--dsw-alias-state-error-primary)}',
+      '.ghm-prPatch{padding:4px 8px 8px;border-top:0.5px solid var(--dsw-alias-border-l1)}',
+      '.ghm-prPatchBody{display:flex;flex-direction:column;gap:4px}',
+      '.ghm-prPatch .ghm-fileText{max-height:360px}',
+      '.ghm-prReview{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 6px;border-radius:6px;font-size:11px}',
+      '.ghm-prReview:hover{background:var(--dsw-alias-bg-layer-2)}',
+      '.ghm-prReviewAuthor{font-weight:600;color:var(--dsw-alias-label-primary)}',
+      '.ghm-prReviewBody{flex:1;min-width:0;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.ghm-prReview .ghm-chip[data-state="APPROVED"]{border-color:var(--dsw-alias-state-success-primary);color:var(--dsw-alias-state-success-primary)}',
+      '.ghm-prReview .ghm-chip[data-state="CHANGES_REQUESTED"]{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}',
+      '.ghm-prComment{padding:6px 7px;border-radius:7px;background:var(--dsw-alias-bg-base);border:0.5px solid var(--dsw-alias-border-l1)}',
+      '.ghm-prCommentHead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:10.5px;margin-bottom:2px}',
+      '.ghm-prCommentBody{font-size:11.5px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto}',
     ].join('\n');
 
     function insertStyles() {

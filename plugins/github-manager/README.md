@@ -29,10 +29,15 @@ Host 进程按以下顺序解析凭据，token 从不进入浏览器：
 
 1. **环境变量 `GH_TOKEN` / `GITHUB_TOKEN`**（优先 `GH_TOKEN`，显式设置时优先级最高）：适用于没有 gh CLI 的环境，
    但改完环境变量需要重启 DeepSeek Harness。
-2. **`gh` CLI 登录（推荐，零配置）**：环境变量不存在时，插件执行 `gh auth token --hostname github.com`，
+2. **面板里加密保存的 token**：在未配置时直接把 token 粘贴到面板的“保存 token”表单。
+   在能访问 Electron `safeStorage` 的 Host 进程中，token 加密后写入
+   `<DSH_HOME>/github-manager/credentials.json`（base64 密文，权限 0600）。
+   读取时通过 `safeStorage.decryptString` 还原；没有系统安全存储时只保存在进程内存里，重启后失效，
+   面板会显示降级提示，**不会**退回到明文落盘。
+3. **`gh` CLI 登录（推荐，零配置）**：前两者不存在时，插件执行 `gh auth token --hostname github.com`，
    复用本机已有的 `gh auth login`（包括 macOS keyring 中的账号）。登录后无需重启，
    在面板里点“重试”即可；切换账号后下一次请求会自动重新解析。
-3. **`~/.config/gh/hosts.yml`**：gh CLI 不可用时直接读该文件里 `github.com` 的 `oauth_token`；
+4. **`~/.config/gh/hosts.yml`**：gh CLI 不可用时直接读该文件里 `github.com` 的 `oauth_token`；
    其他 host（例如 GitHub Enterprise）的 token 不会被用到 api.github.com。
 
 ```bash
@@ -49,7 +54,9 @@ gh 登录同样零配置可用。
 
 可用 `GITHUB_MANAGER_DISABLE_GH=1` 关闭 gh CLI 回退（只用环境变量），
 `GITHUB_MANAGER_GH_BIN=/path/to/gh` 指定 gh 可执行文件（测试或非标准安装）。
-凭据缺失或失效时，面板会显示配置指引；Host 工具会返回可读的错误信息。
+旧的明文凭据文件会在第一次读取时就地迁移为密文（原子替换）；迁移失败时保留原文件并继续使用 token，
+面板会显示告警。凭据缺失或失效时，面板会显示配置指引；Host 工具会返回可读的错误信息。
+任何日志、错误信息和工具返回都不会携带 token 原文。
 
 ## 面板
 
@@ -62,6 +69,10 @@ gh 登录同样零配置可用。
   并显示相对默认分支的领先 / 落后提交数；点分支后按该分支查看最近提交与文件树，
   可以逐级进入目录、预览文本文件（二进制或超过 512 KB 的文件只给提示）。
   这里只切换面板视图，不改动本地工作树；Issue 与 Pull Request 始终是全仓库口径。
+- Pull Request 详情：点列表项进入，显示标题、作者、状态、草稿/合并状态、增删行数与文件数，
+  变更文件列表（最多 100 个，超出标出截断）、每个 review 的状态与作者、以及最近 10 条评论摘要。
+  整份 diff 不会内联，点单个文件才按需拉取该文件的 patch（超过 200 KB 会截断标注）。
+  某个子接口失败时详情仍然可用，缺失的区块会在面板里明确标出。
 - 操作：新建 Issue、关闭/重新打开 Issue、在 GitHub 打开、复制克隆地址、刷新。
 
 ## 工具
@@ -76,6 +87,7 @@ gh 登录同样零配置可用。
 | `github_update_issue` | 关闭/重开或修改 Issue |
 | `github_comment_issue` | 给 Issue / PR 添加评论 |
 | `github_list_pulls` | 列出 Pull Request |
+| `github_get_pull` | 读取单个 PR 详情：文件（最多 100）、review 状态、对话摘要；子接口失败会标注 `missing` |
 | `github_list_branches` | 列出分支，并附默认分支、保护状态与领先/落后提交数 |
 | `github_list_commits` | 按分支（或任意 ref）列出最近提交 |
 | `github_list_tree` | 列出分支上某个目录的文件树 |

@@ -345,6 +345,82 @@ assert.match(text, /README\.md/);
 assert.match(text, /2\.0 KB/);
 assert.match(text, /Back to default branch/);
 
+// 11. Pull-request detail: files, review summary, conversation preview and the
+// per-file patch affordance all render from the seeded aggregate payload.
+const pullDetail = {
+  number: 34,
+  include: ['files', 'reviews', 'conversation'],
+  pull: {
+    ...pull,
+    additions: 12,
+    deletions: 3,
+    changedFiles: 1,
+    mergeable: true,
+    mergeableState: 'clean',
+    bodyPreview: 'This adds a feature.',
+  },
+  files: {
+    count: 1,
+    truncated: true,
+    failed: false,
+    items: [{ path: 'src/a.js', status: 'modified', additions: 10, deletions: 2, changes: 12, patchAvailable: true }],
+  },
+  reviews: {
+    count: 1,
+    truncated: false,
+    failed: false,
+    latestState: 'APPROVED',
+    summary: { approved: 1, changesRequested: 0, commented: 0 },
+    items: [{ id: 1, author: 'alice', state: 'APPROVED', submittedAt: new Date(Date.now() - 3600000).toISOString(), bodyPreview: 'LGTM' }],
+  },
+  conversation: {
+    total: 4,
+    count: 1,
+    loaded: 1,
+    truncated: true,
+    failed: false,
+    items: [{ id: 9, author: 'bob', createdAt: new Date(Date.now() - 7200000).toISOString(), bodyPreview: 'Latest note' }],
+  },
+  missing: [],
+  partial: false,
+  truncated: true,
+};
+text = render([
+  status, [repo], false, '', 0, repo.fullName, '', 'all', 'pulls', 'open',
+  [pull], false, '', 0, null, false, '', null, null, null, null,
+  { number: 34, loading: false, error: '', data: pullDetail },
+]);
+assert.match(text, /Pull request details #34/);
+assert.match(text, /Back to list/);
+assert.match(text, /src\/a\.js/);
+assert.match(text, /\+10/);
+assert.match(text, /−2/);
+assert.match(text, /Show diff/);
+assert.match(text, /Approved/);
+assert.match(text, /1 approved · 0 changes requested · 0 commented/);
+assert.match(text, /Conversation/);
+assert.match(text, /4 comments/);
+assert.match(text, /Latest note/);
+
+// 12. A degraded section is labelled instead of hiding the rest of the PR.
+text = render([
+  status, [repo], false, '', 0, repo.fullName, '', 'all', 'pulls', 'open',
+  [pull], false, '', 0, null, false, '', null, null, null, null,
+  {
+    number: 34,
+    loading: false,
+    error: '',
+    data: {
+      ...pullDetail,
+      files: { items: [], count: 0, truncated: true, failed: true },
+      missing: [{ section: 'files', code: 'rate-limit', status: 403, message: 'API rate limit exceeded' }],
+      partial: true,
+    },
+  },
+]);
+assert.match(text, /Some sections could not be loaded: files/);
+assert.match(text, /Conversation/);
+
 // Sidebar icon renders for both sizes and active states.
 for (const props of [{ size: 20, active: false }, { size: 20, active: true }]) {
   hookIndex = 0;
@@ -355,4 +431,4 @@ for (const props of [{ size: 20, active: false }, { size: 20, active: true }]) {
   assert.equal(icon.props.height, 20);
 }
 
-console.log('client render smoke test passed: 10 render states + sidebar icon');
+console.log('client render smoke test passed: 12 render states + sidebar icon');

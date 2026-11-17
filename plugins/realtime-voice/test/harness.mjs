@@ -405,6 +405,105 @@ api.settings.patch({ contextMode: 'off', partialPreview: true })
   await slowToken.detach()
 }
 
+// ------------------------------------------ microphone permission + hotkey fallback
+{
+  // The previous block deliberately leaves the model provider "preparing";
+  // these permission tests need a ready catalog so the retry is fast.
+  speechStub.catalog = async () => ({ ok: true, value: { providers: [{ id: 'p', preparation: { phase: 'ready' } }], selection: { providerId: 'p' } } })
+  const makeToken = (id) => api.attach({
+    id, label: id,
+    captureInsertion() { return { from: 0, to: 0 } },
+    insertText() { return true },
+    onState() {},
+  })
+
+  storage.delete('dsh.realtime-voice.mic-intro')
+  let noticeAtPrompt = ''
+  sandbox.navigator.mediaDevices.getUserMedia = async () => {
+    noticeAtPrompt = api.state('denied').notice
+    throw Object.assign(new Error('denied'), { name: 'NotAllowedError' })
+  }
+  const deniedToken = makeToken('denied')
+  const denied = await deniedToken.start()
+  ok('a denied permission returns ok:false without throwing', denied && denied.ok === false && denied.code === 'permission', JSON.stringify(denied))
+  eq('a denied permission lands in error', deniedToken.store.get().phase, 'error')
+  ok(
+    'a denial names the macOS settings path in both languages',
+    /系统设置/.test(deniedToken.store.get().error) && /Privacy & Security/.test(deniedToken.store.get().error),
+    deniedToken.store.get().error,
+  )
+  eq('the permission state is denied, not cached', deniedToken.store.get().permission, 'permission')
+  ok('settings stay usable after a denial', api.settings.get().enabled === true)
+  ok(
+    'the one-time consent hint is visible before the browser prompt',
+    /首次点麦克风/.test(noticeAtPrompt) && /first click/i.test(noticeAtPrompt),
+    noticeAtPrompt,
+  )
+
+  let retryCalls = 0
+  sandbox.navigator.mediaDevices.getUserMedia = async () => {
+    retryCalls += 1
+    return { getAudioTracks: () => [{ addEventListener() {}, stop() {} }], getTracks: () => [{ stop() {} }] }
+  }
+  const retried = await deniedToken.start()
+  ok('clicking the mic again retries getUserMedia after a denial', retried && retried.ok === true && retryCalls === 1, JSON.stringify({ retried, retryCalls }))
+  eq('the retry records an actual grant', deniedToken.store.get().permission, 'granted')
+  await deniedToken.stop()
+  await deniedToken.detach()
+
+  sandbox.navigator.mediaDevices.getUserMedia = async () => {
+    throw Object.assign(new Error('missing'), { name: 'NotFoundError' })
+  }
+  const missingToken = makeToken('missing')
+  const missing = await missingToken.start()
+  ok('a missing device returns ok:false', missing && missing.ok === false, JSON.stringify(missing))
+  ok(
+    'NotFoundError has its own bilingual copy',
+    /没有检测到麦克风/.test(missingToken.store.get().error) && /No microphone found/.test(missingToken.store.get().error),
+    missingToken.store.get().error,
+  )
+  eq('a missing device is tagged missing', missingToken.store.get().permission, 'missing')
+  await missingToken.stop()
+  await missingToken.detach()
+
+  sandbox.navigator.mediaDevices.getUserMedia = async () => {
+    throw Object.assign(new Error('busy'), { name: 'NotReadableError' })
+  }
+  const busyToken = makeToken('busy')
+  await busyToken.start()
+  ok(
+    'NotReadableError has its own bilingual copy',
+    /被其他应用占用/.test(busyToken.store.get().error) && /Microphone busy/.test(busyToken.store.get().error),
+    busyToken.store.get().error,
+  )
+  eq('a busy device is tagged busy', busyToken.store.get().permission, 'busy')
+  await busyToken.stop()
+  await busyToken.detach()
+
+  // hotkey binding: a host that refuses addEventListener must not be silent.
+  const t = plugin.__test
+  let attempts = 0
+  const flaky = {
+    addEventListener(type) {
+      if (type === 'keydown') { attempts += 1; if (attempts === 1) throw new Error('taken') }
+    },
+    removeEventListener() {},
+  }
+  const fallback = t.bindHotkey(flaky, 'Alt+Shift+KeyD', () => {})
+  eq('a throwing hotkey bind switches candidates', fallback.mode, 'fallback')
+  ok('the fallback records the candidate that won', fallback.spec.startsWith('ControlLeft+'), fallback.spec)
+  ok('the fallback notice says what happened in both languages', /已切换到/.test(fallback.notice) && /instead/.test(fallback.notice), fallback.notice)
+
+  const allFail = t.bindHotkey({ addEventListener() { throw new Error('nope') }, removeEventListener() {} }, 'Alt+Shift+KeyD', () => {})
+  eq('no bindable key falls back to the mic button', allFail.mode, 'button')
+  ok('the button notice points at the mic in both languages', /点麦克风/.test(allFail.notice) && /click the mic/.test(allFail.notice), allFail.notice)
+
+  const plain = { addEventListener() {}, removeEventListener() {} }
+  const reserved = t.bindHotkey(plain, 'ControlLeft+KeyW', () => {})
+  eq('a browser-reserved chord is skipped', reserved.tried[0].reason, 'reserved')
+  ok('the reserved chord is replaced by a candidate', reserved.mode === 'fallback' && reserved.spec.indexOf('KeyW') >= 0, reserved.spec)
+}
+
 // ------------------------------------------------------------------- report
 if (failures.length > 0) {
   console.error(`\nFAIL ${failures.length}/${checks}`)

@@ -771,6 +771,8 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
           source: searchParams.get('source') || '',
           status,
           sort: searchParams.get('sort') || 'relevance',
+          // 可选：mode=keyword 走旧的关键词过滤；默认 hybrid。
+          mode: searchParams.get('mode') || undefined,
           limit: Number(searchParams.get('limit') || 50),
           offset: Number(searchParams.get('offset') || 0),
         })

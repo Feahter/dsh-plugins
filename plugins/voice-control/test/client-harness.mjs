@@ -24,6 +24,16 @@ function makeElement(tagName) {
     textContent: '',
     attributes: {},
     removed: false,
+    listeners: {},
+    addEventListener(type, handler) {
+      if (!this.listeners[type]) this.listeners[type] = [];
+      this.listeners[type].push(handler);
+    },
+    removeEventListener(type, handler) {
+      const list = this.listeners[type] || [];
+      const index = list.indexOf(handler);
+      if (index >= 0) list.splice(index, 1);
+    },
     setAttribute(name, value) {
       this.attributes[name] = String(value);
     },
@@ -527,6 +537,88 @@ async function main() {
   assert.equal(byPath('/plan').length, 1, 'modifier keyup still transcribes and plans');
   assert.equal(loaded.__test.status().state, 'idle', 'modifier keyup returns to idle');
   pass('modifier release', 'shift-up ends the press and dispatches');
+
+  // --- 5c. hotkey binding falls back instead of failing silently ---
+  const noopHandlers = { onKeyDown() {}, onKeyUp() {} };
+  const flakyTarget = {
+    attempts: 0,
+    addEventListener(type) {
+      if (type === 'keydown') {
+        this.attempts += 1;
+        if (this.attempts === 1) throw new Error('taken by another app');
+      }
+    },
+    removeEventListener() {},
+  };
+  const flaky = loaded.__test.bindHotkey(flakyTarget, 'Ctrl+Shift+Space', noopHandlers);
+  assert.equal(flaky.mode, 'fallback', 'the second candidate should win');
+  assert.equal(flaky.spec, 'AltLeft+Ctrl+Shift+Space');
+  assert.equal(flaky.tried[0].reason, 'error');
+  assert.ok(flaky.notice.includes('已切换到') && flaky.notice.includes('instead'), flaky.notice);
+
+  const reserved = loaded.__test.bindHotkey({ addEventListener() {}, removeEventListener() {} }, 'Ctrl+KeyW', noopHandlers);
+  assert.equal(reserved.tried[0].reason, 'reserved', 'Ctrl+W must be skipped before binding');
+  assert.equal(reserved.mode, 'fallback');
+
+  const broken = loaded.__test.bindHotkey({ addEventListener() { throw new Error('nope'); }, removeEventListener() {} }, 'Ctrl+Shift+Space', noopHandlers);
+  assert.equal(broken.mode, 'button');
+  assert.equal(broken.ok, false);
+  assert.ok(broken.notice.includes('按住说话') && broken.notice.includes('Hold to talk'), broken.notice);
+  pass('hotkey fallback', 'candidate=AltLeft+Ctrl+Shift+Space button-notice=ok');
+
+  // --- 5d. the in-app button is always mounted and drives the same press ---
+  const fallbackButton = documentStub.body.children.find((node) => node.attributes['data-dsh-voice-control'] === 'fallback');
+  assert.ok(fallbackButton, 'fallback button mounted on apply');
+  assert.equal(loaded.__test.status().fallback, true);
+  assert.equal(loaded.__test.status().binding.mode, 'hotkey');
+  resetCalls();
+  planResponses.push({
+    ok: true,
+    plan: { action: 'resume', sessionId: 's1', candidates: [], confidence: 0.9, reason: 'fallback button', text: '你好世界' },
+    confirmation: '好，接着「语音控制插件」。',
+  });
+  transcript = '你好世界';
+  now += 5000;
+  fallbackButton.listeners.pointerdown[0]({ preventDefault() {} });
+  assert.equal(loaded.__test.status().state, 'listening', 'fallback button starts a press');
+  now += 420;
+  fallbackButton.listeners.pointerup[0]({ preventDefault() {} });
+  await loaded.__test.whenIdle();
+  assert.equal(byPath('/plan').length, 1, 'fallback button transcribes and plans');
+  assert.equal(loaded.__test.status().state, 'idle');
+  pass('fallback button', 'pointer hold dispatches');
+
+  // --- 5e. microphone permission copy is specific, not generic ---
+  const originalGetUserMedia = globalThis.navigator.mediaDevices.getUserMedia;
+  const hudDetail = () => {
+    const hud = documentStub.body.children.find((node) => node.attributes['data-dsh-voice-control'] === 'hud');
+    return hud && hud.children[2] ? hud.children[2].textContent : '';
+  };
+  globalThis.navigator.mediaDevices.getUserMedia = async () => {
+    throw Object.assign(new Error('denied'), { name: 'NotAllowedError' });
+  };
+  resetCalls();
+  now += 5000;
+  fire('document', 'keydown', pressEvent());
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  fire('document', 'keyup', pressEvent());
+  await loaded.__test.whenIdle();
+  assert.equal(loaded.__test.status().state, 'error', 'denied mic lands in error');
+  assert.ok(hudDetail().includes('系统设置') && hudDetail().includes('Privacy & Security'), hudDetail());
+  pass('permission copy', 'NotAllowedError names macOS settings');
+
+  globalThis.navigator.mediaDevices.getUserMedia = async () => {
+    throw Object.assign(new Error('missing'), { name: 'NotFoundError' });
+  };
+  now += 5000;
+  fire('document', 'keydown', pressEvent());
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  fire('document', 'keyup', pressEvent());
+  await loaded.__test.whenIdle();
+  assert.ok(hudDetail().includes('没有检测到麦克风') && !hudDetail().includes('系统设置'), hudDetail());
+  pass('permission copy', 'NotFoundError is distinct and actionable');
+  globalThis.navigator.mediaDevices.getUserMedia = originalGetUserMedia;
+  now += 10000;
 
   // --- 6. __dshVoiceControl debug handle + disposer ---
   assert.equal(typeof globalThis.window.__dshVoiceControl.start, 'function', 'window.__dshVoiceControl.start');

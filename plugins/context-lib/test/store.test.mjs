@@ -862,3 +862,28 @@ test('sources.json 读取失败时报错，而不是改名换默认来源', { sk
   const listed = await reloaded.sources()
   assert.ok(listed.some((item) => item.id === source.id), '原有来源必须还在')
 })
+
+test('索引键与条目 id 不一致时保留条目，不当作坏数据丢弃', async (t) => {
+  const { root, source, lib } = await makeLibrary(t)
+  await pruneDefaultSources(lib)
+  await lib.addSource({ path: source, name: 'kept' })
+  await put(source, 'a.md', '# a\n')
+  await lib.scan({})
+  const original = Object.values(lib.index.entries)[0]
+  assert.ok(original, '先有一条扫描结果')
+
+  // 真实库里存在这类历史条目：键与 entry.id 各自都是合法 id，但彼此不同。
+  const indexPath = path.join(root, 'index.json')
+  const parsed = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+  const legacyId = 'cl_00000000beef'
+  parsed.entries[legacyId] = { ...original, id: 'cl_00000000cafe' }
+  await fs.writeFile(indexPath, JSON.stringify(parsed, null, 2))
+
+  const reloaded = await createLibrary(root)
+  await reloaded.init()
+  const kept = reloaded.index.entries[legacyId]
+  assert.ok(kept, '键与 id 不一致的条目必须保留（否则丢索引与手工标签）')
+  assert.equal(kept.id, 'cl_00000000cafe', '条目自身的 id 不变，磁盘路径仍按它解析')
+  const onDisk = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+  assert.ok(onDisk.entries[legacyId], '回写后条目仍在索引里')
+})

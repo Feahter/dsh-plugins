@@ -10,6 +10,10 @@ window.__ModuleLoader__.load({
     const FRAME = 320; // 20 ms @ 16 kHz
     const FRAME_MS = (FRAME / SAMPLE_RATE) * 1000;
     const SETTINGS_KEY = 'dsh.realtime-voice.settings.v2';
+    const HOTKEY_KEY = 'dsh.realtime-voice.hotkey';
+    const DEFAULT_HOTKEY = 'Alt+Shift+KeyD';
+    const MIC_INTRO_KEY = 'dsh.realtime-voice.mic-intro';
+    const HOTKEY_RESERVED = new Set(['ctrl+w', 'ctrl+t', 'ctrl+n', 'ctrl+r', 'meta+q', 'meta+w', 'meta+m', 'alt+f4']);
     const REFINE_PATH = '/plugins/realtime-voice/refine';
     const HEALTH_PATH = '/plugins/realtime-voice/health';
 
@@ -25,7 +29,14 @@ window.__ModuleLoader__.load({
       insert: '插入',
       pending: '草稿已变化，结果已保留',
       failed: '失败：{message}',
-      permissionDenied: '麦克风权限被拒绝，请在系统设置里允许后重试。',
+      permissionWhy: '麦克风用于把语音转成文字：识别在本机完成，音频不出机器。 / The mic turns speech into text; recognition stays on this device.',
+      permissionFirst: '首次点麦克风会请求权限，允许后才能听写。 / The first click asks for microphone access.',
+      permissionDenied: '麦克风权限被拒绝。去 系统设置 → 隐私与安全性 → 麦克风 允许 DeepSeek Harness，再点麦克风重试。 / Mic denied — allow it in System Settings → Privacy & Security → Microphone, then click the mic to retry.',
+      noDevice: '没有检测到麦克风。连接麦克风或检查系统输入设备后点麦克风重试。 / No microphone found — connect one and click the mic to retry.',
+      micBusy: '麦克风被其他应用占用。关掉占用麦克风的应用后点麦克风重试。 / Microphone busy — quit the app using it and click the mic to retry.',
+      hotkeyFallback: '热键 {from} 无法注册（可能被其他应用占用），已切换到 {to}。 / Hotkey {from} could not be registered (maybe taken); using {to} instead.',
+      hotkeyButton: '热键不可用（可能被其他应用占用，或只在窗口聚焦时生效）；点麦克风即可听写。 / Hotkey unavailable (maybe taken, or only while focused); click the mic to dictate.',
+      hotkeyHint: '快捷键 {hotkey} 开关听写；热键只在窗口聚焦时生效。 / Shortcut {hotkey} toggles dictation; it only works while this window is focused.',
       unavailable: '当前环境无法录音。',
       notReady: '本地语音模型尚未就绪，请先在插件管理里完成"语音输入"的模型准备。',
       preparing: '正在准备本地语音模型…',
@@ -91,7 +102,14 @@ window.__ModuleLoader__.load({
       insert: 'Insert',
       pending: 'Your draft changed; result kept',
       failed: 'Failed: {message}',
-      permissionDenied: 'Microphone permission was denied. Allow it and try again.',
+      permissionWhy: 'The mic turns speech into text; recognition stays on this device. / 麦克风用于把语音转成文字，识别在本机完成，音频不出机器。',
+      permissionFirst: 'The first click asks for microphone access. / 首次点麦克风会请求权限，允许后才能听写。',
+      permissionDenied: 'Mic denied — allow it in System Settings → Privacy & Security → Microphone, then click the mic to retry. / 麦克风权限被拒绝，去 系统设置 → 隐私与安全性 → 麦克风 允许 DeepSeek Harness 后重试。',
+      noDevice: 'No microphone found — connect one and click the mic to retry. / 没有检测到麦克风，连接后点麦克风重试。',
+      micBusy: 'Microphone busy — quit the app using it and click the mic to retry. / 麦克风被其他应用占用，关掉后重试。',
+      hotkeyFallback: 'Hotkey {from} could not be registered (maybe taken); using {to} instead. / 热键 {from} 无法注册（可能被占用），已切换到 {to}。',
+      hotkeyButton: 'Hotkey unavailable (maybe taken, or only while focused); click the mic to dictate. / 热键不可用（可能被占用或只在窗口聚焦时生效），点麦克风即可听写。',
+      hotkeyHint: 'Shortcut {hotkey} toggles dictation; it only works while this window is focused. / 快捷键 {hotkey} 开关听写；热键只在窗口聚焦时生效。',
       unavailable: 'Recording is unavailable in this environment.',
       notReady: 'The local speech model is not ready. Prepare it in the voice-input plugin first.',
       preparing: 'Preparing the local speech model…',
@@ -201,6 +219,121 @@ window.__ModuleLoader__.load({
       if (next === previous || next.startsWith(previous)) return next;
       if (previous.startsWith(next)) return previous;
       return next;
+    }
+
+    // ------------------------------------------------------------ hotkey
+    // The mic can also be toggled from the keyboard. Every bind attempt is
+    // visible: a host that refuses listeners, or a chord the browser already
+    // owns, changes the effective shortcut or falls back to the mic button.
+    function parseHotkey(spec) {
+      const raw = typeof spec === 'string' && spec.trim() !== '' ? spec.trim() : DEFAULT_HOTKEY;
+      const parts = raw.split('+').map((part) => part.trim()).filter(Boolean);
+      const binding = { spec: parts.join('+') || DEFAULT_HOTKEY, key: '', ctrl: false, shift: false, alt: false, meta: false };
+      for (const part of parts) {
+        const token = part.toLowerCase();
+        if (['ctrl', 'control', 'controlleft', 'controlright', 'cmdorctrl'].includes(token)) binding.ctrl = true;
+        else if (['shift', 'shiftleft', 'shiftright'].includes(token)) binding.shift = true;
+        else if (['alt', 'option', 'altleft', 'altright'].includes(token)) binding.alt = true;
+        else if (['meta', 'cmd', 'command', 'win', 'super', 'metaleft', 'metaright'].includes(token)) binding.meta = true;
+        else binding.key = part;
+      }
+      return binding;
+    }
+
+    function matchesHotkey(event, binding) {
+      if (!event || !binding) return false;
+      if (!!event.ctrlKey !== !!binding.ctrl) return false;
+      if (!!event.shiftKey !== !!binding.shift) return false;
+      if (!!event.altKey !== !!binding.alt) return false;
+      if (!!event.metaKey !== !!binding.meta) return false;
+      const target = String(binding.key || '').toLowerCase();
+      if (!target || target === 'none') return false;
+      const key = typeof event.key === 'string' ? event.key : '';
+      const code = typeof event.code === 'string' ? event.code : '';
+      if (target === 'space' || target === ' ') return code === 'Space' || key === ' ' || key === 'Spacebar';
+      return (key && key.toLowerCase() === target) || (code && code.toLowerCase() === target);
+    }
+
+    function canonicalHotkey(binding) {
+      const mods = [];
+      if (binding.meta) mods.push('meta');
+      if (binding.ctrl) mods.push('ctrl');
+      if (binding.alt) mods.push('alt');
+      if (binding.shift) mods.push('shift');
+      let key = String(binding.key || '').toLowerCase();
+      if (/^key[a-z]$/.test(key)) key = key.slice(3);
+      mods.push(key);
+      return mods.join('+');
+    }
+
+    function hotkeyCandidates(spec) {
+      const base = parseHotkey(spec);
+      const list = [base.spec];
+      if (!base.alt) list.push('AltLeft+' + base.spec);
+      if (!base.ctrl) list.push('ControlLeft+' + base.spec);
+      if (!base.alt && !base.ctrl) list.push('ControlLeft+AltLeft+' + base.spec);
+      return list.filter((item, index) => list.indexOf(item) === index);
+    }
+
+    function readHotkeySpec() {
+      try {
+        const stored = localStorage.getItem(HOTKEY_KEY);
+        if (typeof stored === 'string' && stored.trim() !== '') return stored.trim();
+      } catch (_storageError) { /* private mode: default shortcut */ }
+      return DEFAULT_HOTKEY;
+    }
+
+    function hotkeyNotice(result) {
+      if (!result || result.mode === 'hotkey') return '';
+      if (result.mode === 'fallback') return fallbackTranslate('hotkeyFallback', { from: result.original, to: result.spec });
+      return fallbackTranslate('hotkeyButton');
+    }
+
+    function bindHotkey(target, spec, onToggle) {
+      const original = parseHotkey(spec).spec;
+      const candidates = hotkeyCandidates(original);
+      const tried = [];
+      const failed = () => {
+        const result = { ok: false, mode: 'button', spec: '', binding: null, handler: null, original, tried, notice: '' };
+        result.notice = hotkeyNotice(result);
+        return result;
+      };
+      if (!target || typeof target.addEventListener !== 'function') {
+        tried.push({ spec: original, reason: 'no-target' });
+        return failed();
+      }
+      for (const candidate of candidates) {
+        const parsed = parseHotkey(candidate);
+        if (HOTKEY_RESERVED.has(canonicalHotkey(parsed))) {
+          tried.push({ spec: candidate, reason: 'reserved' });
+          continue;
+        }
+        const handler = (event) => {
+          if (!event || event.repeat) return;
+          if (!matchesHotkey(event, parsed)) return;
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          onToggle(event);
+        };
+        try {
+          target.addEventListener('keydown', handler);
+          const result = {
+            ok: true,
+            mode: candidate === original ? 'hotkey' : 'fallback',
+            spec: candidate,
+            binding: parsed,
+            handler,
+            original,
+            tried,
+            notice: '',
+          };
+          if (result.mode === 'fallback') result.notice = hotkeyNotice(result);
+          return result;
+        } catch (error) {
+          tried.push({ spec: candidate, reason: 'error', message: (error && error.message) || String(error) });
+          try { if (typeof target.removeEventListener === 'function') target.removeEventListener('keydown', handler); } catch (_removeError) {}
+        }
+      }
+      return failed();
     }
 
     function debugNote(step, detail) {
@@ -683,6 +816,7 @@ window.__ModuleLoader__.load({
       let state = {
         phase: 'idle', partial: '', level: 0, error: '', pending: '', segmentActive: false, busyText: '',
         lastInserted: '', translated: false, warning: '', seconds: 0, waiting: false,
+        notice: '', permission: 'unknown', hotkeyNotice: '',
       };
       const listeners = new Set();
       return {
@@ -717,6 +851,7 @@ window.__ModuleLoader__.load({
         stores: new Map(),
         engines: new Map(),
         audioContext: null,
+        hotkey: { mode: 'pending', spec: DEFAULT_HOTKEY, notice: '' },
       };
     }
 
@@ -739,6 +874,21 @@ window.__ModuleLoader__.load({
       let store = runtime.stores.get(surfaceId);
       if (!store) { store = createStore(); runtime.stores.set(surfaceId, store); }
       return store;
+    }
+
+    /** The four capture failures the user can act on differently. */
+    function microphoneErrorInfo(error) {
+      const name = error && typeof error.name === 'string' ? error.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+        return { code: 'permission', message: fallbackTranslate('permissionDenied') };
+      }
+      if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+        return { code: 'missing', message: fallbackTranslate('noDevice') };
+      }
+      if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+        return { code: 'busy', message: fallbackTranslate('micBusy') };
+      }
+      return { code: 'capture', message: fallbackTranslate('failed', { message: (error && error.message) || String(error) }) };
     }
 
     // ---------------------------------------------------------------- engine
@@ -1131,6 +1281,7 @@ window.__ModuleLoader__.load({
         if (running) return { ok: true, alreadyRunning: true };
         if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function' || typeof window.AudioContext === 'undefined') {
           const message = translate('unavailable');
+          store.set({ permission: 'unavailable' });
           reportError(message);
           return { ok: false, message };
         }
@@ -1138,7 +1289,39 @@ window.__ModuleLoader__.load({
         clearTimeout(heldTimer);
         heldTimer = null;
         held = null;
-        store.set({ phase: 'starting', error: '', partial: '', pending: '', level: 0, warning: '', lastInserted: '', translated: false, waiting: false });
+        store.set({
+          phase: 'starting', error: '', partial: '', pending: '', level: 0, warning: '',
+          lastInserted: '', translated: false, waiting: false, permission: 'prompting', notice: '',
+        });
+        // Say why the mic is needed once, before the browser prompt. The flag is
+        // written even if the user denies, so the explainer does not replay.
+        try {
+          if (localStorage.getItem(MIC_INTRO_KEY) !== '1') {
+            localStorage.setItem(MIC_INTRO_KEY, '1');
+            store.set({ notice: translate('permissionFirst') });
+          }
+        } catch (_introError) {
+          store.set({ notice: translate('permissionFirst') });
+        }
+        const settings = settingsStore().get();
+        const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
+        if (settings.micDeviceId) audio.deviceId = { exact: settings.micDeviceId };
+        // Ask for the microphone before preparing the model: a denied permission
+        // must fail in one step, not after a 60 s model download.
+        try {
+          media = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+        } catch (error) {
+          const info = microphoneErrorInfo(error);
+          store.set({ permission: info.code, notice: '' });
+          reportError(info.message);
+          return { ok: false, message: info.message, code: info.code };
+        }
+        if (!running) {
+          for (const track of media.getTracks()) { try { track.stop(); } catch (_stopError) {} }
+          media = null;
+          return { ok: false, message: 'cancelled' };
+        }
+        store.set({ permission: 'granted', notice: '' });
         try {
           const ready = await ensureModel();
           // The user can stop while the model is still preparing (the loop
@@ -1147,11 +1330,6 @@ window.__ModuleLoader__.load({
           if (!running) return { ok: false, message: 'cancelled' };
           if (!ready.ok) { reportError(ready.message); return { ok: false, message: ready.message }; }
           callController = new AbortController();
-          const settings = settingsStore().get();
-          const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
-          if (settings.micDeviceId) audio.deviceId = { exact: settings.micDeviceId };
-          media = await navigator.mediaDevices.getUserMedia({ audio, video: false });
-          if (!running) return { ok: false, message: 'cancelled' };
           try {
             audioContext = new window.AudioContext({ sampleRate: SAMPLE_RATE });
           } catch (_unsupportedRate) {
@@ -1190,10 +1368,7 @@ window.__ModuleLoader__.load({
           debugNote('listening');
           return { ok: true };
         } catch (error) {
-          const name = error && error.name;
-          const message = name === 'NotAllowedError'
-            ? translate('permissionDenied')
-            : translate('failed', { message: (error && error.message) || String(error) });
+          const message = translate('failed', { message: (error && error.message) || String(error) });
           reportError(message);
           return { ok: false, message };
         } finally {
@@ -1481,6 +1656,12 @@ window.__ModuleLoader__.load({
       ];
       const body = [];
       if (tab === 'input') {
+        body.push(h('div', { key: 'permissionWhy', className: 'rv-note' }, translate('permissionWhy')));
+        body.push(h('div', { key: 'hotkeyHint', className: 'rv-note' },
+          translate('hotkeyHint', { hotkey: (runtime.hotkey && runtime.hotkey.spec) || readHotkeySpec() })));
+        if (runtime.hotkey && runtime.hotkey.notice) {
+          body.push(h('div', { key: 'hotkeyNotice', className: 'rv-warn' }, runtime.hotkey.notice));
+        }
         body.push(h('div', { key: 'lang', className: 'rv-field' },
           h('span', { className: 'rv-fieldLabel' }, translate('langLabel')),
           h('select', {
@@ -1603,7 +1784,7 @@ window.__ModuleLoader__.load({
       }, []);
       const listening = state.phase === 'listening';
       const busy = state.phase === 'starting';
-      const visible = listening || busy || state.phase === 'error' || !!state.pending || !!state.lastInserted || open;
+      const visible = listening || busy || state.phase === 'error' || !!state.pending || !!state.lastInserted || !!state.notice || !!state.hotkeyNotice || open;
       if (!visible) return null;
       const bars = [];
       for (let index = 0; index < 5; index += 1) {
@@ -1643,6 +1824,8 @@ window.__ModuleLoader__.load({
           state.partial || (state.segmentActive ? translate('partialHint') + '…' : '…')));
       }
       if (state.waiting && !open) children.push(h('div', { key: 'waiting', className: 'rv-waiting' }, translate('waitingNext') + '…'));
+      if (state.notice && !open) children.push(h('div', { key: 'notice', className: 'rv-note' }, state.notice));
+      if (state.hotkeyNotice && !open) children.push(h('div', { key: 'hotkey', className: 'rv-warn' }, state.hotkeyNotice));
       if (state.warning && !open) children.push(h('div', { key: 'warn', className: 'rv-warn' }, state.warning));
       if (state.error && !open) children.push(h('div', { key: 'error', className: 'rv-error' }, state.error));
       if (state.pending && !open) {
@@ -1743,6 +1926,25 @@ window.__ModuleLoader__.load({
         return () => { tag.remove(); };
       });
 
+      // Keyboard toggle for dictation. A failed bind is never silent: the bar
+      // and the settings page show which shortcut won or that the mic button is
+      // the fallback. It only fires while this window is focused.
+      ctx.effect(() => {
+        if (typeof document === 'undefined' || !document || typeof document.addEventListener !== 'function') {
+          const result = { ok: false, mode: 'button', spec: '', notice: fallbackTranslate('hotkeyButton') };
+          runtime.hotkey = result;
+          storeFor('composer').set({ hotkeyNotice: result.notice });
+          return () => {};
+        }
+        const result = bindHotkey(document, readHotkeySpec(), () => { void engineFor('composer').toggle(); });
+        runtime.hotkey = result;
+        debugNote('hotkey:binding', { mode: result.mode, spec: result.spec, tried: result.tried.length });
+        if (result.mode !== 'hotkey') storeFor('composer').set({ hotkeyNotice: result.notice });
+        return () => {
+          if (result.handler && typeof document.removeEventListener === 'function') document.removeEventListener('keydown', result.handler);
+        };
+      });
+
       let localeId = '';
       try {
         const snapshot = ctx.locale.getLocale ? ctx.locale.getLocale() : undefined;
@@ -1833,6 +2035,7 @@ window.__ModuleLoader__.load({
       // Exposed for the offline harness: pure functions only, no side effects.
       __test: {
         normalizeSettings, parseDictionary, formatDictionary, polish,
+        parseHotkey, matchesHotkey, hotkeyCandidates, bindHotkey, microphoneErrorInfo,
         stripFillers, collapseRepeats, resolveSelfCorrections, applySpokenCommands,
         fixPunctuation, applyDictionary, isCjkText, reconcilePartial,
         mergeSegments, seamNeedsSpace,

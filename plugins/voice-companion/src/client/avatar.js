@@ -110,6 +110,9 @@ border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba
 [data-vc-avatar][data-collapsed] .vc-stage,
 [data-vc-avatar][data-collapsed] .vc-bubble,
 [data-vc-avatar][data-collapsed] .vc-partial,
+[data-vc-avatar][data-collapsed] .vc-mic-note,
+[data-vc-avatar][data-collapsed] .vc-notice,
+[data-vc-avatar][data-collapsed] .vc-hold-row,
 [data-vc-avatar][data-collapsed] .vc-picker,
 [data-vc-avatar][data-collapsed] .vc-mode,
 [data-vc-avatar][data-collapsed] .vc-actions,
@@ -125,6 +128,14 @@ color:var(--vc-btn-color, #eef3ff);background:var(--vc-btn-bg, rgba(255,255,255,
 [data-vc-avatar] .vc-start,[data-vc-avatar] .vc-end{display:none}
 [data-vc-avatar][data-state="idle"] .vc-start,[data-vc-avatar][data-state="error"] .vc-start{display:inline-flex}
 [data-vc-avatar][data-state="listening"] .vc-end,[data-vc-avatar][data-state="thinking"] .vc-end,[data-vc-avatar][data-state="speaking"] .vc-end{display:inline-flex}
+[data-vc-avatar] .vc-mic-note{flex:none;font-size:10px;line-height:13px;color:var(--vc-text-muted, #9fb0d6);opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-vc-avatar] .vc-notice{display:none;flex:none;padding:5px 8px;border-radius:10px;border:1px solid rgba(255,196,95,.3);background:rgba(255,196,95,.10);color:var(--vc-notice-color, #ffd58a);font-size:10px;line-height:1.35;white-space:pre-line;max-height:54px;overflow:auto}
+[data-vc-avatar] .vc-notice[data-visible="1"]{display:block}
+[data-vc-avatar] .vc-notice[data-level="error"]{border-color:rgba(255,118,118,.4);background:rgba(255,118,118,.10);color:var(--vc-dot-error, #ff8f8f)}
+[data-vc-avatar] .vc-hold-row{display:none;flex:none;align-items:center;gap:6px}
+[data-vc-avatar] .vc-hold-row[data-visible="1"]{display:flex}
+[data-vc-avatar] .vc-hold{flex:none}
+[data-vc-avatar] .vc-hold-hint{font-size:10px;color:var(--vc-text-muted, #9fb0d6);opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:var(--vc-stage-height, 152px);display:grid;place-items:center;overflow:hidden;background:var(--vc-stage-bg, transparent);border-radius:var(--vc-stage-radius, 14px)}
 [data-vc-avatar] .vc-fish{position:relative;display:grid;place-items:center;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35));transition:filter .3s ease,transform .3s ease}
 [data-vc-avatar] .vc-fish-svg{display:block;width:186px;height:155px;overflow:visible}
@@ -426,6 +437,34 @@ export function createAvatar(options = {}) {
   actions.appendChild(startButton);
   actions.appendChild(endButton);
   actions.appendChild(receipt);
+
+  // Why the microphone is needed, always visible before the first permission
+  // prompt. A denied/busy/unavailable mic turns this into the notice below.
+  const micNote = element(doc, 'div', {
+    class: 'vc-mic-note',
+  }, '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.');
+
+  // Degradation banner: hotkey binding failures and microphone recovery steps.
+  // Hidden until there is something actionable to say, so the panel keeps its
+  // normal height when everything works.
+  const notice = element(doc, 'div', {
+    class: 'vc-notice',
+    'data-visible': '0',
+    'data-level': 'info',
+    role: 'status',
+    'aria-live': 'polite',
+  });
+
+  // In-app replacement for the hotkey. Keyboard/mouse hold, release to send.
+  const holdRow = element(doc, 'div', { class: 'vc-hold-row', 'data-visible': '0' });
+  const holdButton = element(doc, 'button', {
+    class: 'vc-btn vc-hold',
+    type: 'button',
+    'aria-label': '按住说话 / Hold to talk',
+    title: '按住说话 / Hold to talk',
+  }, '按住说话');
+  holdRow.appendChild(holdButton);
+  holdRow.appendChild(element(doc, 'span', { class: 'vc-hold-hint' }, '松开结束 / release to send'));
   head.appendChild(dot);
   head.appendChild(label);
   head.appendChild(picker);
@@ -653,6 +692,9 @@ export function createAvatar(options = {}) {
 
   panel.appendChild(head);
   panel.appendChild(stage);
+  panel.appendChild(micNote);
+  panel.appendChild(notice);
+  panel.appendChild(holdRow);
   panel.appendChild(bubble);
   panel.appendChild(partial);
   panel.appendChild(sheet);
@@ -738,6 +780,34 @@ export function createAvatar(options = {}) {
 
   function cycleCharacter(notify) {
     return selectCharacter(nextCharacterId(characterId()), notify !== false);
+  }
+
+  let holding = false;
+  const beginHold = (event) => {
+    if (disposed || holding) return;
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    holding = true;
+    if (onAction) onAction('hold-start');
+  };
+  const endHold = (event) => {
+    if (!holding) return;
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    holding = false;
+    if (onAction) onAction('hold-end');
+  };
+  if (typeof holdButton.addEventListener === 'function') {
+    holdButton.addEventListener('pointerdown', beginHold);
+    holdButton.addEventListener('pointerup', endHold);
+    holdButton.addEventListener('pointercancel', endHold);
+    holdButton.addEventListener('pointerleave', endHold);
+    holdButton.addEventListener('keydown', (event) => {
+      if (!event || event.repeat) return;
+      if (event.key === ' ' || event.key === 'Enter' || event.code === 'Space') beginHold(event);
+    });
+    holdButton.addEventListener('keyup', (event) => {
+      if (!event) return;
+      if (event.key === ' ' || event.key === 'Enter' || event.code === 'Space') endHold(event);
+    });
   }
 
   const handleStart = () => {
@@ -1713,9 +1783,38 @@ export function createAvatar(options = {}) {
   // 先把 chip 画出来，抽屉打开时只做同步，不会看到空行。
   syncThemeSection();
 
+  function setNotice(text, level) {
+    if (disposed) return '';
+    const value = typeof text === 'string' ? text.trim() : '';
+    const kind = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info';
+    notice.textContent = value;
+    notice.setAttribute('data-level', kind);
+    notice.setAttribute('data-visible', value === '' ? '0' : '1');
+    return value;
+  }
+
+  function setHoldFallback(visible) {
+    if (disposed) return false;
+    const on = !!visible;
+    holdRow.setAttribute('data-visible', on ? '1' : '0');
+    return on;
+  }
+
+  function setMicNote(text) {
+    if (disposed) return '';
+    const value = typeof text === 'string' && text.trim() !== ''
+      ? text.trim()
+      : '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.';
+    micNote.textContent = value;
+    return value;
+  }
+
   return {
     root,
     setState,
+    setNotice,
+    setHoldFallback,
+    setMicNote,
     setLevel,
     setSubtitle,
     setPartial,

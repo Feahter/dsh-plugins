@@ -90,8 +90,31 @@ const shot = async name => {
 }
 
 try {
+  // 懒加载回归：启动阶段（面板未打开）只注册侧栏，不下载画布 chunk。
+  const bootPage = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  await bootPage.goto(`${base}?manual=1`, { waitUntil: 'load' })
+  await bootPage.waitForFunction('window.__ready === true', null, { timeout: 10_000 })
+  check('启动阶段侧栏入口已注册（不依赖画布 chunk）', await bootPage.evaluate(() => {
+    const slots = window.__slots ?? []
+    const resource = performance.getEntriesByType('resource')
+    return slots.some(item => item.id === 'mind-canvas' && item.name === 'sidebar.panellist')
+      && !resource.some(item => item.name.includes('client.panel.js'))
+  }), await bootPage.evaluate(() => (window.__slots ?? []).map(item => item.name).join(',')))
+  await bootPage.evaluate(() => window.__mountPanel())
+  await bootPage.waitForSelector('.mc-root', { timeout: 10_000 })
+  check('首次打开面板才请求画布 chunk 并挂载', await bootPage.evaluate(() =>
+    performance.getEntriesByType('resource').some(item => item.name.includes('client.panel.js'))))
+  await bootPage.close()
+
   await page.goto(base, { waitUntil: 'load' })
   await page.waitForSelector('.mc-root', { timeout: 10_000 })
+  console.log('[perf]', await page.evaluate(() => {
+    const measures = performance.getEntriesByType('measure').map(m => `${m.name}=${m.duration.toFixed(1)}ms`)
+    const scripts = performance.getEntriesByType('resource')
+      .filter(r => r.name.endsWith('.js'))
+      .map(r => `${r.name.split('/').pop()}:${(r.transferSize / 1024).toFixed(0)}KB/${r.duration.toFixed(0)}ms`)
+    return [...measures, ...scripts].join(' ')
+  }))
 
   check('页面挂载：侧栏页根节点出现', await page.locator('.mc-root').count() === 1)
   check('插件注册了两个 slot（侧栏入口 + 主页）', await page.evaluate(() => {

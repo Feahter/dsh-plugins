@@ -46,7 +46,7 @@ root/
 }
 ```
 
-`list()` 的条目是**摘要**：entry 去掉 `preview` 全文，换成 ≤160 字符的 `snippet`（命中位置上下文），并保留 `id,title,kind,ext,collection,tags,sourceId,storage,path,size,status,updatedAt,snippet`（`path` 仅在 linked 条目上非空，note/blob 为 null）。
+`list()` 的条目是**摘要**：entry 去掉 `preview` 全文，换成 ≤160 字符的 `snippet`（命中位置上下文），并保留 `id,title,kind,ext,collection,tags,sourceId,storage,path,size,status,updatedAt,snippet`（`path` 仅在 linked 条目上非空，note/blob 为 null）。带 `q` 且走 hybrid 时额外有 `score`、`scoreParts`、`source`、`line`（见 §5）。
 
 ## 3. 数据层 API（`src/store.js`）
 
@@ -64,7 +64,7 @@ export async function createLibrary(root, options = {})  // -> Library；options
 | --- | --- |
 | `init()` | 建目录、读/修 index.json（缺字段补齐）、sources.json 不存在时写入默认源；幂等 |
 | `stats()` | `{root, counts:{active,trashed,notes,byKind:{...}}, collections:[{name,count}], tags:[{name,count}], sources:[{id,name,path,count,lastScanAt}], bytes, updatedAt}` |
-| `list(query)` | `{total, limit, offset, items, facets:{kinds:[{kind,count}], collections:[{name,count}], tags:[{name,count}]}}`；query `{q,kind,collection,tag,source,status='active',sort='relevance'|'updated'|'title'|'size',limit=50,offset=0}`；limit 夹到 1..200 |
+| `list(query)` | `{total, limit, offset, items, facets:{kinds:[{kind,count}], collections:[{name,count}], tags:[{name,count}]}}`；query `{q,mode='hybrid'\|'keyword',weights?,scoreParts=true,line=true,kind,collection,tag,source,status='active',sort='relevance'\|'updated'\|'title'\|'size',limit=50,offset=0}`；limit 夹到 1..200；检索语义见 §5 |
 | `get(id)` | entry 或 null；id 不存在时 null（不抛） |
 | `readText(id,{startLine,endLine,maxChars=20000})` | `{id,title,text,truncated,totalLines,bytes}`；二进制条目 `text=''` 且 `binary:true` |
 | `create({title,content='',kind='note',collection='inbox',tags=[],notes=''})` | 写 `notes/<id>.md`，返回 entry |
@@ -113,10 +113,38 @@ export async function createLibrary(root, options = {})  // -> Library；options
 
 ## 5. 检索（`list({q})`）
 
-- 大小写不敏感；q 按空白切 token，**全部 token** 命中才算（AND）。
-- 单 token 命中字段计分：title +6、tags +4、collection +2、path +2、preview +1；`snippet` 取 preview 中第一个命中 token 前后各 80 字符（去换行 → 空格）。
-- `sort=relevance` 按分数降序，同分按 updatedAt 降序；`q` 为空时 relevance 等价于 updated。
-- 中文不分词：整段 q 也做一次子串匹配（title/tags/preview），命中 +3，避免「查一个中文词零结果」。
+默认 `mode:'hybrid'`；`mode:'keyword'` 保留旧行为（见本节末尾），用于回归与调试。
+
+**分词与候选**（hybrid）
+
+- 大小写不敏感；q 按空白切 term，**每个 term 都要命中**（AND，与旧行为一致）。
+- 拉丁词按 `_ - .` 与 camelCase 拆词（`safeStorage` → `safe`+`storage`；`context_lib_search` → `context`+`lib`+`search`），同一个 term 拆出的多个词必须**全部**命中；CJK 按 bigram 切分（`热更新` → `热更`+`更新`），同一个 term 的 bigram **任一命中**即可，因此「热 更新」能被「热更新」搜到。
+- 拉丁词用整词边界匹配（`js` 不会命中 `json`）；CJK 用子串匹配。
+- `kind/collection/tag/source/status` 过滤与 `q` 空时行为不变；facets 仍按 q 命中集统计（不受额外筛选影响）。
+
+**打分**
+
+`score = weights.phrase × 短语分 + weights.bm25 × BM25 分`，默认 `weights = {phrase:3, bm25:1}`；单次调用可传 `weights` 覆盖。
+
+- 短语分：q 原文出现在 title +4 / tags +3 / path +2 / preview +1；多 term 时每个 term 再按 title +1.5 / tags +1 / path +1 / preview +0.5 叠加。
+- BM25：`k1=1.2`，`b=title 0.5 / meta 0.5 / body 0.75`；字段权重 `title 2 / meta 1.2 / body 1`（meta = tags + collection + path）；idf 在本次 `status` 过滤后的候选池上算（`ln(1 + (N-df+0.5)/(df+0.5))`）；文档长度用分词数归一。
+- 同分按 `id` 升序，保证同 query 同数据两次排序一致；`q` 为空时 relevance 等价于 updated。
+
+**返回**
+
+- `sort=relevance` 时按 `score` 降序，同分按 id 升序。
+- hybrid 条目在旧字段之外追加：`score`、`scoreParts:{phrase,bm25,title,meta,body}`（`scoreParts:false` 或 `debug:false` 可关）、`source`（文件绝对路径，无文件为 null）、`line`（正文命中最强的一行，1 基；标题/路径命中但正文无命中时为 1；二进制为 null；`line:false` 只留 source）。
+- `snippet` 按「q 原文 → term → 分词变体」找命中位置。
+- 配置权重：`createLibrary(root, {searchWeights:{...}})` 设默认值，`list({q,weights:{...}})` 单次覆盖。
+
+**keyword 模式（旧行为，`list({q,mode:'keyword'})`）**
+
+- q 按空白切 token，**全部 token** 子串命中才算；title +6 / tags +4 / collection +2 / path +2 / preview +1；中文整段命中 +3；同分按 updatedAt 降序；返回结构不含 hybrid 追加字段。
+
+**性能**
+
+- 每条 entry 的检索串与命中条目的分词按 `id+updatedAt` 缓存（`_haystackCache` / `_tokenCache`，LRU 上限 3000）；3862 条真实索引下 `list({q,limit:20})` 首次查询建缓存（数百 ms），之后约 20–50ms。
+
 
 ## 6. HTTP API（`index.js`，前缀 `/api/context-lib`）
 

@@ -12,9 +12,10 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const API_ROOT = 'https://api.github.com';
 const ROUTE_PREFIX = '/api/github-manager';
@@ -25,6 +26,16 @@ const TOKEN_FAILURE_TTL_MS = 15_000;
 const ENRICH_LIMIT = 8;
 const MAX_TEXT_CHARS = 200000;
 const MAX_FILE_BYTES = 512 * 1024;
+// Pull-request detail is an aggregate of four endpoints. Every list is bounded
+// so one huge PR cannot blow up the tool result or the panel payload.
+const PULL_FILES_MAX = 100;
+const PULL_FILES_PER_PAGE = 100;
+const PULL_REVIEWS_MAX = 100;
+const CONVERSATION_PREVIEW = 10;
+const PULL_BODY_PREVIEW = 4000;
+const MAX_PATCH_CHARS = 200000;
+// Local credential vault. Version 1 stores only a base64 safeStorage blob.
+const TOKEN_FILE_VERSION = 1;
 // Every Host-side call gets a bounded budget: without one, a stalled
 // api.github.com leaves the panel route (and the agent tool) waiting forever.
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -143,17 +154,302 @@ async function readGhHostsToken() {
   return '';
 }
 
+// ------------------------------------------------------- credential storage
+//
+// The local credential file is the only place this plugin can persist a token.
+// It is always written through Electron safeStorage (OS keychain) as a base64
+// blob; plaintext is never written to disk. When safeStorage is unavailable
+// (plain Node, or a Linux box without a keyring) a token supplied by the panel
+// is kept in process memory for this run only, and the status route reports a
+// visible degraded state. Legacy plaintext files are migrated in place on the
+// first store read; if migration fails the file is left untouched and the token
+// is still used, so a failed migration never loses the credential.
+
+let safeStorageOverride = null;
+let safeStorageProbe;
+let tokenStoreState = null;
+let tokenStoreInit = null;
+let memoryToken = '';
+let memoryTokenWarning = '';
+
+/** Test seam: inject a fake Electron safeStorage implementation. */
+function setSafeStorageAdapter(adapter) {
+  safeStorageOverride = adapter || null;
+  safeStorageProbe = undefined;
+}
+
+function probeSafeStorage() {
+  if (safeStorageOverride) return safeStorageOverride;
+  if (safeStorageProbe !== undefined) return safeStorageProbe;
+  let adapter = null;
+  try {
+    const require = createRequire(import.meta.url);
+    const electron = require('electron');
+    const safe = electron && electron.safeStorage;
+    if (
+      safe &&
+      typeof safe.isEncryptionAvailable === 'function' &&
+      typeof safe.encryptString === 'function' &&
+      typeof safe.decryptString === 'function'
+    ) {
+      adapter = safe;
+    }
+  } catch {
+    adapter = null;
+  }
+  // Only cache a working adapter: if Electron is still starting up, probe
+  // again on the next call instead of disabling encryption for the process.
+  if (adapter) safeStorageProbe = adapter;
+  return adapter;
+}
+
+function encryptionAvailable() {
+  const safe = probeSafeStorage();
+  if (!safe) return false;
+  try {
+    return safe.isEncryptionAvailable() === true;
+  } catch {
+    return false;
+  }
+}
+
+function expandHome(value) {
+  if (value === '~') return homedir();
+  if (value.startsWith('~/')) return join(homedir(), value.slice(2));
+  return value;
+}
+
+/**
+ * `<DSH_HOME>/github-manager/credentials.json`, overridable for tests and for
+ * users who keep their harness home elsewhere.
+ */
+function tokenStorePath() {
+  const override = process.env.GITHUB_MANAGER_TOKEN_FILE;
+  if (override) return expandHome(override);
+  const home = expandHome(process.env.DSH_HOME || '') || join(homedir(), '.dsh');
+  return join(home, 'github-manager', 'credentials.json');
+}
+
+function plaintextFromRecord(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return '';
+  if (record.storage === 'safeStorage' || typeof record.ciphertext === 'string') return '';
+  const raw = record.token ?? record.githubToken ?? record.oauth_token;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+async function readCredentialFile() {
+  const file = tokenStorePath();
+  let text;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { file, exists: false, record: null };
+    return { file, exists: true, record: null, unreadable: true };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { file, exists: true, record: parsed };
+    }
+  } catch {
+    // Fall through to the unparsable branch.
+  }
+  return { file, exists: true, record: null, unreadable: true };
+}
+
+/**
+ * Atomic write: a 0600 temp file in the target directory is renamed over the
+ * store, so a crash can never leave a half-written credential file behind.
+ */
+async function writeCredentialFile(record) {
+  const file = tokenStorePath();
+  const dir = dirname(file);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const temp = join(dir, `.credentials-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`);
+  try {
+    await writeFile(temp, JSON.stringify(record), { encoding: 'utf8', mode: 0o600 });
+    await rename(temp, file);
+    try {
+      await chmod(file, 0o600);
+    } catch {
+      // chmod is best-effort on filesystems that do not support it.
+    }
+  } catch (error) {
+    try {
+      await unlink(temp);
+    } catch {
+      // The temp file may not exist; the original store is still intact.
+    }
+    throw error;
+  }
+}
+
+function encryptedBlob(token) {
+  const safe = probeSafeStorage();
+  if (!safe || !encryptionAvailable()) return null;
+  const encrypted = safe.encryptString(token);
+  if (!Buffer.isBuffer(encrypted)) {
+    throw new GithubError('Electron safeStorage returned an unexpected payload.', { code: 'storage-error', status: 500 });
+  }
+  return encrypted.toString('base64');
+}
+
+/**
+ * Load the local store once. A legacy plaintext record is encrypted in place;
+ * if that cannot happen the token is still returned (storage marks it as
+ * degraded) and the original file is left exactly as it was.
+ */
+async function initializeTokenStore() {
+  if (tokenStoreState) return tokenStoreState;
+  if (tokenStoreInit) return tokenStoreInit;
+  tokenStoreInit = (async () => {
+    const file = await readCredentialFile();
+    if (!file.exists) {
+      tokenStoreState = { value: '', storage: 'none', warning: '', migrated: false };
+      return tokenStoreState;
+    }
+    if (file.unreadable || !file.record) {
+      tokenStoreState = { value: '', storage: 'unreadable', warning: 'credential-file-unreadable', migrated: false };
+      return tokenStoreState;
+    }
+    const record = file.record;
+    if (typeof record.ciphertext === 'string') {
+      if (!encryptionAvailable()) {
+        tokenStoreState = { value: '', storage: 'encrypted-unavailable', warning: 'encryption-unavailable', migrated: false };
+        return tokenStoreState;
+      }
+      let value = '';
+      try {
+        value = String(probeSafeStorage().decryptString(Buffer.from(record.ciphertext, 'base64')) || '');
+      } catch {
+        tokenStoreState = { value: '', storage: 'safeStorage', warning: 'decrypt-failed', migrated: false };
+        return tokenStoreState;
+      }
+      tokenStoreState = { value: value.trim(), storage: 'safeStorage', warning: value ? '' : 'decrypt-failed', migrated: false };
+      return tokenStoreState;
+    }
+    const plaintext = plaintextFromRecord(record);
+    if (!plaintext) {
+      tokenStoreState = { value: '', storage: 'none', warning: '', migrated: false };
+      return tokenStoreState;
+    }
+    if (!encryptionAvailable()) {
+      tokenStoreState = {
+        value: plaintext,
+        storage: 'plaintext-degraded',
+        warning: 'encryption-unavailable',
+        migrated: false,
+      };
+      return tokenStoreState;
+    }
+    try {
+      const ciphertext = encryptedBlob(plaintext);
+      if (!ciphertext) throw new Error('safeStorage returned no ciphertext');
+      await writeCredentialFile({
+        version: TOKEN_FILE_VERSION,
+        storage: 'safeStorage',
+        ciphertext,
+        updatedAt: new Date().toISOString(),
+      });
+      tokenStoreState = { value: plaintext, storage: 'safeStorage', warning: '', migrated: true };
+    } catch {
+      // Migration failed: keep the credential and the original file.
+      tokenStoreState = {
+        value: plaintext,
+        storage: 'plaintext-degraded',
+        warning: 'migration-failed',
+        migrated: false,
+      };
+    }
+    return tokenStoreState;
+  })().finally(() => {
+    tokenStoreInit = null;
+  });
+  return tokenStoreInit;
+}
+
+/**
+ * Persist a token from the panel. With safeStorage available the file holds
+ * only ciphertext; without it the token stays in memory and the caller sees a
+ * `memory-degraded` result that the panel renders as a warning.
+ */
+async function saveStoredToken(rawToken) {
+  const token = requireString({ token: rawToken }, 'token', 4096);
+  if (!/^[\x21-\x7e]+$/.test(token)) {
+    throw new GithubError('Argument "token" must be a single non-empty token without whitespace.', {
+      code: 'invalid-argument',
+      status: 400,
+    });
+  }
+  if (!encryptionAvailable()) {
+    memoryToken = token;
+    memoryTokenWarning = 'encryption-unavailable';
+    tokenStoreState = { value: token, storage: 'memory-degraded', warning: memoryTokenWarning, migrated: false };
+    tokenCache = { value: token, source: 'memory', storage: 'memory-degraded', warning: memoryTokenWarning, at: Date.now() };
+    return { storage: 'memory-degraded', persisted: false, degraded: true, warning: memoryTokenWarning };
+  }
+  try {
+    const ciphertext = encryptedBlob(token);
+    if (!ciphertext) throw new Error('safeStorage returned no ciphertext');
+    await writeCredentialFile({
+      version: TOKEN_FILE_VERSION,
+      storage: 'safeStorage',
+      ciphertext,
+      updatedAt: new Date().toISOString(),
+    });
+    memoryToken = '';
+    memoryTokenWarning = '';
+    tokenStoreState = { value: token, storage: 'safeStorage', warning: '', migrated: false };
+    tokenCache = { value: token, source: 'local-store', storage: 'safeStorage', warning: '', at: Date.now() };
+    return { storage: 'safeStorage', persisted: true, degraded: false, warning: '' };
+  } catch {
+    // Never fall back to plaintext on disk. Keep the token for this run only.
+    memoryToken = token;
+    memoryTokenWarning = 'write-failed';
+    tokenStoreState = { value: token, storage: 'memory-degraded', warning: memoryTokenWarning, migrated: false };
+    tokenCache = { value: token, source: 'memory', storage: 'memory-degraded', warning: memoryTokenWarning, at: Date.now() };
+    return { storage: 'memory-degraded', persisted: false, degraded: true, warning: memoryTokenWarning };
+  }
+}
+
+/** Test seam: drop all cached credential state between cases. */
+function resetTokenStore() {
+  tokenStoreState = null;
+  tokenStoreInit = null;
+  memoryToken = '';
+  memoryTokenWarning = '';
+  tokenCache = { value: '', source: '', at: 0 };
+}
+
 async function collectToken() {
-  if (ghFallbackDisabled()) return { value: '', source: '' };
+  if (memoryToken) {
+    return {
+      value: memoryToken,
+      source: 'memory',
+      storage: 'memory-degraded',
+      warning: memoryTokenWarning,
+    };
+  }
+  const stored = await initializeTokenStore();
+  if (stored.value) {
+    return { value: stored.value, source: 'local-store', storage: stored.storage, warning: stored.warning };
+  }
+  if (ghFallbackDisabled()) {
+    return { value: '', source: '', storage: stored.storage || 'none', warning: stored.warning || '' };
+  }
   const override = process.env.GITHUB_MANAGER_GH_BIN;
   const binaries = override ? [override] : ghBinaries();
   for (const binary of binaries) {
     const token = await runGhToken(binary);
-    if (token) return { value: token, source: 'gh-cli' };
+    if (token) {
+      return { value: token, source: 'gh-cli', storage: 'ephemeral', warning: stored.warning || '' };
+    }
   }
   const fileToken = await readGhHostsToken();
-  if (fileToken) return { value: fileToken, source: 'gh-hosts' };
-  return { value: '', source: '' };
+  if (fileToken) {
+    return { value: fileToken, source: 'gh-hosts', storage: 'ephemeral', warning: stored.warning || '' };
+  }
+  return { value: '', source: '', storage: stored.storage || 'none', warning: stored.warning || '' };
 }
 
 /**
@@ -164,20 +460,32 @@ async function collectToken() {
 async function resolveToken(force = false) {
   const fromEnv = envToken();
   if (fromEnv) {
-    tokenCache = { value: fromEnv, source: 'env', at: Date.now() };
+    tokenCache = { value: fromEnv, source: 'env', storage: 'environment', warning: '', at: Date.now() };
     return tokenCache;
   }
   const now = Date.now();
   const ttl = tokenCache.value ? TOKEN_TTL_MS : TOKEN_FAILURE_TTL_MS;
   if (!force && tokenCache.at && now - tokenCache.at < ttl) return tokenCache;
   if (!force && tokenPending) return tokenPending;
+  // A forced retry re-reads an encrypted store that was previously unusable
+  // (safeStorage may have become available after boot). The memory-only token
+  // is never dropped: collectToken checks it first.
+  if (force && tokenStoreState && tokenStoreState.warning === 'encryption-unavailable') {
+    tokenStoreState = null;
+  }
   tokenPending = collectToken()
     .then((found) => {
-      tokenCache = { value: found.value, source: found.source, at: Date.now() };
+      tokenCache = {
+        value: found.value,
+        source: found.source,
+        storage: found.storage || 'none',
+        warning: found.warning || '',
+        at: Date.now(),
+      };
       return tokenCache;
     })
     .catch(() => {
-      tokenCache = { value: '', source: '', at: Date.now() };
+      tokenCache = { value: '', source: '', storage: 'none', warning: '', at: Date.now() };
       return tokenCache;
     })
     .finally(() => {
@@ -188,6 +496,8 @@ async function resolveToken(force = false) {
 
 function resetTokenCache() {
   tokenCache = { value: '', source: '', at: 0 };
+  // A memory-only token is the only copy that exists; clearing the cache must
+  // not lose it. Only resetTokenStore() (tests) drops it.
 }
 
 async function requireToken(options = {}) {
@@ -206,6 +516,36 @@ function requestSignal(externalSignal, timeoutMs) {
   const timeout = AbortSignal.timeout(budget);
   if (!externalSignal) return timeout;
   return typeof AbortSignal.any === 'function' ? AbortSignal.any([externalSignal, timeout]) : externalSignal;
+}
+
+function headerValue(headers, name) {
+  try {
+    return headers && typeof headers.get === 'function' ? headers.get(name) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A 403 is either "you may not read this" or "you have no quota left". The
+ * panel and the PR-detail aggregator need to tell them apart: rate limiting is
+ * transient, a permission error is not.
+ */
+function classifyHttpError(response, data) {
+  const status = response.status;
+  if (status === 401) return 'auth';
+  if (status === 429) return 'rate-limit';
+  if (status === 403) {
+    const remaining = headerValue(response.headers, 'x-ratelimit-remaining');
+    const retryAfter = headerValue(response.headers, 'retry-after');
+    if (remaining === '0' || (retryAfter !== null && retryAfter !== '')) return 'rate-limit';
+    // GitHub's secondary-limit body names the limiter even without headers.
+    const message = data && typeof data.message === 'string' ? data.message.toLowerCase() : '';
+    if (message.includes('rate limit') || message.includes('secondary rate')) return 'rate-limit';
+    return 'forbidden';
+  }
+  if (status === 404) return 'not-found';
+  return 'github-error';
 }
 
 async function github(pathname, options = {}) {
@@ -265,8 +605,15 @@ async function github(pathname, options = {}) {
   if (!response.ok) {
     const detail = data && data.message ? data.message : `HTTP ${response.status}`;
     const docs = data && data.documentation_url ? ` (${data.documentation_url})` : '';
-    const code = response.status === 401 || response.status === 403 ? 'auth' : 'github-error';
-    throw new GithubError(`GitHub ${response.status}: ${detail}${docs}`, { code, status: response.status });
+    const code = classifyHttpError(response, data);
+    let hint = '';
+    if (code === 'rate-limit') {
+      const retryAfter = headerValue(response.headers, 'retry-after');
+      const reset = headerValue(response.headers, 'x-ratelimit-reset');
+      if (retryAfter) hint = ` Retry after ${retryAfter}s.`;
+      else if (/^\d+$/.test(reset || '')) hint = ` Limit resets at ${new Date(Number(reset) * 1000).toISOString()}.`;
+    }
+    throw new GithubError(`GitHub ${response.status}: ${detail}${docs}${hint}`, { code, status: response.status });
   }
   return { data, headers: response.headers };
 }
@@ -341,7 +688,7 @@ function requireIssueNumber(args) {
   const raw = args && (args.number ?? args.issue ?? args.issue_number);
   const number = typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? ''), 10);
   if (!Number.isInteger(number) || number < 1) {
-    throw new GithubError('Argument "number" must be a positive issue number.', { code: 'invalid-argument', status: 400 });
+    throw new GithubError('Argument "number" must be a positive number.', { code: 'invalid-argument', status: 400 });
   }
   return number;
 }
@@ -436,12 +783,24 @@ function trimWriteResult(item) {
 
 // --------------------------------------------------------------------- reads
 
+function statusStorage(token) {
+  // The active token may come from the environment while the local vault still
+  // has a migration/decryption problem; surface that warning too.
+  const store = tokenStoreState;
+  const warning = token.warning || (store && store.warning) || '';
+  const storage = token.warning
+    ? token.storage
+    : (store && store.warning ? store.storage : token.storage);
+  return { tokenStorage: storage || 'none', storageWarning: warning };
+}
+
 async function readStatus(force = false) {
   const token = await resolveToken(force);
   if (!token.value) {
     return {
       configured: false,
       tokenSource: '',
+      ...statusStorage(token),
       hint: 'Log in with `gh auth login`, or set GH_TOKEN / GITHUB_TOKEN in the environment and restart DeepSeek Harness.',
     };
   }
@@ -459,6 +818,7 @@ async function readStatus(force = false) {
   return {
     configured: true,
     tokenSource: token.source,
+    ...statusStorage(token),
     login: user.login,
     name: user.name || user.login,
     avatarUrl: user.avatar_url || '',
@@ -535,6 +895,303 @@ async function readPulls(searchParams) {
   const { data } = await github(`/repos/${fullName}/pulls?` + params.toString());
   const items = (Array.isArray(data) ? data : []).map(trimPull);
   return { count: items.length, items, truncated: items.length >= limit };
+}
+
+// --------------------------------------------------------------- pull detail
+//
+// One PR detail is four GitHub endpoints. The pull record is mandatory, the
+// three collections are best-effort: a 403/404/timeout for one of them is
+// recorded in `missing` and leaves the rest of the detail usable.
+
+const PULL_SECTIONS = ['files', 'reviews', 'conversation'];
+
+function parseInclude(raw) {
+  if (raw === null || raw === undefined || raw === '') return PULL_SECTIONS.slice();
+  const values = Array.isArray(raw) ? raw : String(raw).split(',');
+  const include = [];
+  for (const value of values) {
+    const name = String(value).trim().toLowerCase();
+    if (!name) continue;
+    if (!PULL_SECTIONS.includes(name)) {
+      throw new GithubError(`Argument "include" accepts only: ${PULL_SECTIONS.join(', ')}.`, {
+        code: 'invalid-argument',
+        status: 400,
+      });
+    }
+    if (!include.includes(name)) include.push(name);
+  }
+  return include.length ? include : PULL_SECTIONS.slice();
+}
+
+function requirePullNumber(searchParams) {
+  const raw = String(searchParams.get('number') || '').trim();
+  const number = Number.parseInt(raw, 10);
+  if (!/^\d+$/.test(raw) || !Number.isInteger(number) || number < 1) {
+    throw new GithubError('Query parameter "number" must be a positive pull request number.', {
+      code: 'invalid-argument',
+      status: 400,
+    });
+  }
+  return number;
+}
+
+function trimPullDetail(pull) {
+  return {
+    ...trimPull(pull),
+    bodyPreview: (pull.body || '').slice(0, PULL_BODY_PREVIEW),
+    mergeable: pull.mergeable === null || pull.mergeable === undefined ? null : Boolean(pull.mergeable),
+    mergeableState: pull.mergeable_state || '',
+    additions: pull.additions ?? null,
+    deletions: pull.deletions ?? null,
+    changedFiles: pull.changed_files ?? null,
+    commits: pull.commits ?? null,
+    reviewComments: pull.review_comments ?? 0,
+    comments: pull.comments ?? 0,
+    headSha: pull.head && pull.head.sha ? String(pull.head.sha) : '',
+    baseSha: pull.base && pull.base.sha ? String(pull.base.sha) : '',
+  };
+}
+
+/**
+ * Patch text is deliberately omitted here: a large PR can carry megabytes of
+ * it. The aggregate only says whether a patch exists; the per-file route reads
+ * exactly one patch when the user asks for it.
+ */
+function trimPullFile(file) {
+  const patch = typeof file.patch === 'string' ? file.patch : '';
+  return {
+    path: file.filename || '',
+    status: file.status || '',
+    additions: file.additions ?? 0,
+    deletions: file.deletions ?? 0,
+    changes: file.changes ?? 0,
+    patchAvailable: patch.length > 0,
+    patchBytes: patch ? Buffer.byteLength(patch, 'utf8') : 0,
+    blobUrl: file.blob_url || '',
+  };
+}
+
+function trimPullReview(review) {
+  return {
+    id: review.id ?? null,
+    author: trimUser(review.user),
+    state: review.state || '',
+    submittedAt: review.submitted_at || '',
+    bodyPreview: (review.body || '').slice(0, 400),
+  };
+}
+
+function trimConversationComment(comment) {
+  return {
+    id: comment.id ?? null,
+    author: trimUser(comment.user),
+    createdAt: comment.created_at || '',
+    bodyPreview: (comment.body || '').slice(0, 400),
+  };
+}
+
+function failedSection() {
+  return { items: [], count: 0, truncated: true, failed: true };
+}
+
+function missingSection(section, error) {
+  const isGithub = error instanceof GithubError;
+  return {
+    section,
+    code: isGithub ? error.code : 'error',
+    status: isGithub && Number.isInteger(error.status) ? error.status : 0,
+    message: isGithub ? error.message : 'Section request failed.',
+  };
+}
+
+function parseLastPage(headers) {
+  const link = headerValue(headers, 'link') || '';
+  const match = /[?&]page=(\d+)>;\s*rel="last"/.exec(link);
+  return match ? Number(match[1]) : 1;
+}
+
+async function fetchPullFiles(fullName, number) {
+  const items = [];
+  let truncated = false;
+  for (let page = 1; page <= Math.ceil(PULL_FILES_MAX / PULL_FILES_PER_PAGE); page += 1) {
+    const { data } = await github(
+      `/repos/${fullName}/pulls/${number}/files?per_page=${PULL_FILES_PER_PAGE}&page=${page}`,
+    );
+    if (!Array.isArray(data) || data.length === 0) break;
+    for (const file of data) {
+      if (items.length >= PULL_FILES_MAX) {
+        truncated = true;
+        break;
+      }
+      items.push(trimPullFile(file));
+    }
+    if (items.length >= PULL_FILES_MAX) {
+      truncated = true;
+      break;
+    }
+    if (data.length < PULL_FILES_PER_PAGE) break;
+  }
+  return { items, count: items.length, truncated };
+}
+
+async function fetchPullFilePatch(fullName, number, path) {
+  for (let page = 1; page <= Math.ceil(PULL_FILES_MAX / PULL_FILES_PER_PAGE); page += 1) {
+    const { data } = await github(
+      `/repos/${fullName}/pulls/${number}/files?per_page=${PULL_FILES_PER_PAGE}&page=${page}`,
+    );
+    if (!Array.isArray(data) || data.length === 0) break;
+    const found = data.find((file) => file && file.filename === path);
+    if (found) {
+      const patch = typeof found.patch === 'string' ? found.patch : '';
+      const truncated = patch.length > MAX_PATCH_CHARS;
+      return {
+        path,
+        status: found.status || '',
+        additions: found.additions ?? 0,
+        deletions: found.deletions ?? 0,
+        patchAvailable: patch.length > 0,
+        patch: patch ? patch.slice(0, MAX_PATCH_CHARS) : null,
+        truncated,
+        reason: patch ? '' : 'no-patch',
+      };
+    }
+    if (data.length < PULL_FILES_PER_PAGE) break;
+  }
+  return {
+    path,
+    status: '',
+    additions: 0,
+    deletions: 0,
+    patchAvailable: false,
+    patch: null,
+    truncated: false,
+    reason: 'file-not-found',
+  };
+}
+
+async function fetchPullReviews(fullName, number) {
+  const { data } = await github(`/repos/${fullName}/pulls/${number}/reviews?per_page=${PULL_REVIEWS_MAX}`);
+  const all = Array.isArray(data) ? data : [];
+  const items = all.slice(0, PULL_REVIEWS_MAX).map(trimPullReview);
+  const summary = {
+    approved: 0,
+    changesRequested: 0,
+    commented: 0,
+    dismissed: 0,
+    pending: 0,
+    total: all.length,
+  };
+  for (const review of items) {
+    if (review.state === 'APPROVED') summary.approved += 1;
+    else if (review.state === 'CHANGES_REQUESTED') summary.changesRequested += 1;
+    else if (review.state === 'COMMENTED') summary.commented += 1;
+    else if (review.state === 'DISMISSED') summary.dismissed += 1;
+    else if (review.state === 'PENDING') summary.pending += 1;
+  }
+  return {
+    items,
+    count: items.length,
+    truncated: all.length > PULL_REVIEWS_MAX,
+    latestState: items.length ? items[items.length - 1].state : '',
+    summary,
+  };
+}
+
+async function fetchPullConversation(fullName, number, totalFromPull) {
+  const first = await github(`/repos/${fullName}/issues/${number}/comments?per_page=100&page=1`);
+  let loaded = Array.isArray(first.data) ? first.data : [];
+  const total = Number.isInteger(totalFromPull) && totalFromPull >= 0 ? totalFromPull : loaded.length;
+  const lastPage = parseLastPage(first.headers);
+  // Keep the *latest* comments, not the first page, when the thread is long.
+  if (lastPage > 1) {
+    const tail = await github(`/repos/${fullName}/issues/${number}/comments?per_page=100&page=${lastPage}`);
+    if (Array.isArray(tail.data)) loaded = tail.data;
+  }
+  const items = loaded.slice(-CONVERSATION_PREVIEW).map(trimConversationComment);
+  return {
+    total,
+    loaded: loaded.length,
+    count: items.length,
+    items,
+    truncated: total > items.length,
+  };
+}
+
+async function readPullDetail(searchParams) {
+  const fullName = requireFullName(searchParams);
+  const number = requirePullNumber(searchParams);
+  const include = parseInclude(searchParams.get('include'));
+  // The pull record is the anchor of the aggregate: without it there is no
+  // detail to show, so its error propagates with the real HTTP status.
+  const { data: pull } = await github(`/repos/${fullName}/pulls/${number}`);
+  const result = {
+    repo: fullName,
+    number,
+    include: include.slice(),
+    pull: trimPullDetail(pull),
+    files: null,
+    reviews: null,
+    conversation: null,
+    missing: [],
+    partial: false,
+    truncated: false,
+  };
+
+  const jobs = [];
+  if (include.includes('files')) {
+    jobs.push((async () => {
+      try {
+        const files = await fetchPullFiles(fullName, number);
+        const changed = Number.isInteger(pull.changed_files) ? pull.changed_files : null;
+        files.truncated = Boolean(files.truncated || (changed !== null && changed > files.items.length));
+        result.files = files;
+        if (files.truncated) result.truncated = true;
+      } catch (error) {
+        result.files = failedSection();
+        result.missing.push(missingSection('files', error));
+        result.truncated = true;
+      }
+    })());
+  }
+  if (include.includes('reviews')) {
+    jobs.push((async () => {
+      try {
+        const reviews = await fetchPullReviews(fullName, number);
+        result.reviews = reviews;
+        if (reviews.truncated) result.truncated = true;
+      } catch (error) {
+        result.reviews = failedSection();
+        result.missing.push(missingSection('reviews', error));
+        result.truncated = true;
+      }
+    })());
+  }
+  if (include.includes('conversation')) {
+    jobs.push((async () => {
+      try {
+        const conversation = await fetchPullConversation(fullName, number, pull.comments);
+        result.conversation = conversation;
+        if (conversation.truncated) result.truncated = true;
+      } catch (error) {
+        result.conversation = failedSection();
+        result.missing.push(missingSection('conversation', error));
+        result.truncated = true;
+      }
+    })());
+  }
+  await Promise.all(jobs);
+  result.partial = result.missing.length > 0;
+  return result;
+}
+
+async function readPullFile(searchParams) {
+  const fullName = requireFullName(searchParams);
+  const number = requirePullNumber(searchParams);
+  const path = (searchParams.get('path') || '').trim();
+  if (!path) {
+    throw new GithubError('Query parameter "path" is required.', { code: 'invalid-argument', status: 400 });
+  }
+  return fetchPullFilePatch(fullName, number, path);
 }
 
 function encodePath(path) {
@@ -981,6 +1638,32 @@ const TOOLS = [
     },
   ),
   defineTool(
+    'github_get_pull',
+    'Read one pull request in detail: title, author, state, draft/mergeable status, additions/deletions/changed-file counts, a body preview, the changed-file list (bounded to 100 files, no inline patches), review states with a summary, and a digest of the latest conversation comments. A failing sub-request is reported in "missing" instead of failing the whole detail.',
+    {
+      type: 'object',
+      properties: {
+        repo: repoProperty('Repository in "owner/name" form, for example "octocat/Hello-World".'),
+        number: { type: 'integer', description: 'Pull request number.' },
+        include: {
+          type: 'array',
+          items: { type: 'string', enum: ['files', 'reviews', 'conversation'] },
+          description: 'Sections to fetch. Defaults to all three; pass a subset to skip a section and save API calls.',
+        },
+      },
+      required: ['repo', 'number'],
+      additionalProperties: false,
+    },
+    async (args) => {
+      const fullName = requireRepo(args);
+      const number = requireIssueNumber(args);
+      const include = optionalStringArray(args, 'include', 3);
+      const searchParams = new URLSearchParams({ full_name: fullName, number: String(number) });
+      if (include && include.length) searchParams.set('include', include.join(','));
+      return readPullDetail(searchParams);
+    },
+  ),
+  defineTool(
     'github_list_branches',
     'List branches of a GitHub repository with the default branch first. Each item carries the head SHA, protected flag, and, for the first few branches, the last commit author/date/message plus ahead/behind counts relative to the default branch.',
     {
@@ -1159,6 +1842,8 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
       if (route === '/repos') return okPayload(await readRepos(searchParams));
       if (route === '/issues') return okPayload(await readIssues(searchParams));
       if (route === '/pulls') return okPayload(await readPulls(searchParams));
+      if (route === '/pull') return okPayload(await readPullDetail(searchParams));
+      if (route === '/pull-file') return okPayload(await readPullFile(searchParams));
       if (route === '/branches') return okPayload(await readBranches(searchParams));
       if (route === '/commits') return okPayload(await readCommits(searchParams));
       if (route === '/tree') return okPayload(await readTree(searchParams));
@@ -1170,6 +1855,7 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
       if (route === '/issue') return okPayload(await createIssue(body));
       if (route === '/issue-state') return okPayload(await updateIssue(body));
       if (route === '/comment') return okPayload(await commentIssue(body));
+      if (route === '/token') return okPayload(await saveStoredToken(body.token));
       return { status: 404, payload: { ok: false, error: { message: 'Unknown route: POST ' + route } } };
     }
     return {
@@ -1253,6 +1939,11 @@ function createRouteHandler(ctx) {
 export const inject = ['tools', 'webServer'];
 
 export function apply(ctx) {
+  // Load (and migrate) the local credential vault at boot, even when the
+  // environment currently supplies the token: this is what turns a legacy
+  // plaintext file into ciphertext on first launch. A failure only degrades
+  // the status route; it never blocks the panel.
+  void initializeTokenStore().catch(() => {});
   for (const definition of TOOLS) {
     ctx.effect(() => ctx.tools.register(definition));
   }
@@ -1267,4 +1958,24 @@ export function apply(ctx) {
 
 // Test seam: pure helpers used by .verify-host.mjs. Nothing else should rely
 // on these names, so they can change without a plugin-facing migration.
-export const __testing = { ghBinaries, ghHostsCandidates, pickHostsToken, requestSignal, github, setDefaultTimeout };
+export const __testing = {
+  ghBinaries,
+  ghHostsCandidates,
+  pickHostsToken,
+  requestSignal,
+  github,
+  setDefaultTimeout,
+  classifyHttpError,
+  parseInclude,
+  readPullDetail,
+  readPullFile,
+  readStatus,
+  saveStoredToken,
+  initializeTokenStore,
+  resolveToken,
+  resetTokenStore,
+  resetTokenCache,
+  setSafeStorageAdapter,
+  tokenStorePath,
+  encryptionAvailable,
+};

@@ -1731,6 +1731,9 @@ border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba
 [data-vc-avatar][data-collapsed] .vc-stage,
 [data-vc-avatar][data-collapsed] .vc-bubble,
 [data-vc-avatar][data-collapsed] .vc-partial,
+[data-vc-avatar][data-collapsed] .vc-mic-note,
+[data-vc-avatar][data-collapsed] .vc-notice,
+[data-vc-avatar][data-collapsed] .vc-hold-row,
 [data-vc-avatar][data-collapsed] .vc-picker,
 [data-vc-avatar][data-collapsed] .vc-mode,
 [data-vc-avatar][data-collapsed] .vc-actions,
@@ -1746,6 +1749,14 @@ color:var(--vc-btn-color, #eef3ff);background:var(--vc-btn-bg, rgba(255,255,255,
 [data-vc-avatar] .vc-start,[data-vc-avatar] .vc-end{display:none}
 [data-vc-avatar][data-state="idle"] .vc-start,[data-vc-avatar][data-state="error"] .vc-start{display:inline-flex}
 [data-vc-avatar][data-state="listening"] .vc-end,[data-vc-avatar][data-state="thinking"] .vc-end,[data-vc-avatar][data-state="speaking"] .vc-end{display:inline-flex}
+[data-vc-avatar] .vc-mic-note{flex:none;font-size:10px;line-height:13px;color:var(--vc-text-muted, #9fb0d6);opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-vc-avatar] .vc-notice{display:none;flex:none;padding:5px 8px;border-radius:10px;border:1px solid rgba(255,196,95,.3);background:rgba(255,196,95,.10);color:var(--vc-notice-color, #ffd58a);font-size:10px;line-height:1.35;white-space:pre-line;max-height:54px;overflow:auto}
+[data-vc-avatar] .vc-notice[data-visible="1"]{display:block}
+[data-vc-avatar] .vc-notice[data-level="error"]{border-color:rgba(255,118,118,.4);background:rgba(255,118,118,.10);color:var(--vc-dot-error, #ff8f8f)}
+[data-vc-avatar] .vc-hold-row{display:none;flex:none;align-items:center;gap:6px}
+[data-vc-avatar] .vc-hold-row[data-visible="1"]{display:flex}
+[data-vc-avatar] .vc-hold{flex:none}
+[data-vc-avatar] .vc-hold-hint{font-size:10px;color:var(--vc-text-muted, #9fb0d6);opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-vc-avatar] .vc-stage{position:relative;flex:1 1 auto;min-height:var(--vc-stage-height, 152px);display:grid;place-items:center;overflow:hidden;background:var(--vc-stage-bg, transparent);border-radius:var(--vc-stage-radius, 14px)}
 [data-vc-avatar] .vc-fish{position:relative;display:grid;place-items:center;filter:drop-shadow(0 10px 18px rgba(0,0,0,.35));transition:filter .3s ease,transform .3s ease}
 [data-vc-avatar] .vc-fish-svg{display:block;width:186px;height:155px;overflow:visible}
@@ -2035,6 +2046,28 @@ function createAvatar(options = {}) {
   actions.appendChild(startButton);
   actions.appendChild(endButton);
   actions.appendChild(receipt);
+
+  const micNote = element(doc, 'div', {
+    class: 'vc-mic-note',
+  }, '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.');
+
+  const notice = element(doc, 'div', {
+    class: 'vc-notice',
+    'data-visible': '0',
+    'data-level': 'info',
+    role: 'status',
+    'aria-live': 'polite',
+  });
+
+  const holdRow = element(doc, 'div', { class: 'vc-hold-row', 'data-visible': '0' });
+  const holdButton = element(doc, 'button', {
+    class: 'vc-btn vc-hold',
+    type: 'button',
+    'aria-label': '按住说话 / Hold to talk',
+    title: '按住说话 / Hold to talk',
+  }, '按住说话');
+  holdRow.appendChild(holdButton);
+  holdRow.appendChild(element(doc, 'span', { class: 'vc-hold-hint' }, '松开结束 / release to send'));
   head.appendChild(dot);
   head.appendChild(label);
   head.appendChild(picker);
@@ -2257,6 +2290,9 @@ function createAvatar(options = {}) {
 
   panel.appendChild(head);
   panel.appendChild(stage);
+  panel.appendChild(micNote);
+  panel.appendChild(notice);
+  panel.appendChild(holdRow);
   panel.appendChild(bubble);
   panel.appendChild(partial);
   panel.appendChild(sheet);
@@ -2337,6 +2373,34 @@ function createAvatar(options = {}) {
 
   function cycleCharacter(notify) {
     return selectCharacter(nextCharacterId(characterId()), notify !== false);
+  }
+
+  let holding = false;
+  const beginHold = (event) => {
+    if (disposed || holding) return;
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    holding = true;
+    if (onAction) onAction('hold-start');
+  };
+  const endHold = (event) => {
+    if (!holding) return;
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    holding = false;
+    if (onAction) onAction('hold-end');
+  };
+  if (typeof holdButton.addEventListener === 'function') {
+    holdButton.addEventListener('pointerdown', beginHold);
+    holdButton.addEventListener('pointerup', endHold);
+    holdButton.addEventListener('pointercancel', endHold);
+    holdButton.addEventListener('pointerleave', endHold);
+    holdButton.addEventListener('keydown', (event) => {
+      if (!event || event.repeat) return;
+      if (event.key === ' ' || event.key === 'Enter' || event.code === 'Space') beginHold(event);
+    });
+    holdButton.addEventListener('keyup', (event) => {
+      if (!event) return;
+      if (event.key === ' ' || event.key === 'Enter' || event.code === 'Space') endHold(event);
+    });
   }
 
   const handleStart = () => {
@@ -3273,9 +3337,38 @@ function createAvatar(options = {}) {
   setCollapsed(readStore(FOLD_KEY) === '1');
   syncThemeSection();
 
+  function setNotice(text, level) {
+    if (disposed) return '';
+    const value = typeof text === 'string' ? text.trim() : '';
+    const kind = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info';
+    notice.textContent = value;
+    notice.setAttribute('data-level', kind);
+    notice.setAttribute('data-visible', value === '' ? '0' : '1');
+    return value;
+  }
+
+  function setHoldFallback(visible) {
+    if (disposed) return false;
+    const on = !!visible;
+    holdRow.setAttribute('data-visible', on ? '1' : '0');
+    return on;
+  }
+
+  function setMicNote(text) {
+    if (disposed) return '';
+    const value = typeof text === 'string' && text.trim() !== ''
+      ? text.trim()
+      : '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.';
+    micNote.textContent = value;
+    return value;
+  }
+
   return {
     root,
     setState,
+    setNotice,
+    setHoldFallback,
+    setMicNote,
     setLevel,
     setSubtitle,
     setPartial,
@@ -3515,6 +3608,41 @@ function createVad(config) {
 }
 
 /**
+ * Microphone failures are not interchangeable: a denied permission needs the OS
+ * settings path, a missing device needs hardware advice, and a busy device needs
+ * the other app quit. Keep the copy bilingual so it works in both locales.
+ */
+function microphoneErrorInfo(error) {
+  const name = error && typeof error.name === 'string' ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+    return {
+      state: 'denied',
+      code: 'permission',
+      message: '麦克风权限被拒绝 · Microphone access denied — macOS：系统设置 → 隐私与安全性 → 麦克风，允许 DeepSeek Harness 后点「开始通话」重试 / allow DeepSeek Harness in System Settings → Privacy & Security → Microphone, then retry.',
+    };
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+    return {
+      state: 'missing',
+      code: 'no-device',
+      message: '没有检测到麦克风 · No microphone found — 请连接麦克风，或在系统声音设置里确认输入设备后重试 / connect a microphone and check the input device, then retry.',
+    };
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+    return {
+      state: 'busy',
+      code: 'busy',
+      message: '麦克风被其他应用占用 · Microphone is busy — 关掉正在使用麦克风的应用后重试 / quit the app using the mic, then retry.',
+    };
+  }
+  return {
+    state: 'error',
+    code: 'capture',
+    message: '麦克风不可用 · Microphone unavailable — ' + ((error && error.message) || 'unknown error') + ' / retry after checking the device.',
+  };
+}
+
+/**
  * Engine: one microphone stream, one VAD, partial re-decoding every `cadenceMs`,
  * a sentence playback queue that can be interrupted by the next user turn.
  */
@@ -3524,6 +3652,7 @@ function createAudioEngine(deps) {
     level: 0,
     partial: '',
     error: '',
+    mic: { state: 'idle', code: '', message: '' },
   };
   const vadConfig = {
     threshold: 0.012,
@@ -3566,6 +3695,7 @@ function createAudioEngine(deps) {
     state.phase = phase;
     if (extra && typeof extra.partial === 'string') state.partial = extra.partial;
     if (extra && typeof extra.error === 'string') state.error = extra.error;
+    if (extra && extra.mic && typeof extra.mic === 'object') state.mic = extra.mic;
     if (phase !== 'speaking') state.level = 0;
     emit();
   }
@@ -3787,16 +3917,20 @@ function createAudioEngine(deps) {
     if (running || disposed) return;
     const token = ++startToken;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setPhase('error', { error: 'microphone unavailable' });
+      const info = { state: 'error', code: 'unavailable', message: '这个窗口拿不到麦克风接口 · Microphone API unavailable in this window.' };
+      setPhase('error', { error: info.message, mic: info });
       return;
     }
     let stream;
+    state.mic = { state: 'prompting', code: '', message: '' };
+    emit();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (error) {
-      setPhase('error', { error: (error && error.message) || 'microphone permission denied' });
+      const info = microphoneErrorInfo(error);
+      setPhase('error', { error: info.message, mic: info });
       return;
     }
     if (token !== startToken || disposed) {
@@ -3853,6 +3987,7 @@ function createAudioEngine(deps) {
     processor.connect(sink);
     sink.connect(audioContext.destination);
     running = true;
+    state.mic = { state: 'granted', code: '', message: '' };
     setPhase('listening');
   }
 
@@ -3917,6 +4052,9 @@ function createAudioEngine(deps) {
     },
     get listening() {
       return running;
+    },
+    get mic() {
+      return { ...state.mic };
     },
   };
 }
@@ -4421,6 +4559,10 @@ const HOTKEY_PENDING_TTL_MS = 30000;
 const HOTKEY_HUD_HIDE_MS = 4000;
 const HOTKEY_SPEAK_GUARD_MS = 800;
 const HOTKEY_BUFFER_SIZE = 4096;
+const HOTKEY_RESERVED_KEYS = new Set([
+  'ctrl+w', 'ctrl+t', 'ctrl+n', 'ctrl+r', 'ctrl+shift+w',
+  'meta+q', 'meta+w', 'meta+m', 'meta+r', 'alt+f4',
+]);
 
 const HOTKEY_LABELS = {
   idle: '待命',
@@ -4633,6 +4775,98 @@ function hotkeyIsModifierRelease(event, binding) {
   return false;
 }
 
+function hotkeyCanonicalKey(binding) {
+  if (!binding) return '';
+  const mods = [];
+  if (binding.meta) mods.push('meta');
+  if (binding.ctrl) mods.push('ctrl');
+  if (binding.alt) mods.push('alt');
+  if (binding.shift) mods.push('shift');
+  let key = String(binding.key || '').toLowerCase();
+  if (/^key[a-z]$/.test(key)) key = key.slice(3);
+  mods.push(key);
+  return mods.join('+');
+}
+
+/**
+ * Binding attempts, in order: the user's key, the same key plus a modifier, then
+ * the panel button (returned as mode "button" when every attempt fails).
+ */
+function hotkeyCandidateSpecs(spec) {
+  const base = parseHotkey(spec);
+  const list = [base.spec];
+  if (!base.alt) list.push('AltLeft+' + base.spec);
+  if (!base.ctrl) list.push('ControlLeft+' + base.spec);
+  if (!base.alt && !base.ctrl) list.push('ControlLeft+AltLeft+' + base.spec);
+  return list.filter((item, index) => list.indexOf(item) === index);
+}
+
+function hotkeyBindingNotice(result) {
+  if (!result || result.mode === 'hotkey') return '';
+  const original = result.original || HOTKEY_DEFAULT_SPEC;
+  if (result.mode === 'fallback') {
+    return '热键 ' + original + ' 无法注册（可能被其他应用占用），已切换到 ' + result.spec + '。\n'
+      + 'Hotkey ' + original + ' could not be registered (maybe taken by another app); using ' + result.spec + ' instead.\n'
+      + '也可用面板「按住说话」按钮。/ The panel’s “Hold to talk” button always works.';
+  }
+  return '热键不可用（可能被其他应用占用，或只在窗口有焦点时生效）。\n'
+    + 'Hotkey unavailable — it may be taken by another app, and it only works while this window is focused.\n'
+    + '请用面板「按住说话」按钮。/ Use “Hold to talk” on the panel.';
+}
+
+/**
+ * Try each candidate against the real keyboard target. A host that throws from
+ * addEventListener (or a combo reserved by the browser) advances to the next
+ * candidate instead of silently disabling push-to-talk.
+ */
+function hotkeyBind(keyTarget, spec, handlers) {
+  const original = parseHotkey(spec).spec;
+  const candidates = hotkeyCandidateSpecs(original);
+  const tried = [];
+  const failed = () => {
+    const result = { ok: false, mode: 'button', spec: '', binding: null, original, tried, notice: '' };
+    result.notice = hotkeyBindingNotice(result);
+    return result;
+  };
+  if (!keyTarget || typeof keyTarget.addEventListener !== 'function') {
+    tried.push({ spec: original, reason: 'no-target' });
+    return failed();
+  }
+  for (const candidate of candidates) {
+    const parsed = parseHotkey(candidate);
+    if (HOTKEY_RESERVED_KEYS.has(hotkeyCanonicalKey(parsed))) {
+      tried.push({ spec: candidate, reason: 'reserved' });
+      continue;
+    }
+    try {
+      keyTarget.addEventListener('keydown', handlers.onKeyDown);
+      keyTarget.addEventListener('keyup', handlers.onKeyUp);
+      const result = {
+        ok: true,
+        mode: candidate === original ? 'hotkey' : 'fallback',
+        spec: candidate,
+        binding: parsed,
+        original,
+        tried,
+        notice: '',
+      };
+      if (result.mode === 'fallback') result.notice = hotkeyBindingNotice(result);
+      return result;
+    } catch (error) {
+      tried.push({ spec: candidate, reason: 'error', message: hotkeyErrorMessage(error) });
+      try {
+        if (typeof keyTarget.removeEventListener === 'function') keyTarget.removeEventListener('keydown', handlers.onKeyDown);
+      } catch {
+      }
+      try {
+        if (typeof keyTarget.removeEventListener === 'function') keyTarget.removeEventListener('keyup', handlers.onKeyUp);
+      } catch {
+      }
+    }
+  }
+  return failed();
+}
+
 function hotkeyReadSpec() {
   try {
     if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
@@ -4788,6 +5022,8 @@ function createHotkey(deps) {
     doc: null,
     win: null,
     listeners: null,
+    binding: null,
+    bindingNotice: '',
     token: 0,
   };
 
@@ -5399,7 +5635,6 @@ function createHotkey(deps) {
     state.win = win;
     if (doc) hotkeyEnsureStyles(doc);
     const keyTarget = doc && typeof doc.addEventListener === 'function' ? doc : win;
-    if (!keyTarget || typeof keyTarget.addEventListener !== 'function') return hotkeyNoop;
 
     const onKeyDown = (event) => {
       if (!event || event.repeat) return;
@@ -5420,13 +5655,20 @@ function createHotkey(deps) {
       abortPress();
     };
 
-    try {
-      keyTarget.addEventListener('keydown', onKeyDown);
-      keyTarget.addEventListener('keyup', onKeyUp);
-    } catch (error) {
-      hotkeyNoteError('listeners', error);
+    const bound = hotkeyBind(keyTarget, state.hotkey.spec, { onKeyDown, onKeyUp });
+    state.binding = bound;
+    state.bindingNotice = bound.notice;
+    if (!bound.ok) {
+      hotkeyNoteError('listeners', (bound.tried || []).map((entry) => entry.spec + ':' + entry.reason).join(','));
+      setPhase('idle', bound.notice);
+      hotkeySafeCall(options.onBinding, bound);
       return hotkeyNoop;
     }
+    state.hotkey = bound.binding;
+    if (bound.mode === 'fallback') {
+      setPhase('idle', bound.notice);
+    }
+    hotkeySafeCall(options.onBinding, bound);
     const blurTarget = win && win !== keyTarget && typeof win.addEventListener === 'function' ? win : keyTarget;
     try {
       blurTarget.addEventListener('blur', onBlur);
@@ -5476,11 +5718,17 @@ function createHotkey(deps) {
       pending: Array.isArray(state.pending) ? state.pending.length : 0,
       installed: state.installed,
       recording: !!state.recording,
-      hotkey: state.hotkey.spec,
+      hotkey: state.hotkey && state.hotkey.spec,
+      binding: state.binding,
+      bindingNotice: state.bindingNotice,
     };
   }
 
-  return { install, dispose, status, press, release, abort: abortPress };
+  function binding() {
+    return state.binding;
+  }
+
+  return { install, dispose, status, binding, press, release, abort: abortPress };
 }
 
 const __hotkeyTest = {
@@ -5491,6 +5739,10 @@ const __hotkeyTest = {
   setClock: hotkeySetClock,
   resetClock: hotkeyResetClock,
   DEFAULT_HOTKEY: HOTKEY_DEFAULT_SPEC,
+  candidates: hotkeyCandidateSpecs,
+  canonicalKey: hotkeyCanonicalKey,
+  bind: hotkeyBind,
+  bindingNotice: hotkeyBindingNotice,
   MIN_PRESS_MS: HOTKEY_MIN_PRESS_MS,
   HUD_HIDE_MS: HOTKEY_HUD_HIDE_MS,
   PENDING_TTL_MS: HOTKEY_PENDING_TTL_MS,
@@ -5504,6 +5756,8 @@ const CHARACTER_KEY = 'dsh.voice-companion.character';
 const FACE_STORE_KEY = 'dsh.voice-companion.face';
 const MODE_KEY = 'dsh.voice-companion.mode';
 const THEME_ACTIVE_KEY = 'dsh.voice-companion.theme.active';
+const MIC_INTRO_KEY = 'dsh.voice-companion.mic-intro';
+const MIC_DEFAULT_NOTE = '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.';
 const FILLERS = ['嗯，我看一下。', '好呀。', '我在呢。'];
 
 function storedValue(key) {
@@ -5538,6 +5792,38 @@ function storedFace() {
   }
 }
 
+/**
+ * One-time consent hint, shown before the first getUserMedia call. The flag is
+ * written immediately so a denied prompt does not replay the explainer.
+ */
+function micIntroOnce() {
+  if (storedValue(MIC_INTRO_KEY) === '1') return false;
+  storeValue(MIC_INTRO_KEY, '1');
+  return true;
+}
+
+/** Turn the engine's structured mic state into the panel's recovery copy. */
+function micPermissionNotice(mic) {
+  const code = mic && mic.code;
+  if (code === 'permission') {
+    return '麦克风权限被拒绝 · Microphone access denied\nmacOS：系统设置 → 隐私与安全性 → 麦克风，允许 DeepSeek Harness 后点「开始通话」重试 / System Settings → Privacy & Security → Microphone, then retry.';
+  }
+  if (code === 'no-device') {
+    return '没有检测到麦克风 · No microphone found\n请连接麦克风或在系统声音设置里确认输入设备后，点「开始通话」重试 / connect a microphone and retry.';
+  }
+  if (code === 'busy') {
+    return '麦克风被其他应用占用 · Microphone is busy\n关掉正在使用麦克风的应用后，点「开始通话」重试 / quit the app using the mic, then retry.';
+  }
+  if (code === 'unavailable') {
+    return '这个窗口拿不到麦克风接口 · Microphone API unavailable in this window.';
+  }
+  return (mic && mic.message) || '麦克风不可用 · Microphone unavailable';
+}
+
+/**
+ * A denied permission is never cached: every click starts a fresh getUserMedia
+ * call, so granting access in System Settings works without a page reload.
+ */
 function voiceError(kind, message) {
   const error = new Error(message);
   error.kind = kind;
@@ -5759,12 +6045,26 @@ function apply(ctx) {
   async function startCall() {
     if (runtime.active) return;
     runtime.active = true;
+    const intro = micIntroOnce();
+    if (runtime.avatar && typeof runtime.avatar.setMicNote === 'function') {
+      runtime.avatar.setMicNote(MIC_DEFAULT_NOTE);
+    }
+    if (intro && runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
+      runtime.avatar.setNotice('首次使用会请求麦克风权限：只在本机识别，音频不出机器。\nFirst use asks for microphone access; recognition stays on this device.', 'info');
+    }
     runtime.avatar && runtime.avatar.setSubtitle('喂，我在。', { role: 'assistant' });
     await runtime.engine.start();
     if (!runtime.engine.listening) {
       runtime.active = false;
+      const mic = typeof runtime.engine.mic === 'object' && runtime.engine.mic ? runtime.engine.mic : null;
+      if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
+        runtime.avatar.setNotice(micPermissionNotice(mic), 'error');
+      }
+      runtime.lastMic = mic;
       return;
     }
+    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') runtime.avatar.setNotice('');
+    runtime.lastMic = runtime.engine.mic;
     startPolling();
     void warmFillers();
     try {
@@ -5781,6 +6081,7 @@ function apply(ctx) {
     runtime.engine.stop();
     runtime.avatar && runtime.avatar.setState('idle');
     runtime.avatar && runtime.avatar.setSubtitle('通话结束。');
+    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') runtime.avatar.setNotice('');
   }
 
   /**
@@ -5884,6 +6185,8 @@ function apply(ctx) {
       onAction: (name, value) => {
         if (name === 'start') void startCall();
         if (name === 'end') endCall();
+        if (name === 'hold-start' && runtime.hotkey) runtime.hotkey.press();
+        if (name === 'hold-end' && runtime.hotkey) runtime.hotkey.release();
         if (name === 'character') setCharacter(value);
         if (name === 'mode') setMode(value);
         if (name === 'face') log('face', value);
@@ -5943,6 +6246,20 @@ function apply(ctx) {
       currentSessionId: () => runtime.sessionId,
       onPhase: (phase) => log('hotkey:phase', phase),
       onSubtitle: (text) => runtime.avatar && runtime.avatar.setSubtitle(text),
+      onBinding: (binding) => {
+        log('hotkey:binding', {
+          mode: binding && binding.mode,
+          spec: binding && binding.spec,
+          tried: binding && binding.tried && binding.tried.length,
+        });
+        if (!runtime.avatar || typeof runtime.avatar.setNotice !== 'function') return;
+        if (binding && binding.mode === 'hotkey') {
+          if (typeof runtime.avatar.setHoldFallback === 'function') runtime.avatar.setHoldFallback(false);
+          return;
+        }
+        if (typeof runtime.avatar.setHoldFallback === 'function') runtime.avatar.setHoldFallback(true);
+        runtime.avatar.setNotice((binding && binding.notice) || '热键不可用 · Hotkey unavailable', binding && binding.mode === 'button' ? 'error' : 'warn');
+      },
     });
     try {
       runtime.hotkey.install();
@@ -5968,7 +6285,14 @@ function apply(ctx) {
     window.__dshVoiceCompanion = {
       start: startCall,
       stop: endCall,
-      status: () => ({ active: runtime.active, phase: runtime.engine && runtime.engine.phase, cursor: runtime.cursor }),
+      status: () => ({
+        active: runtime.active,
+        phase: runtime.engine && runtime.engine.phase,
+        cursor: runtime.cursor,
+        mic: runtime.engine && runtime.engine.mic,
+      }),
+      permission: () => (runtime.engine && runtime.engine.mic) || null,
+      hotkey: () => (runtime.hotkey ? { binding: runtime.hotkey.binding(), status: runtime.hotkey.status() } : null),
       say: (text) => runtime.engine.speak([text]),
       character: (id) => (id === undefined ? runtime.character : setCharacter(id)),
       mode: (next) => (next === undefined ? runtime.mode : setMode(next)),

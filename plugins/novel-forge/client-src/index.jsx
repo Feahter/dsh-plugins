@@ -2,8 +2,6 @@
 import React from 'react'
 import zhPack from '../locale/zh.json'
 import enPack from '../locale/en.json'
-import { App } from './app.jsx'
-import { injectStylesOnce } from './style.js'
 import { zh, en } from './strings.js'
 
 const NS = 'novel-forge'
@@ -12,6 +10,19 @@ const PANEL_KEY = 'novel-forge'
 const PANEL_ID = PANEL_KEY
 
 export const inject = ['slots', 'locale']
+
+/**
+ * 面板本体放在 package-local 动态 chunk 里，首次打开面板才下载/执行。
+ * require.async 由宿主模块系统注入（build.mjs 的 __DSH_REQUIRE__ 定义）。
+ */
+let panelPromise
+function loadPanel() {
+  panelPromise ??= __DSH_REQUIRE__.async('./client.panel.js').catch(error => {
+    panelPromise = null
+    throw error
+  })
+  return panelPromise
+}
 
 /** 侧栏图标：与包根 icon.svg 同一组笔迹。 */
 function PenIcon(props) {
@@ -46,8 +57,6 @@ export function apply(ctx) {
     console.warn('[novel-forge] 注册文案失败：', error)
   }
 
-  ctx.effect(() => injectStylesOnce(document))
-
   const exitPanel = () => {
     try {
       ctx.get('layout')?.selectPanel?.(null)
@@ -56,7 +65,27 @@ export function apply(ctx) {
     }
   }
 
-  const Page = () => React.createElement(App, { onExit: exitPanel })
+  const Page = () => {
+    const [Panel, setPanel] = React.useState(null)
+
+    React.useEffect(() => {
+      let alive = true
+      loadPanel().then(module => {
+        if (alive) setPanel(() => module.Panel)
+      }).catch(error => {
+        console.error('[novel-forge] 面板加载失败：', error)
+      })
+      return () => { alive = false }
+    }, [])
+
+    if (!Panel) {
+      return React.createElement('div', {
+        className: 'nf-panel-loading',
+        style: { padding: '24px', color: 'var(--dsw-alias-label-secondary, #666)' },
+      }, '加载墨炉…')
+    }
+    return React.createElement(Panel, { onExit: exitPanel })
+  }
 
   ctx.effect(() => {
     const disposers = []

@@ -17,6 +17,8 @@ const CHARACTER_KEY = 'dsh.voice-companion.character';
 const FACE_STORE_KEY = 'dsh.voice-companion.face';
 const MODE_KEY = 'dsh.voice-companion.mode';
 const THEME_ACTIVE_KEY = 'dsh.voice-companion.theme.active';
+const MIC_INTRO_KEY = 'dsh.voice-companion.mic-intro';
+const MIC_DEFAULT_NOTE = '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.';
 // Pre-synthesised so the first 0.9 s after the user stops talking is never dead air:
 // the filler starts playing while the model is still thinking.
 const FILLERS = ['嗯，我看一下。', '好呀。', '我在呢。'];
@@ -54,6 +56,38 @@ function storedFace() {
   }
 }
 
+/**
+ * One-time consent hint, shown before the first getUserMedia call. The flag is
+ * written immediately so a denied prompt does not replay the explainer.
+ */
+function micIntroOnce() {
+  if (storedValue(MIC_INTRO_KEY) === '1') return false;
+  storeValue(MIC_INTRO_KEY, '1');
+  return true;
+}
+
+/** Turn the engine's structured mic state into the panel's recovery copy. */
+function micPermissionNotice(mic) {
+  const code = mic && mic.code;
+  if (code === 'permission') {
+    return '麦克风权限被拒绝 · Microphone access denied\nmacOS：系统设置 → 隐私与安全性 → 麦克风，允许 DeepSeek Harness 后点「开始通话」重试 / System Settings → Privacy & Security → Microphone, then retry.';
+  }
+  if (code === 'no-device') {
+    return '没有检测到麦克风 · No microphone found\n请连接麦克风或在系统声音设置里确认输入设备后，点「开始通话」重试 / connect a microphone and retry.';
+  }
+  if (code === 'busy') {
+    return '麦克风被其他应用占用 · Microphone is busy\n关掉正在使用麦克风的应用后，点「开始通话」重试 / quit the app using the mic, then retry.';
+  }
+  if (code === 'unavailable') {
+    return '这个窗口拿不到麦克风接口 · Microphone API unavailable in this window.';
+  }
+  return (mic && mic.message) || '麦克风不可用 · Microphone unavailable';
+}
+
+/**
+ * A denied permission is never cached: every click starts a fresh getUserMedia
+ * call, so granting access in System Settings works without a page reload.
+ */
 function voiceError(kind, message) {
   const error = new Error(message);
   error.kind = kind;
@@ -289,12 +323,26 @@ function apply(ctx) {
   async function startCall() {
     if (runtime.active) return;
     runtime.active = true;
+    const intro = micIntroOnce();
+    if (runtime.avatar && typeof runtime.avatar.setMicNote === 'function') {
+      runtime.avatar.setMicNote(MIC_DEFAULT_NOTE);
+    }
+    if (intro && runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
+      runtime.avatar.setNotice('首次使用会请求麦克风权限：只在本机识别，音频不出机器。\nFirst use asks for microphone access; recognition stays on this device.', 'info');
+    }
     runtime.avatar && runtime.avatar.setSubtitle('喂，我在。', { role: 'assistant' });
     await runtime.engine.start();
     if (!runtime.engine.listening) {
       runtime.active = false;
+      const mic = typeof runtime.engine.mic === 'object' && runtime.engine.mic ? runtime.engine.mic : null;
+      if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
+        runtime.avatar.setNotice(micPermissionNotice(mic), 'error');
+      }
+      runtime.lastMic = mic;
       return;
     }
+    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') runtime.avatar.setNotice('');
+    runtime.lastMic = runtime.engine.mic;
     startPolling();
     void warmFillers();
     try {
@@ -311,6 +359,7 @@ function apply(ctx) {
     runtime.engine.stop();
     runtime.avatar && runtime.avatar.setState('idle');
     runtime.avatar && runtime.avatar.setSubtitle('通话结束。');
+    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') runtime.avatar.setNotice('');
   }
 
   /**
@@ -416,6 +465,8 @@ function apply(ctx) {
       onAction: (name, value) => {
         if (name === 'start') void startCall();
         if (name === 'end') endCall();
+        if (name === 'hold-start' && runtime.hotkey) runtime.hotkey.press();
+        if (name === 'hold-end' && runtime.hotkey) runtime.hotkey.release();
         if (name === 'character') setCharacter(value);
         if (name === 'mode') setMode(value);
         if (name === 'face') log('face', value);
@@ -482,6 +533,22 @@ function apply(ctx) {
       currentSessionId: () => runtime.sessionId,
       onPhase: (phase) => log('hotkey:phase', phase),
       onSubtitle: (text) => runtime.avatar && runtime.avatar.setSubtitle(text),
+      onBinding: (binding) => {
+        // Binding failures are visible twice: a panel banner with the in-app
+        // alternative, and a state log for support screenshots.
+        log('hotkey:binding', {
+          mode: binding && binding.mode,
+          spec: binding && binding.spec,
+          tried: binding && binding.tried && binding.tried.length,
+        });
+        if (!runtime.avatar || typeof runtime.avatar.setNotice !== 'function') return;
+        if (binding && binding.mode === 'hotkey') {
+          if (typeof runtime.avatar.setHoldFallback === 'function') runtime.avatar.setHoldFallback(false);
+          return;
+        }
+        if (typeof runtime.avatar.setHoldFallback === 'function') runtime.avatar.setHoldFallback(true);
+        runtime.avatar.setNotice((binding && binding.notice) || '热键不可用 · Hotkey unavailable', binding && binding.mode === 'button' ? 'error' : 'warn');
+      },
     });
     try {
       runtime.hotkey.install();
@@ -509,7 +576,14 @@ function apply(ctx) {
     window.__dshVoiceCompanion = {
       start: startCall,
       stop: endCall,
-      status: () => ({ active: runtime.active, phase: runtime.engine && runtime.engine.phase, cursor: runtime.cursor }),
+      status: () => ({
+        active: runtime.active,
+        phase: runtime.engine && runtime.engine.phase,
+        cursor: runtime.cursor,
+        mic: runtime.engine && runtime.engine.mic,
+      }),
+      permission: () => (runtime.engine && runtime.engine.mic) || null,
+      hotkey: () => (runtime.hotkey ? { binding: runtime.hotkey.binding(), status: runtime.hotkey.status() } : null),
       say: (text) => runtime.engine.speak([text]),
       character: (id) => (id === undefined ? runtime.character : setCharacter(id)),
       mode: (next) => (next === undefined ? runtime.mode : setMode(next)),

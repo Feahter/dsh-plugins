@@ -283,6 +283,36 @@ check('buttons call onAction with start / end', () => {
   assert.deepEqual(actions, ['start', 'end']);
 });
 
+check('microphone consent line is visible before the first prompt', () => {
+  const note = findByClass(root, 'vc-mic-note');
+  assert.ok(note, 'mic note missing');
+  assert.ok(note.textContent.includes('不出机器'), note.textContent);
+  assert.ok(note.textContent.includes('stays on this device'), note.textContent);
+});
+
+check('hotkey fallback shows the in-app hold button', () => {
+  const row = findByClass(root, 'vc-hold-row');
+  assert.equal(row.getAttribute('data-visible'), '0', 'hidden while the hotkey works');
+  avatar.setHoldFallback(true);
+  assert.equal(row.getAttribute('data-visible'), '1');
+  const hold = findByClass(root, 'vc-hold');
+  hold.listeners.get('pointerdown').forEach((fn) => fn({ preventDefault() {} }));
+  hold.listeners.get('pointerup').forEach((fn) => fn({ preventDefault() {} }));
+  assert.deepEqual(actions.slice(-2), ['hold-start', 'hold-end']);
+  avatar.setHoldFallback(false);
+  assert.equal(row.getAttribute('data-visible'), '0');
+});
+
+check('notice renders and clears the permission recovery copy', () => {
+  avatar.setNotice('麦克风权限被拒绝\n去系统设置开启 / allow in System Settings', 'error');
+  const notice = findByClass(root, 'vc-notice');
+  assert.equal(notice.getAttribute('data-visible'), '1');
+  assert.equal(notice.getAttribute('data-level'), 'error');
+  assert.ok(notice.textContent.includes('系统设置'));
+  avatar.setNotice('');
+  assert.equal(notice.getAttribute('data-visible'), '0');
+});
+
 check('dragging the head moves the panel and remembers the spot', () => {
   const head = findByClass(root, 'vc-head');
   const before = root.style.left;

@@ -17,6 +17,28 @@ const requireModule = id => {
   return MODULES[id]
 }
 
+// 复刻宿主 require.async：按需加载 package-local chunk（client.<name>.js）。
+const chunkCache = new Map()
+requireModule.async = async spec => {
+  const fileName = spec.replace(/^\.\//, '')
+  if (chunkCache.has(fileName)) return chunkCache.get(fileName)
+  let registration = window.__ModuleLoader__.pending.find(item => item.chunk === fileName)
+  if (!registration) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = new URL(`../${fileName}`, location.href).href
+      script.onload = resolve
+      script.onerror = () => reject(new Error(`harness: chunk 加载失败 ${fileName}`))
+      document.head.append(script)
+    })
+    registration = window.__ModuleLoader__.pending.find(item => item.chunk === fileName)
+  }
+  if (!registration) throw new Error(`harness: chunk ${fileName} 没有注册`)
+  const exports = registration.factory(requireModule)
+  chunkCache.set(fileName, exports)
+  return exports
+}
+
 const registrations = []
 const localeRegistrations = []
 const disposers = []

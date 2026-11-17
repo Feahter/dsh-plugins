@@ -12,13 +12,17 @@ window.__ModuleLoader__.load({
     const TRANSCRIBE_PATH = ROUTE_PREFIX + '/transcribe';
 
     const HOTKEY_KEY = 'dsh.voice-control.hotkey';
+    const HOTKEY_TIP_KEY = 'dsh.voice-control.hotkey-tip';
     const DEFAULT_HOTKEY = 'Ctrl+Shift+Space';
+    const HOTKEY_RESERVED = new Set(['ctrl+w', 'ctrl+t', 'ctrl+n', 'ctrl+r', 'meta+q', 'meta+w', 'meta+m', 'alt+f4']);
 
     const SAMPLE_RATE = 16000;
     const MIN_PRESS_MS = 300;
     const MAX_RECORD_MS = 60000;
     const PENDING_TTL_MS = 30000;
     const HUD_HIDE_MS = 1200;
+    const HUD_NOTICE_MS = 9000;
+    const ERROR_HIDE_MS = 9000;
     const SPEAK_GUARD_MS = 500;
     const PLAN_TIMEOUT_MS = 20000;
     const SPEAK_TIMEOUT_MS = 40000;
@@ -123,10 +127,10 @@ window.__ModuleLoader__.load({
       };
       for (let index = 0; index < parts.length - 1; index += 1) {
         const token = parts[index].toLowerCase();
-        if (token === 'ctrl' || token === 'control' || token === 'cmdorctrl') binding.ctrl = true;
-        else if (token === 'shift') binding.shift = true;
-        else if (token === 'alt' || token === 'option') binding.alt = true;
-        else if (token === 'meta' || token === 'cmd' || token === 'command' || token === 'win') binding.meta = true;
+        if (token === 'ctrl' || token === 'control' || token === 'controlleft' || token === 'controlright' || token === 'cmdorctrl') binding.ctrl = true;
+        else if (token === 'shift' || token === 'shiftleft' || token === 'shiftright') binding.shift = true;
+        else if (token === 'alt' || token === 'option' || token === 'altleft' || token === 'altright') binding.alt = true;
+        else if (token === 'meta' || token === 'cmd' || token === 'command' || token === 'win' || token === 'super' || token === 'metaleft' || token === 'metaright') binding.meta = true;
       }
       return binding;
     }
@@ -168,6 +172,86 @@ window.__ModuleLoader__.load({
         }
       } catch (_storageError) {}
       return DEFAULT_HOTKEY;
+    }
+
+    // Binding candidates: the user's chord, the same chord plus a modifier, then
+    // the in-app button. Reserved browser chords are skipped before the attempt.
+    function hotkeyCanonical(binding) {
+      const mods = [];
+      if (binding.meta) mods.push('meta');
+      if (binding.ctrl) mods.push('ctrl');
+      if (binding.alt) mods.push('alt');
+      if (binding.shift) mods.push('shift');
+      let key = String(binding.key || '').toLowerCase();
+      if (/^key[a-z]$/.test(key)) key = key.slice(3);
+      mods.push(key);
+      return mods.join('+');
+    }
+
+    function hotkeyCandidates(spec) {
+      const base = parseHotkey(spec);
+      const list = [base.spec];
+      if (!base.alt) list.push('AltLeft+' + base.spec);
+      if (!base.ctrl) list.push('ControlLeft+' + base.spec);
+      if (!base.alt && !base.ctrl) list.push('ControlLeft+AltLeft+' + base.spec);
+      return list.filter((item, index) => list.indexOf(item) === index);
+    }
+
+    function hotkeyNotice(result) {
+      if (!result || result.mode === 'hotkey') return '';
+      const original = (result && result.original) || DEFAULT_HOTKEY;
+      if (result.mode === 'fallback') {
+        return '热键 ' + original + ' 无法注册（可能被其他应用占用），已切换到 ' + result.spec
+          + '。 / Hotkey ' + original + ' could not be registered (maybe taken); using ' + result.spec + ' instead.';
+      }
+      return '热键 ' + original + ' 不可用（可能被其他应用占用，或只在窗口聚焦时生效）；请用右下角「按住说话」按钮。'
+        + ' / Hotkey unavailable (maybe taken, or only while focused); use the “Hold to talk” button at the bottom right.';
+    }
+
+    function bindHotkey(target, spec, handlers) {
+      const original = parseHotkey(spec).spec;
+      const candidates = hotkeyCandidates(original);
+      const tried = [];
+      const failed = () => {
+        const result = { ok: false, mode: 'button', spec: '', binding: null, original, tried, notice: '' };
+        result.notice = hotkeyNotice(result);
+        return result;
+      };
+      if (!target || typeof target.addEventListener !== 'function') {
+        tried.push({ spec: original, reason: 'no-target' });
+        return failed();
+      }
+      for (const candidate of candidates) {
+        const parsed = parseHotkey(candidate);
+        if (HOTKEY_RESERVED.has(hotkeyCanonical(parsed))) {
+          tried.push({ spec: candidate, reason: 'reserved' });
+          continue;
+        }
+        try {
+          target.addEventListener('keydown', handlers.onKeyDown);
+          target.addEventListener('keyup', handlers.onKeyUp);
+          const result = {
+            ok: true,
+            mode: candidate === original ? 'hotkey' : 'fallback',
+            spec: candidate,
+            binding: parsed,
+            original,
+            tried,
+            notice: '',
+          };
+          if (result.mode === 'fallback') result.notice = hotkeyNotice(result);
+          return result;
+        } catch (error) {
+          tried.push({ spec: candidate, reason: 'error', message: (error && error.message) || String(error) });
+          try {
+            if (typeof target.removeEventListener === 'function') target.removeEventListener('keydown', handlers.onKeyDown);
+          } catch (_removeError) {}
+          try {
+            if (typeof target.removeEventListener === 'function') target.removeEventListener('keyup', handlers.onKeyUp);
+          } catch (_removeError) {}
+        }
+      }
+      return failed();
     }
 
     // Float32 mono @ 16 kHz -> 44 byte header + PCM16 little endian.
@@ -288,12 +372,16 @@ window.__ModuleLoader__.load({
 
     function mapCaptureError(error) {
       const name = error && error.name;
-      if (name === 'NotAllowedError' || name === 'SecurityError') return voiceError('permission', '麦克风权限被拒绝');
-      if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') {
-        return voiceError('deviceMissing', '没有可用的麦克风');
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        return voiceError('permission', '麦克风权限被拒绝 · Microphone access denied — macOS：系统设置 → 隐私与安全性 → 麦克风，允许 DeepSeek Harness 后重试 / allow it in System Settings → Privacy & Security → Microphone, then retry.');
       }
-      if (name === 'NotReadableError' || name === 'TrackStartError') return voiceError('busy', '麦克风被占用');
-      return voiceError('capture', '无法打开麦克风');
+      if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') {
+        return voiceError('deviceMissing', '没有检测到麦克风 · No microphone found — 连接麦克风或检查系统输入设备后重试 / connect one and retry.');
+      }
+      if (name === 'NotReadableError' || name === 'TrackStartError') {
+        return voiceError('busy', '麦克风被其他应用占用 · Microphone is busy — 关掉占用麦克风的应用后重试 / quit the app using it, then retry.');
+      }
+      return voiceError('capture', '无法打开麦克风 · Could not open the microphone');
     }
 
     function stopStream(stream) {
@@ -482,6 +570,7 @@ window.__ModuleLoader__.load({
       ctx: null,
       speech: null,
       hotkey: parseHotkey(DEFAULT_HOTKEY),
+      binding: { mode: 'pending', spec: DEFAULT_HOTKEY, notice: '' },
       state: STATE.IDLE,
       detail: '',
       candidates: null,
@@ -495,6 +584,7 @@ window.__ModuleLoader__.load({
       speakToken: 0,
       transcribeAbort: null,
       hud: null,
+      fallback: null,
       disposers: [],
     };
 
@@ -522,6 +612,9 @@ window.__ModuleLoader__.load({
         label: LABEL[runtime.state] || '',
         detail: runtime.detail,
         pending: Array.isArray(runtime.pending) ? runtime.pending.length : 0,
+        hotkey: runtime.binding && runtime.binding.spec,
+        binding: runtime.binding,
+        fallback: !!runtime.fallback,
       };
     }
 
@@ -597,6 +690,92 @@ window.__ModuleLoader__.load({
       try {
         if (hud.root && typeof hud.root.remove === 'function') hud.root.remove();
       } catch (_removeError) {}
+    }
+
+    function announce(text) {
+      const value = typeof text === 'string' ? text.trim() : '';
+      if (!value) return '';
+      runtime.detail = value;
+      runtime.candidates = null;
+      renderHud();
+      if (runtime.hideTimer !== null) {
+        clock.clearTimeout(runtime.hideTimer);
+        runtime.hideTimer = null;
+      }
+      runtime.hideTimer = clock.setTimeout(() => {
+        runtime.hideTimer = null;
+        if (runtime.state === STATE.IDLE) hideHud();
+      }, HUD_NOTICE_MS);
+      return value;
+    }
+
+    // The in-app entry that always works, even when the chord is taken or the
+    // window cannot receive the key. It is the advertised fallback in the HUD.
+    function mountFallback() {
+      if (runtime.fallback) return runtime.fallback;
+      const doc = typeof document !== 'undefined' ? document : null;
+      if (!doc || !doc.body || typeof doc.createElement !== 'function' || typeof doc.body.appendChild !== 'function') return null;
+      const button = doc.createElement('button');
+      button.setAttribute('data-dsh-voice-control', 'fallback');
+      button.setAttribute('type', 'button');
+      button.setAttribute('aria-label', '按住说话 / Hold to talk');
+      button.textContent = '按住说话 / Hold to talk';
+      button.style.cssText = [
+        'position:fixed',
+        'right:18px',
+        'bottom:18px',
+        'z-index:2147483000',
+        'padding:8px 14px',
+        'border-radius:999px',
+        'border:1px solid rgba(140,170,255,.28)',
+        'background:rgba(18,20,26,.9)',
+        'color:#f4f6fb',
+        'font:600 12px/1.2 system-ui,-apple-system,"PingFang SC",sans-serif',
+        'box-shadow:0 8px 24px rgba(0,0,0,.26)',
+        'cursor:pointer',
+      ].join(';');
+      const down = (event) => {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        beginPress();
+      };
+      const up = (event) => {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        endPress();
+      };
+      const click = (event) => {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      };
+      if (typeof button.addEventListener === 'function') {
+        button.addEventListener('pointerdown', down);
+        button.addEventListener('pointerup', up);
+        button.addEventListener('pointerleave', up);
+        button.addEventListener('pointercancel', up);
+        button.addEventListener('click', click);
+      }
+      doc.body.appendChild(button);
+      runtime.fallback = { button, down, up, click };
+      return runtime.fallback;
+    }
+
+    function unmountFallback() {
+      const fallback = runtime.fallback;
+      runtime.fallback = null;
+      if (!fallback || !fallback.button) return;
+      try {
+        if (typeof fallback.button.remove === 'function') fallback.button.remove();
+        else if (fallback.button.parentNode && typeof fallback.button.parentNode.removeChild === 'function') {
+          fallback.button.parentNode.removeChild(fallback.button);
+        }
+      } catch (_removeError) {}
+    }
+
+    function announceFocusTip() {
+      try {
+        if (typeof localStorage !== 'undefined' && localStorage && localStorage.getItem(HOTKEY_TIP_KEY) === '1') return false;
+        if (typeof localStorage !== 'undefined' && localStorage) localStorage.setItem(HOTKEY_TIP_KEY, '1');
+      } catch (_storageError) {}
+      announce('热键只在窗口聚焦时生效；右下角「按住说话」按钮始终可用。 / Hotkey works only while this window is focused; the corner “Hold to talk” button always works.');
+      return true;
     }
 
     function scheduleHide() {
@@ -784,7 +963,7 @@ window.__ModuleLoader__.load({
       setState(STATE.ERROR, { hint: message });
       clock.setTimeout(() => {
         if (runtime.state === STATE.ERROR) setState(STATE.IDLE);
-      }, HUD_HIDE_MS);
+      }, ERROR_HIDE_MS);
     }
 
     async function applyPlan(plan, confirmation, utterance) {
@@ -939,21 +1118,30 @@ window.__ModuleLoader__.load({
       const onBlur = () => {
         abortPress();
       };
-      if (keyTarget) {
-        keyTarget.addEventListener('keydown', onKeyDown);
-        keyTarget.addEventListener('keyup', onKeyUp);
+      const bound = bindHotkey(keyTarget, runtime.hotkey.spec, { onKeyDown, onKeyUp });
+      runtime.binding = bound;
+      if (bound.ok) {
+        runtime.hotkey = bound.binding;
+        if (bound.mode === 'fallback') announce(bound.notice);
+        else announceFocusTip();
+      } else {
+        announce(bound.notice);
       }
       if (blurTarget && typeof blurTarget.addEventListener === 'function') {
-        blurTarget.addEventListener('blur', onBlur);
+        try {
+          blurTarget.addEventListener('blur', onBlur);
+        } catch (_blurError) {}
       }
+      mountFallback();
       return () => {
-        if (keyTarget) {
+        if (bound.ok && keyTarget && typeof keyTarget.removeEventListener === 'function') {
           keyTarget.removeEventListener('keydown', onKeyDown);
           keyTarget.removeEventListener('keyup', onKeyUp);
         }
         if (blurTarget && typeof blurTarget.removeEventListener === 'function') {
           blurTarget.removeEventListener('blur', onBlur);
         }
+        unmountFallback();
         removeHud();
       };
     }
@@ -1068,6 +1256,9 @@ window.__ModuleLoader__.load({
         parseHotkey,
         matchesHotkey,
         modifierReleased,
+        hotkeyCandidates,
+        bindHotkey,
+        hotkeyNotice,
         readCurrentSessionId,
         setClock,
         resetClock,

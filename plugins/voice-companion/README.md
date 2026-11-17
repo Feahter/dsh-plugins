@@ -14,6 +14,13 @@ v0.3 带来的是：形象可以换成你自己的图、声音可以三槽自选
 | `dsh-realtime-voice`（输入框听写） | `src/client/dictation.js` + `polish.js`，走面板上的「听写」模式 |
 | `dsh-voice-control`（热键单句） | `src/client/hotkey.js`，Ctrl+Shift+Space 按住说话 |
 
+## 热键与麦克风（先看这里）
+
+- 热键 `Ctrl+Shift+Space` 只在 DSH 窗口有焦点时生效（可用 `localStorage['dsh.voice-companion.hotkey']` 改组合）；注册失败或组合被浏览器保留时，会自动试「加修饰键」的候选键，并把最终生效的组合写在面板提示里；候选都不可用时，面板出现「按住说话」按钮，功能不丢。
+- 第一次开始通话前，面板会说明「为什么要麦克风」（只在本机识别，音频不出机器）；拒绝后提示 macOS「系统设置 → 隐私与安全性 → 麦克风」，面板、设置与历史仍可用。
+- 权限拒绝不会被缓存：去系统设置打开后，再点一次「开始通话」就会重新请求，不用刷新页面。
+- 宿主（Electron 桌面壳）目前自动批准权限请求；插件只能在收到拒绝后引导，真正的权限收紧仍需宿主侧 `setPermissionRequestHandler`。
+
 ## 安装
 
 ```bash

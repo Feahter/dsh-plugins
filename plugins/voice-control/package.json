@@ -1,7 +1,7 @@
 {
   "name": "dsh-voice-control",
   "description": "Global voice control for DSH: hold a key, speak, and the utterance is routed to the right Session",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "main": "index.js",
