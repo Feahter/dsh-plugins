@@ -289,7 +289,8 @@ function frozenTestCommand(plugin) {
   if (basePkg?.scripts?.test) return { cmd: basePkg.scripts.test, source: "base", path };
   // 默认分支还没定义该插件的 test（插件比默认分支新）：退回候选命令，但在报告里显式标出，
   // 不允许“没有 test 就静默跳过”——那会让 full 假绿。
-  const candPkg = parse(readFileSync(join(REPO, path)));
+  let candPkg = null;
+  try { candPkg = parse(readFileSync(join(REPO, path))); } catch { candPkg = null; }
   if (candPkg?.scripts?.test) return { cmd: candPkg.scripts.test, source: raw ? "candidate-fallback" : "candidate", path };
   return { cmd: null, source: raw ? "base-no-test" : "missing", path };
 }
@@ -434,8 +435,10 @@ async function execute(level) {
     steps: [], failureRound: session.failureRound, limitations: [],
   };
   if (level === "fast") report.limitations.push("未验证真实 DSH UI（heavy 未实现）");
-  const fallbackPlugins = PLUGIN_ORDER.filter((p) => frozenTestCommand(p).source === "candidate-fallback" || frozenTestCommand(p).source === "candidate");
-  if (fallbackPlugins.length) report.limitations.push(`插件 test 命令取自候选（默认分支未定义）：${fallbackPlugins.join(", ")}`);
+  if (level === "full") {
+    const fallbackPlugins = PLUGIN_ORDER.filter((p) => ["candidate-fallback", "candidate"].includes(frozenTestCommand(p).source));
+    if (fallbackPlugins.length) report.limitations.push(`插件 test 命令取自候选（默认分支未定义）：${fallbackPlugins.join(", ")}`);
+  }
   if (opts.staged) {
     const unstaged = git(["diff", "--name-only"], { allowFail: true }) || "";
     const untracked = git(["ls-files", "--others", "--exclude-standard"], { allowFail: true }) || "";
