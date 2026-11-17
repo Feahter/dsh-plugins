@@ -16,7 +16,7 @@
 | 档位 | 命令 | 实际内容 | 预算 |
 | --- | --- | --- | --- |
 | fast | `node scripts/verify.mjs fast` | `git diff --check`（含 staged）、改动文件的语法门（单子进程批量解析 + 失败复核）、manifest、docs 一致性、router 测试、规则/事故/skill 结构检查、正式测试集未被删除 | 硬 deadline 170s（`DSH_VERIFY_FAST_BUDGET_MS` 可覆盖）；本机实测 46s |
-| full | `node scripts/verify.mjs full` | fast 全部项 + 验证基础设施自测（`scripts/verify.test.mjs`）+ 默认分支冻结的 11 个插件 test + 客户端 harness | 总预算 900s；单插件 180s（novel-forge 360s，实测其套件 271s） |
+| full | `node scripts/verify.mjs full` | fast 全部项 + 验证基础设施自测（`scripts/verify.test.mjs`）+ 默认分支冻结的 11 个插件 test + 客户端 harness | 总预算 1800s（`DSH_VERIFY_FULL_BUDGET_MS` 可覆盖）；单插件 180s（novel-forge 360s） |
 | heavy | `node scripts/verify.mjs heavy` | 真宿主/离线浏览器流程；**P0 未实现**，预期退出 2、`status=BLOCKED`、`reason=HEAVY_NOT_IMPLEMENTED` | P2 总预算 1200s |
 
 常用参数：
@@ -41,8 +41,9 @@ node scripts/verify.mjs heavy --plan
 2. **语法门按改动文件跑，且批量解析。** 设计原写“逐文件独立 spawn”；实测 251 个文件逐个 spawn 要 28–60s，改为只查 `mergeBase..worktree` 的改动文件（含 untracked），在一个子进程里用 `vm.SourceTextModule` 批量解析，解析失败的文件再用真实 `node --check` 复核，避免把 CJS 误判成语法错。无基线时退化为全量并在摘要里标注。
 3. **subjectHash 用 git blob/diff 而非逐文件读取。** 389 个文件逐个 `readFileSync` 在本机实测 4 分 20 秒（换页），改为 `git ls-files -s` + `git diff HEAD --binary` + 仅 untracked 读内容。它仍是内容绑定，但不等同于逐字节快照。
 4. **full 的插件命令取自默认分支 blob**；默认分支缺该文件时用候选并在 `steps[].meta.frozenFrom=candidate` 标出。
-5. **heavy 的 `--staged` 尚未实现**：P0 的 heavy 一律 BLOCKED，`--plan` 只列前提，不加提交场景参数。
-6. **门禁刷新用重跑 `gate install`**；没有 `--refresh`/`uninstall` 子命令，卸装是人工移走 hook（先 `gate status` 确认是本工具的）。
+5. **full 预算从设计 900s 提到 1800s。** 本机实测：一跑 615s（自测 314s），另一跑 1455s（自测 305s + novel-forge 330s，同样是 novel-forge 套件在内存压力下从 5s 抖到 330s）。单步超时 180/360s 不变，总预算按最坏观测再留余量。
+6. **heavy 的 `--staged` 尚未实现**：P0 的 heavy 一律 BLOCKED，`--plan` 只列前提，不加提交场景参数。
+7. **门禁刷新用重跑 `gate install`**；没有 `--refresh`/`uninstall` 子命令，卸装是人工移走 hook（先 `gate status` 确认是本工具的）。
 
 **输出**：通常模式逐项打印 `stepId`、状态、耗时，最后一行给 `runId`、报告路径与总状态。JSON 模式取 `.runId`、`.status`、`.complete`。
 
@@ -234,7 +235,7 @@ node scripts/verify.mjs session resume --id <sessionId> --human-note "已确认�
 | P0 | `bash -n scripts/test-all.sh` | 语法通过 |
 | P0 | `node --test scripts/verify.test.mjs` | 全部用例 0（Node 内置测试入口，不是 verify 子命令） |
 | P0 | `node scripts/verify.mjs policy --check` | 0；打印默认分支 ref/sha、规则哈希、触发项、来源 |
-| P0 | `node scripts/verify.mjs fast` | 0、`complete=true`、`durationMs` 在上限内；干净副本无 `node_modules` 也可跑 |
+| P0 | `node scripts/verify.mjs fast` | 0、`complete=true`、`durationMs` 在上限内；干净副本无 `node_modules` 也可跑（实测 46s） |
 | P0 | `node scripts/verify.mjs full` | 现有依赖齐全时 0；缺依赖时 2/BLOCKED 且列出缺项，**不得宣布 full 已通过** |
 | P0 | `node scripts/verify.mjs heavy --plan` | 0，仅打印阶段计划，不导入浏览器包 |
 | P0 | `node scripts/verify.mjs heavy` | 2/BLOCKED/`HEAVY_NOT_IMPLEMENTED`（P0 预期，不是失败） |

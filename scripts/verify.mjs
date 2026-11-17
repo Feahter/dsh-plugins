@@ -29,7 +29,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO = resolve(HERE, "..");
 const EXIT = { PASS: 0, FAIL: 1, BLOCKED: 2, USAGE: 64 };
 const FAST_BUDGET_MS = Number(process.env.DSH_VERIFY_FAST_BUDGET_MS || 170_000);   // 设计预算 170s
-const FULL_BUDGET_MS = Number(process.env.DSH_VERIFY_FULL_BUDGET_MS || 900_000);   // 设计预算 900s
+const FULL_BUDGET_MS = Number(process.env.DSH_VERIFY_FULL_BUDGET_MS || 1_800_000);   // 实测定标：设计 900s 不够（自测 305s + novel-forge 330s），改 1800s
 const NOISE = new Set([".git", "node_modules", "dist", ".verify"]);
 
 // ───────────────────────── 基础工具 ─────────────────────────
@@ -462,13 +462,17 @@ async function execute(level) {
     if (step.id === "syntax") { report.steps.push(await runSyntaxStep(dir, left)); continue; }
     if (step.id === "policy") { report.steps.push(runPolicyAsStep()); continue; }
     if (step.id === "test-integrity") { report.steps.push(runTestIntegrity()); continue; }
+    const t0 = nowIso();
     const r = await runStep(step, join(dir, "logs"), left);
+    r.startedAt = t0; r.endedAt = nowIso();
     trace(`步骤 ${step.id} → ${r.status} ${r.durationMs}ms`);
     report.steps.push(finishStep(r, dir));
     writeJsonAtomic(join(dir, "report.json"), report);
   }
 
+  trace("末步结束，做 stale 检查");
   const stale = subjectHash() !== subject;
+  trace(`stale=${stale}，写最终报告`);
   report.endedAt = nowIso();
   report.durationMs = Date.now() - startedAt;
   report.complete = !stale && report.steps.every((s) => s.status !== "NOT_RUN");
@@ -480,7 +484,9 @@ async function execute(level) {
   if (stale) report.status = "FAIL";
   if (INTERRUPTED) report.status = "INTERRUPTED";
   writeJsonAtomic(join(dir, "report.json"), report);
+  trace("report.json 已写");
   writeSummary(dir, report);
+  trace("summary.md 已写");
 
   session.runs.push({ runId, level, status: report.status, at: report.endedAt, durationMs: report.durationMs });
   if (report.status === "PASS") session.failureRound = 0;
@@ -494,6 +500,7 @@ async function execute(level) {
 
 function finishStep(r, dir) {
   return {
+    startedAt: r.startedAt || null, endedAt: r.endedAt || null,
     id: r.id, command: r.argv, cwd: rel(r.cwd || REPO), durationMs: r.durationMs,
     exitCode: r.exitCode ?? null, signal: r.signal ?? null, status: r.status,
     summary: r.reason || tailSummary(join(REPO, r.stdout || "x")),
