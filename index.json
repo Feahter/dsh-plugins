@@ -86,17 +86,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795018195
         }
       },
       "versions": [
         {
           "version": "0.4.0",
-          "publishTimestamp": 1795014753,
+          "publishTimestamp": 1795018195,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "e8553f058cb5308cbceea108563da868317b9712",
+            "commit": "a2c4b66ae040f899ffb1dfba5a6c8e9d9b5d9c50",
             "path": "plugins/realtime-voice"
           },
           "engines": {
@@ -192,17 +192,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795018195
         }
       },
       "versions": [
         {
           "version": "0.5.0",
-          "publishTimestamp": 1795014753,
+          "publishTimestamp": 1795018195,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "e8553f058cb5308cbceea108563da868317b9712",
+            "commit": "a2c4b66ae040f899ffb1dfba5a6c8e9d9b5d9c50",
             "path": "plugins/voice-companion"
           },
           "engines": {
