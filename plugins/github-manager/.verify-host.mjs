@@ -442,6 +442,15 @@ assert.equal(response.status, 200);
 assert.equal(response.body.ok, true);
 assert.equal(response.body.data.login, 'octocat');
 
+// Version self-check: shape only — the index fetch is network-dependent, so this
+// must hold whether it succeeds or reports `failed`.
+const versionResponse = await request('GET', '/api/github-manager/version');
+assert.equal(versionResponse.status, 200);
+assert.equal(versionResponse.body.ok, true);
+assert.equal(versionResponse.body.data.plugin, 'dsh-github-manager');
+assert.equal(typeof versionResponse.body.data.current, 'string');
+assert.ok('latest' in versionResponse.body.data && 'updateAvailable' in versionResponse.body.data);
+
 response = await request('GET', '/api/github-manager/repos?limit=5');
 assert.equal(response.body.data.count, 1);
 

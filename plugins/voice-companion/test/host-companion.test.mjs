@@ -215,7 +215,7 @@ function createContext({ controller, stt = defaultStt }) {
  * @param {string[]} [options.replies] Model replies, consumed in order.
  * @param {string[]} [options.sessions]
  */
-function setup({ replies = [], sessions = ['s-1'], stt } = {}) {
+function setup({ replies = [], sessions = ['s-1'], stt, versionChecker } = {}) {
   const { controller, prompts } = createController({ sessions })
   const calls = []
   const fetchImpl = async (url, init) => {
@@ -238,6 +238,7 @@ function setup({ replies = [], sessions = ['s-1'], stt } = {}) {
     fetchImpl,
     getApiKey: async () => 'test-key',
     now: () => (clock += 10),
+    ...(versionChecker === undefined ? {} : { versionChecker }),
   })
 
   const route = (suffix) => {
@@ -255,6 +256,28 @@ const post = (payload) => ({
   body: JSON.stringify(payload),
 })
 
+test('GET /version exposes the version-check payload', async () => {
+  const versionChecker = {
+    check: async ({ refresh }) => ({
+      plugin: 'dsh-voice-companion',
+      current: '0.4.2',
+      latest: '0.4.3',
+      updateAvailable: true,
+      homepage: 'https://example.test/voice-companion',
+      failed: false,
+      refreshed: refresh,
+    }),
+  }
+  const app = setup({ versionChecker })
+  const response = await call(app.route('/version'), {
+    method: 'GET',
+    url: `${ROUTE_PREFIX}/version?refresh=1`,
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.json.ok, true)
+  assert.equal(response.json.data.latest, '0.4.3')
+  assert.equal(response.json.data.updateAvailable, true)
+})
 test('GET /health exposes providers, voices, key state and tracked tasks', async () => {
   const app = setup()
   const response = await call(app.route('/health'), {

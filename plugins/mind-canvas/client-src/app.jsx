@@ -436,6 +436,30 @@ function Canvas(props) {
   )
 }
 
+// ------------------------------------------------------------------ 版本徽标
+/** 有新版本时在顶栏右端显示「新版本 ↑ vX.Y.Z」，点击打开插件页；无更新或失败时不渲染。 */
+function VersionBadge({ t }) {
+  const [version, setVersion] = React.useState(null)
+  React.useEffect(() => {
+    let alive = true
+    api.version().then(data => { if (alive) setVersion(data) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  if (!version || version.updateAvailable !== true || typeof version.latest !== 'string') return null
+  const href = typeof version.homepage === 'string' ? version.homepage : 'https://github.com/Feahter/dsh-plugins'
+  const tip = format(t('updateTip'), { version: `v${version.latest}` })
+  return h('a', {
+    className: 'mc-version',
+    href,
+    target: '_blank',
+    rel: 'noreferrer',
+    title: tip,
+    'aria-label': tip,
+  },
+  h('span', { className: 'mc-version-label' }, t('updateLabel')),
+  h('span', { className: 'mc-version-number' }, `↑ v${version.latest}`))
+}
+
 // --------------------------------------------------------------------- 主页面
 export function MindCanvasPage(props) {
   const t = props.t
@@ -1106,6 +1130,7 @@ export function MindCanvasPage(props) {
       h('button', {
         type: 'button', className: 'mc-btn mc-icon', title: t('deleteDoc'), onClick: () => setDialog({ kind: 'deleteDoc' }),
       }, icons.trash),
+      h(VersionBadge, { t }),
     ),
 
     // 画布

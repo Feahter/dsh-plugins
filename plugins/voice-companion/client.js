@@ -1709,6 +1709,12 @@ border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba
 [data-vc-avatar] .vc-mode[data-mode="dictation"]{background:linear-gradient(180deg,var(--vc-mode-dictation-from, #5fd0a8),var(--vc-mode-dictation-to, #22a37a));border-color:rgba(180,255,224,.5);color:var(--vc-text-on-accent, #04241b)}
 [data-vc-avatar] .vc-mode:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
 [data-vc-avatar] .vc-actions{margin-left:auto;display:flex;gap:6px;flex:none}
+[data-vc-avatar] .vc-version{display:none;appearance:none;flex:none;align-items:center;gap:4px;height:21px;padding:0 8px;border-radius:999px;border:1px solid rgba(200,216,255,.45);background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));color:#fff;font:600 10.5px/1 "PingFang SC","Microsoft YaHei",sans-serif;text-decoration:none;white-space:nowrap;letter-spacing:.02em}
+[data-vc-avatar] .vc-version[data-visible="1"]{display:inline-flex}
+[data-vc-avatar] .vc-version:hover{filter:brightness(1.08)}
+[data-vc-avatar] .vc-version:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
+[data-vc-avatar] .vc-version-label{opacity:.9;font-weight:500}
+[data-vc-avatar] .vc-version-number{font-variant-numeric:tabular-nums}
 [data-vc-avatar] .vc-receipt{display:none;align-items:center;max-width:132px;height:20px;padding:0 8px;border-radius:999px;border:1px solid rgba(103,226,166,.24);background:var(--vc-receipt-bg, rgba(103,226,166,.12));color:var(--vc-receipt-color, #8ff0c4);font:600 10px/1 "PingFang SC","Microsoft YaHei",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
 [data-vc-avatar] .vc-receipt[data-state="pending"]{display:inline-flex}
 [data-vc-avatar] .vc-receipt[data-state="done"]{display:inline-flex;border-color:rgba(103,226,166,.34);background:var(--vc-receipt-bg, rgba(103,226,166,.12));color:var(--vc-receipt-color, #8ff0c4)}
@@ -1737,6 +1743,7 @@ border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba
 [data-vc-avatar][data-collapsed] .vc-picker,
 [data-vc-avatar][data-collapsed] .vc-mode,
 [data-vc-avatar][data-collapsed] .vc-actions,
+[data-vc-avatar][data-collapsed] .vc-version,
 [data-vc-avatar][data-collapsed] .vc-label,
 [data-vc-avatar][data-collapsed] .vc-min{display:none}
 [data-vc-avatar] .vc-btn{appearance:none;border:1px solid var(--vc-btn-border, rgba(255,255,255,.16));border-radius:var(--vc-btn-radius, 999px);padding:var(--vc-btn-padding, 5px 11px);font:600 var(--vc-btn-font-size, 11px)/1.2 inherit;
@@ -2047,6 +2054,20 @@ function createAvatar(options = {}) {
   actions.appendChild(endButton);
   actions.appendChild(receipt);
 
+  const versionLink = element(doc, 'a', {
+    class: 'vc-version',
+    href: 'https://github.com/Feahter/dsh-plugins',
+    target: '_blank',
+    rel: 'noreferrer',
+    'data-visible': '0',
+    'aria-hidden': 'true',
+    tabindex: '-1',
+  });
+  const versionLabel = element(doc, 'span', { class: 'vc-version-label' });
+  const versionNumber = element(doc, 'span', { class: 'vc-version-number' });
+  versionLink.appendChild(versionLabel);
+  versionLink.appendChild(versionNumber);
+
   const micNote = element(doc, 'div', {
     class: 'vc-mic-note',
   }, '麦克风仅在本机识别，音频不出机器 · Mic audio stays on this device.');
@@ -2075,6 +2096,7 @@ function createAvatar(options = {}) {
   head.appendChild(gearButton);
   head.appendChild(minButton);
   head.appendChild(actions);
+  head.appendChild(versionLink);
 
   const stage = element(doc, 'div', { class: 'vc-stage' });
   const ripple1 = element(doc, 'span', { class: 'vc-ripple vc-ripple-1', 'aria-hidden': 'true' });
@@ -2622,7 +2644,7 @@ function createAvatar(options = {}) {
     let current = node;
     while (current && current !== root) {
       const cls = current.getAttribute ? current.getAttribute('class') : null;
-      if (cls && /(^|\s)(vc-chip|vc-btn|vc-mode|vc-min|vc-gear)(\s|$)/.test(cls)) return true;
+      if (cls && /(^|\s)(vc-chip|vc-btn|vc-mode|vc-min|vc-gear|vc-version)(\s|$)/.test(cls)) return true;
       current = current.parentNode;
     }
     return false;
@@ -3363,9 +3385,37 @@ function createAvatar(options = {}) {
     return value;
   }
 
+  function setVersionBadge(badge) {
+    if (disposed) return null;
+    const data = badge && typeof badge === 'object' ? badge : null;
+    if (!data || typeof data.version !== 'string' || data.version === '') {
+      versionLink.setAttribute('data-visible', '0');
+      versionLink.setAttribute('aria-hidden', 'true');
+      versionLink.setAttribute('tabindex', '-1');
+      versionLabel.textContent = '';
+      versionNumber.textContent = '';
+      return null;
+    }
+    const label = typeof data.label === 'string' && data.label !== '' ? data.label : '新版本 / Update';
+    const tip = typeof data.tip === 'string' ? data.tip : '';
+    const href = typeof data.href === 'string' && data.href !== ''
+      ? data.href
+      : 'https://github.com/Feahter/dsh-plugins';
+    versionLink.setAttribute('href', href);
+    versionLink.setAttribute('title', tip);
+    versionLink.setAttribute('aria-label', tip);
+    versionLink.setAttribute('data-visible', '1');
+    versionLink.removeAttribute('aria-hidden');
+    versionLink.removeAttribute('tabindex');
+    versionLabel.textContent = label;
+    versionNumber.textContent = '↑ v' + data.version;
+    return data.version;
+  }
+
   return {
     root,
     setState,
+    setVersionBadge,
     setNotice,
     setHoldFallback,
     setMicNote,
@@ -6199,6 +6249,22 @@ function apply(ctx) {
         if (name === 'theme-design') void designTheme(value);
       },
     });
+
+    requestJson('/version', null, 8000)
+      .then((body) => {
+        const data = body && body.data;
+        if (!data || data.updateAvailable !== true || typeof data.latest !== 'string') return;
+        const version = 'v' + data.latest;
+        if (runtime.avatar && typeof runtime.avatar.setVersionBadge === 'function') {
+          runtime.avatar.setVersionBadge({
+            version: data.latest,
+            href: typeof data.homepage === 'string' ? data.homepage : undefined,
+            label: '新版本 / Update',
+            tip: '新版本 ' + version + ' 已发布，点击前往插件页更新 / Update ' + version + ' is available — click to update on the plugin page',
+          });
+        }
+      })
+      .catch(() => {});
 
     const legacyTheme = storedTheme();
     if (legacyTheme && legacyTheme.name && legacyTheme.tokens && listThemes().length <= 1) {

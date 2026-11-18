@@ -32,7 +32,8 @@
     ".verify-host.mjs",
     ".verify-client.mjs",
     "VERIFY.md",
-    "test"
+    "test",
+    "version-check.js"
   ],
   "scripts": {
     "test": "node .verify-host.mjs && node .verify-client.mjs && node --test test/*.test.mjs",

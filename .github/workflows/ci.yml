@@ -16,6 +16,10 @@ jobs:
         with:
           node-version: 24
 
+      # 版本自查模块的 11 份副本必须与 scripts/version-check.mjs 完全一致。
+      - name: Check version-check copies
+        run: node scripts/sync-version-check.mjs --check
+
       # 一条命令跑完：每个插件的 npm test、无测试插件的语法门、清单/索引一致性、文档校验。
       # 本地等价命令：bash scripts/test-all.sh
       - name: Run all plugin checks

@@ -12,6 +12,7 @@ import { readInspirations } from './src/inspirations.js'
 import { buildPrompt, callModel, modelInfo, normalizeIdeas } from './src/llm.js'
 import { outline, addChildren, findNode, summarize } from './src/outline.js'
 import { importJsonCanvas, toJsonCanvas, toJsonCanvasData } from './src/export.js'
+import { createVersionChecker } from './version-check.js'
 
 export const ROUTE_PREFIX = '/mind-canvas'
 const MAX_BODY_BYTES = 9 * 1024 * 1024
@@ -66,9 +67,15 @@ export function requestRejection(ctx, req) {
   return connection.requestRejection({ headers: req.headers })
 }
 
-export async function route(ctx, store, req, res, url) {
+export async function route(ctx, store, req, res, url, versionChecker) {
   const method = (req.method ?? 'GET').toUpperCase()
   const path = url.pathname.slice(ROUTE_PREFIX.length) || '/'
+
+  if (path === '/version' && method === 'GET') {
+    const data = await versionChecker.check({ refresh: url.searchParams.get('refresh') === '1' })
+    json(res, 200, { ok: true, data })
+    return
+  }
 
   if (path === '/state' && method === 'GET') {
     const state = await store.read()
@@ -381,6 +388,7 @@ export default {
   inject: ['webServer', 'connection'],
   apply(ctx) {
     const store = new Store()
+    const versionChecker = createVersionChecker({ pluginName: name })
 
     for (const definition of createTools(store)) {
       ctx.effect(() => ctx.get('tools')?.register?.(definition))
@@ -397,7 +405,7 @@ export default {
             return
           }
           const url = new URL(req.url ?? '/', 'http://localhost')
-          await route(ctx, store, req, res, url)
+          await route(ctx, store, req, res, url, versionChecker)
         } catch (error) {
           if (res.headersSent) {
             res.end()

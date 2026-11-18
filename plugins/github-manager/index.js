@@ -17,8 +17,11 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { createVersionChecker } from './version-check.js';
+
 const API_ROOT = 'https://api.github.com';
 const ROUTE_PREFIX = '/api/github-manager';
+const versionChecker = createVersionChecker({ pluginName: 'dsh-github-manager' });
 const USER_AGENT = 'dsh-github-manager/1.0';
 const MAX_BODY_BYTES = 256 * 1024;
 const TOKEN_TTL_MS = 60_000;
@@ -1836,6 +1839,9 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
   const effectiveMethod = method === 'HEAD' ? 'GET' : method;
   try {
     if (effectiveMethod === 'GET') {
+      // Version self-check needs no GitHub credential, so it answers before the
+      // status path (which shells out to `gh`).
+      if (route === '/version') return okPayload(await versionChecker.check({ refresh: searchParams.get('refresh') === '1' }));
       // Force a fresh credential lookup: this is the panel's "Retry" path, so a
       // `gh auth login` performed after boot is picked up without a restart.
       if (route === '/status') return okPayload(await readStatus(true));

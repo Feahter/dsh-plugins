@@ -17,6 +17,8 @@ window.__ModuleLoader__.load({
       refresh: '刷新',
       loading: '正在加载…',
       retry: '重试',
+      updateLabel: '新版本',
+      updateTip: '新版本 {version} 已发布，点击前往插件页更新',
       notConfiguredTitle: '还没有找到可用的 GitHub 凭据',
       notConfiguredBody: '插件会自动复用本机 gh CLI 的登录（gh auth login），或读取 GH_TOKEN / GITHUB_TOKEN 环境变量。点“重试”会重新检测，无需重启。',
       setupStep1: '方式一（推荐）：本机 gh CLI 已登录时直接点“重试”；未登录则运行：',
@@ -153,6 +155,8 @@ window.__ModuleLoader__.load({
       refresh: 'Refresh',
       loading: 'Loading…',
       retry: 'Retry',
+      updateLabel: 'Update',
+      updateTip: 'Update {version} is available — click to update on the plugin page',
       notConfiguredTitle: 'No GitHub credential found',
       notConfiguredBody: 'The plugin reuses your local gh CLI login (gh auth login), or reads GH_TOKEN / GITHUB_TOKEN from the Host environment. Click “Retry” to re-check — no restart needed.',
       setupStep1: 'Option 1 (recommended): if gh CLI is logged in, just click “Retry”; otherwise run:',
@@ -386,6 +390,34 @@ window.__ModuleLoader__.load({
       } finally {
         window.clearTimeout(timer);
       }
+    }
+
+    // ----------------------------------------------------------- version badge
+
+    // 有新版本时显示「新版本 ↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时
+    // 什么都不渲染（api 失败只会 throw，这里吞掉）。
+    function VersionBadge({ t }) {
+      const [data, setData] = React.useState(null);
+      React.useEffect(() => {
+        let alive = true;
+        api('/version').then((value) => {
+          if (alive && value) setData(value);
+        }).catch(() => {});
+        return () => { alive = false; };
+      }, []);
+      if (!data || data.updateAvailable !== true || typeof data.latest !== 'string') return null;
+      const href = typeof data.homepage === 'string' ? data.homepage : 'https://github.com/Feahter/dsh-plugins';
+      const tip = t('updateTip', { version: 'v' + data.latest });
+      return h('a', {
+        className: 'ghm-version',
+        href,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: tip,
+        'aria-label': tip,
+      },
+      h('span', { className: 'ghm-versionLabel' }, t('updateLabel')),
+      h('span', { className: 'ghm-versionNumber' }, '↑ v' + data.latest));
     }
 
     function parseLabels(value) {
@@ -1485,7 +1517,7 @@ window.__ModuleLoader__.load({
             disabled: loading,
             title: t('refresh'),
             'aria-label': t('refresh'),
-          }, loading ? h(Spinner) : h(RefreshIcon, { size: 15 }), h('span', null, t('refresh')))));
+          }, loading ? h(Spinner) : h(RefreshIcon, { size: 15 }), h('span', null, t('refresh'))), h(VersionBadge, { t })));
 
       let body;
       if (loading && !status) {
@@ -1782,6 +1814,10 @@ window.__ModuleLoader__.load({
       '.ghm-title{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em;color:var(--dsw-alias-label-primary)}',
       '.ghm-subtitle{margin:2px 0 0;font-size:12px;color:var(--dsw-alias-label-secondary)}',
       '.ghm-headerRight{display:flex;align-items:center;gap:10px;flex:none}',
+      '.ghm-version{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;text-decoration:none;white-space:nowrap;color:var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));font-size:11.5px;font-weight:600;flex:none}',
+      '.ghm-version:hover{filter:brightness(1.08)}',
+      '.ghm-versionLabel{opacity:.9;font-weight:500}',
+      '.ghm-versionNumber{font-variant-numeric:tabular-nums}',
       '.ghm-account{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 10px 4px 4px;border:0.5px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1)}',
       '.ghm-avatar{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:none;background:var(--dsw-alias-bg-layer-2)}',
       '.ghm-avatarFallback{display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}',

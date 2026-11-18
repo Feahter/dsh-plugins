@@ -11,6 +11,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
 import { apply } from '../index.js'
 import { MAX_TEXT_CHARS, ROUTES } from '../host/refine.js'
 
@@ -320,4 +321,44 @@ test('refine: aborts a pending translation when the client disconnects', async (
   // A real disconnect aborts immediately; the handler's own 20s deadline must
   // not be what makes this pass.
   assert.ok(elapsed < 5000, `abort took ${elapsed}ms`)
+})
+
+test('version: the plugin release probe mounts at its own exact route', async (t) => {
+  const host = await startHost(undefined)
+  t.after(() => host.close())
+  assert.equal(host.routes.has('/plugins/realtime-voice/version'), true, 'version route must be registered')
+
+  // A non-GET is refused before any index fetch, so this stays offline.
+  const refused = await fetch(`${host.origin}/plugins/realtime-voice/version`, { method: 'POST' })
+  assert.equal(refused.status, 405)
+
+  // Swap only the index fetch for a local fixture; the test's own HTTP calls pass through.
+  const realFetch = globalThis.fetch
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  const homepage = 'https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice'
+  globalThis.fetch = (url, init) => {
+    if (String(url).includes('index.json')) {
+      return Promise.resolve({
+        ok: true,
+        async json() {
+          return { plugins: [{ name: 'dsh-realtime-voice', homepage, versions: [{ version: '0.0.1' }, { version: '99.0.0' }] }] }
+        },
+      })
+    }
+    return realFetch(url, init)
+  }
+  try {
+    const response = await realFetch(`${host.origin}/plugins/realtime-voice/version?refresh=1`)
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.data.plugin, 'dsh-realtime-voice')
+    assert.equal(body.data.current, pkg.version)
+    assert.equal(body.data.latest, '99.0.0')
+    assert.equal(body.data.updateAvailable, true)
+    assert.equal(body.data.failed, false)
+    assert.equal(body.data.homepage, homepage)
+  } finally {
+    globalThis.fetch = realFetch
+  }
 })

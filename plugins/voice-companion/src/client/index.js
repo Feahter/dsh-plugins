@@ -480,6 +480,23 @@ function apply(ctx) {
       },
     });
 
+    // 版本自查：只在宿主报告有新版本时挂徽标，失败或已最新时什么都不渲染。
+    requestJson('/version', null, 8000)
+      .then((body) => {
+        const data = body && body.data;
+        if (!data || data.updateAvailable !== true || typeof data.latest !== 'string') return;
+        const version = 'v' + data.latest;
+        if (runtime.avatar && typeof runtime.avatar.setVersionBadge === 'function') {
+          runtime.avatar.setVersionBadge({
+            version: data.latest,
+            href: typeof data.homepage === 'string' ? data.homepage : undefined,
+            label: '新版本 / Update',
+            tip: '新版本 ' + version + ' 已发布，点击前往插件页更新 / Update ' + version + ' is available — click to update on the plugin page',
+          });
+        }
+      })
+      .catch(() => {});
+
     // 0.3 只把快照写进 theme.active；主题库还是空的时候把它收编成一条自定义主题，
     // 升级后用户原来的配色不会因为「库里没有」被重置成默认。
     const legacyTheme = storedTheme();

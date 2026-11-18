@@ -2271,6 +2271,16 @@ async function phaseRoutes() {
     return `sessions=${response.json.corpus.sessions}`;
   });
 
+  await check('WEB.1b', 'GET /api/archive-rsi/version returns {ok:true} from the version self-check', async () => {
+    const response = await httpCall(handler, { url: '/api/archive-rsi/version' });
+    assertEqual(response.status, 200, `status (body ${JSON.stringify(response.json).slice(0, 200)})`);
+    assert(response.json && response.json.ok === true, `body.ok: ${JSON.stringify(response.json).slice(0, 200)}`);
+    assert(response.json.data && response.json.data.plugin === 'dsh-archive-rsi', 'body.data.plugin');
+    assert(typeof response.json.data.current === 'string', 'body.data.current');
+    assert('latest' in response.json.data && 'updateAvailable' in response.json.data, 'version payload keys');
+    return `current=${response.json.data.current} latest=${JSON.stringify(response.json.data.latest)}`;
+  });
+
   await check('WEB.2', 'PATCH /api/archive-rsi/sessions/:id updates the entry with a JSON body', async () => {
     const listed = await callTool(stub, 'archive_list', {});
     assert(listed && listed.ok === true && Array.isArray(listed.entries) && listed.entries.length > 0, 'no synced entry to patch');

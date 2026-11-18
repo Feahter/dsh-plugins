@@ -4,7 +4,7 @@ import { Shelf } from './components/Shelf.jsx'
 import { CreateWizard } from './components/CreateWizard.jsx'
 import { Workbench } from './components/Workbench.jsx'
 import { Icon, ToastHost } from './components/bits.jsx'
-import { getToolState, setToolState } from './api.js'
+import { getToolState, getVersion, setToolState } from './api.js'
 import { zh } from './strings.js'
 
 function Seal() {
@@ -17,6 +17,29 @@ function Seal() {
       background: 'var(--nf-cinnabar-soft)', borderRadius: 2,
     },
   }, '墨')
+}
+
+// 有新版本时在顶栏右端显示「新版本 ↑ vX.Y.Z」，点击打开插件页；无更新或失败时不渲染。
+function VersionBadge() {
+  const [version, setVersion] = React.useState(null)
+  React.useEffect(() => {
+    let alive = true
+    getVersion().then(data => { if (alive) setVersion(data) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  if (!version || version.updateAvailable !== true || typeof version.latest !== 'string') return null
+  const href = typeof version.homepage === 'string' ? version.homepage : 'https://github.com/Feahter/dsh-plugins'
+  const tip = String(zh.updateTip || '').replace('{version}', `v${version.latest}`)
+  return React.createElement('a', {
+    className: 'nf-version',
+    href,
+    target: '_blank',
+    rel: 'noreferrer',
+    title: tip,
+    'aria-label': tip,
+  },
+  React.createElement('span', { className: 'nf-version-label' }, zh.updateLabel),
+  React.createElement('span', { className: 'nf-version-number' }, `↑ v${version.latest}`))
 }
 
 export function App({ onExit }) {
@@ -160,6 +183,7 @@ export function App({ onExit }) {
         React.createElement('button', { type: 'button', className: 'nf-icon-btn', onClick: onExit },
           Icon.back, '返回对话'),
       ),
+      React.createElement(VersionBadge),
     ),
     body,
     React.createElement(ToastHost, { toast, onDismiss: dismiss }),

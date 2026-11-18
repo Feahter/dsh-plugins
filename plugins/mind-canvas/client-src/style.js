@@ -43,6 +43,15 @@ body[data-ds-dark-theme] .mc-root{ color-scheme: dark; }
 .mc-brand b{ font-size: 13.5px; font-weight: 650; letter-spacing: .2px; }
 .mc-brand small{ font-size: 10.5px; color: var(--ink3); }
 .mc-grow{ flex: 1; min-width: 0; }
+.mc-version{
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px;
+  border-radius: 999px; text-decoration: none; white-space: nowrap; flex: none;
+  color: var(--dsw-alias-label-primary-foreground, #fff); background: var(--accent);
+  font-size: 11.5px; font-weight: 600;
+}
+.mc-version:hover{ filter: brightness(1.08); }
+.mc-version-label{ opacity: .9; font-weight: 500; }
+.mc-version-number{ font-variant-numeric: tabular-nums; }
 
 .mc-select, .mc-input, .mc-textarea{
   font: inherit; color: var(--ink); background: var(--card); border: .5px solid var(--line);

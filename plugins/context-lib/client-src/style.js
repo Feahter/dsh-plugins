@@ -54,6 +54,15 @@ html[data-theme='dark'] .clib-root, body[data-ds-dark-theme] .clib-root{
 .clib-brand{ display: flex; flex-direction: column; gap: 1px; margin-right: 4px; min-width: 92px; }
 .clib-brand b{ font-size: 13.5px; font-weight: 650; letter-spacing: .2px; }
 .clib-brand small{ font-size: 10.5px; color: var(--clib-ink3); }
+/* 版本徽标：有新版本时出现在顶栏右端 */
+.clib-version{
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px;
+  border-radius: 999px; text-decoration: none; white-space: nowrap;
+  color: #fff; background: var(--clib-accent); font-size: 11.5px; font-weight: 600;
+}
+.clib-version:hover{ filter: brightness(1.08); }
+.clib-version-label{ opacity: .9; font-weight: 500; }
+.clib-version-number{ font-variant-numeric: tabular-nums; }
 .clib-search{
   flex: 1 1 220px; min-width: 170px; display: flex; align-items: center; gap: 6px;
   padding: 0 9px; height: 30px; border: .5px solid var(--clib-line); border-radius: 999px;

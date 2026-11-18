@@ -15,6 +15,7 @@ import { execFile } from 'node:child_process'
 import { LibraryError, createLibrary, resolveRoot } from './src/store.js'
 import { preview, previewThumb, entryFile } from './src/preview.js'
 import { assistStatus, runAssist } from './src/assist.js'
+import { createVersionChecker } from './version-check.js'
 
 export const DEFAULTS = {
   rootDir: '',
@@ -723,7 +724,7 @@ function revealInFinder(target) {
   })
 }
 
-async function dispatchRoute({ method, pathname, searchParams, headers, bodyText, connection, root, getLibrary, briefer, ctx }) {
+async function dispatchRoute({ method, pathname, searchParams, headers, bodyText, connection, root, getLibrary, briefer, versionChecker, ctx }) {
   if (!connection || typeof connection.requestRejection !== 'function') {
     return {
       status: 503,
@@ -740,6 +741,10 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
   const route = pathname.slice(ROUTE_PREFIX.length) || '/'
   const verb = method === 'HEAD' ? 'GET' : method
   const segments = route.split('/').filter(Boolean)
+  if (verb === 'GET' && route === '/version') {
+    const data = await versionChecker.check({ refresh: searchParams.get('refresh') === '1' })
+    return { status: 200, payload: { ok: true, data } }
+  }
   const lib = await getLibrary()
   try {
     if (verb === 'GET') {
@@ -1004,6 +1009,7 @@ function createRouteHandler(services) {
         root: services.root,
         getLibrary: services.getLibrary,
         briefer: services.briefer,
+        versionChecker: services.versionChecker,
         ctx: services.ctx,
       })
       if (result.raw) {
@@ -1055,6 +1061,7 @@ export function apply(ctx, rawConfig) {
   const getLibrary = () => libraryPromise
 
   const briefer = createBriefer(getLibrary, config)
+  const versionChecker = createVersionChecker({ pluginName: 'dsh-context-lib' })
 
   for (const definition of buildTools({ getLibrary })) {
     ctx.effect(() => ctx.tools.register(definition))
@@ -1095,7 +1102,7 @@ export function apply(ctx, rawConfig) {
       webCtx.webServer.register({
         kind: 'prefix',
         path: ROUTE_PREFIX,
-        handler: createRouteHandler({ ctx: webCtx, root, getLibrary, briefer }),
+        handler: createRouteHandler({ ctx: webCtx, root, getLibrary, briefer, versionChecker }),
       }),
     )
   })

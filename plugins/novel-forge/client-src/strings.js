@@ -90,6 +90,8 @@ export const zh = {
   toolsOpened: '已为最近一次对话开启：回到对话发一句话，助手就能调用墨炉工具。',
   toolsClosed: '已关闭最近一次对话的墨炉工具。',
   toolsNeedSession: '还没有可接手的对话：先在对话里发一句话，再回来开启。',
+  updateLabel: '新版本',
+  updateTip: '新版本 {version} 已发布，点击前往插件页更新',
 }
 
 export const en = {
@@ -112,4 +114,6 @@ export const en = {
   toolsOpened: 'Enabled for the most recent conversation. Send it a message and the assistant can call Novel Forge tools.',
   toolsClosed: 'Novel Forge tools turned off for the most recent conversation.',
   toolsNeedSession: 'No conversation to attach to yet: send a message in a chat first, then come back.',
+  updateLabel: 'Update',
+  updateTip: 'Update {version} is available — click to update on the plugin page',
 }

@@ -15,9 +15,12 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { createSkillsSurface } from './lib/host-skills.js';
 import { createAgentsSurface } from './lib/host-agents.js';
+import { createVersionChecker, createVersionRoute } from './version-check.js';
 
 const VERSION = '0.2.3';
 const HEALTH_PREFIX = '/api/dsh-360/health';
+const VERSION_ROUTE = '/api/dsh-360/version';
+const versionChecker = createVersionChecker({ pluginName: 'dsh-360' });
 
 class HarnessError extends Error {
   constructor(message, { code = 'internal', status = 500 } = {}) {
@@ -432,6 +435,17 @@ export function apply(ctx, config = {}) {
       kind: 'prefix',
       path: HEALTH_PREFIX,
       handler: createHealthHandler(ctx),
+    }),
+  );
+  // Version self-check: exact route, same connection admission as /health.
+  ctx.effect(() =>
+    ctx.webServer.register({
+      kind: 'exact',
+      path: VERSION_ROUTE,
+      handler: createVersionRoute({
+        checker: versionChecker,
+        getConnection: () => resolveConnection(ctx),
+      }),
     }),
   );
 

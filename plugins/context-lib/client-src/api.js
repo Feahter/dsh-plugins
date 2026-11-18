@@ -136,6 +136,11 @@ export function getAssistStatus(options) {
   return request('/assist/status', options)
 }
 
+/** 版本自查：{plugin, current, latest, updateAvailable, homepage, failed, checkedAt}。 */
+export function version(options) {
+  return request('/version', options)
+}
+
 /**
  * 智能助手：{mode:'summary', id} / {mode:'organize', ids} / {mode:'ask', question}。
  * 返回 {mode, model, text, actions}，错误沿用 request() 的抛错约定。

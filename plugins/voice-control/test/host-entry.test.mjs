@@ -2,12 +2,13 @@
  * Route-level test for the Host half.
  *
  * `index.js` is the only file that talks to the Cordis context, so this test
- * fakes that context, captures the five registered routes, and drives them with
+ * fakes that context, captures the six registered routes, and drives them with
  * plain request/response objects. No GUI, no network, no microphone.
  */
 
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { classifyError } from '../host/http.js'
@@ -157,7 +158,7 @@ function routeFor(routes, name) {
   return handler
 }
 
-test('apply registers the five routes under the plugin prefix', () => {
+test('apply registers the six routes under the plugin prefix', () => {
   const { routes } = makeContext()
   assert.deepEqual([...routes.keys()].sort(), [
     `${ROUTE_PREFIX}/dispatch`,
@@ -165,7 +166,39 @@ test('apply registers the five routes under the plugin prefix', () => {
     `${ROUTE_PREFIX}/plan`,
     `${ROUTE_PREFIX}/speak`,
     `${ROUTE_PREFIX}/transcribe`,
+    `${ROUTE_PREFIX}/version`,
   ])
+})
+
+test('version reports this plugin\'s own release against the repo index', async () => {
+  const { routes } = makeContext()
+  const handler = routeFor(routes, 'version')
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const homepage = 'https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control'
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return { plugins: [{ name: 'dsh-voice-control', homepage, versions: [{ version: '0.0.1' }, { version: '99.0.0' }] }] }
+    },
+  })
+  try {
+    // A non-GET never touches the index.
+    const refused = await call(handler, { method: 'POST' })
+    assert.equal(refused.status, 405)
+
+    const result = await call(handler, { method: 'GET', url: `${ROUTE_PREFIX}/version?refresh=1` })
+    assert.equal(result.status, 200)
+    assert.equal(result.json.ok, true)
+    assert.equal(result.json.data.plugin, 'dsh-voice-control')
+    assert.equal(result.json.data.current, pkg.version)
+    assert.equal(result.json.data.latest, '99.0.0')
+    assert.equal(result.json.data.updateAvailable, true)
+    assert.equal(result.json.data.failed, false)
+    assert.equal(result.json.data.homepage, homepage)
+  } finally {
+    globalThis.fetch = realFetch
+  }
 })
 
 test('health reports the local recognizer, the voices and the session count', async () => {

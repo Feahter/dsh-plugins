@@ -17,6 +17,8 @@ window.__ModuleLoader__.load({
       title: '任务账本',
       subtitle: '任务章程、状态、决策与证据的长期记录',
       refresh: '刷新',
+      updateLabel: '新版本',
+      updateTip: '新版本 {version} 已发布，点击前往插件页更新',
       loading: '正在加载…',
       retry: '重试',
       requestTimeout: '请求超时',
@@ -113,6 +115,8 @@ window.__ModuleLoader__.load({
       title: 'Task ledger',
       subtitle: 'The long-lived record of task charters, state, decisions, and evidence',
       refresh: 'Refresh',
+      updateLabel: 'Update',
+      updateTip: 'Update {version} is available — click to update on the plugin page',
       loading: 'Loading…',
       retry: 'Retry',
       requestTimeout: 'Request timed out',
@@ -475,6 +479,30 @@ window.__ModuleLoader__.load({
 
     function Spinner() {
       return h('span', { className: 'dsh-task-ledger-spinner', 'aria-hidden': true });
+    }
+
+    // 有新版本时显示「↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时什么都不渲染。
+    function VersionBadge(props) {
+      const t = props.t;
+      const [version, setVersion] = React.useState(null);
+      React.useEffect(() => {
+        let alive = true;
+        api('/version').then((data) => { if (alive) setVersion(data); }, () => {});
+        return () => { alive = false; };
+      }, []);
+      if (!version || version.updateAvailable !== true || typeof version.latest !== 'string') return null;
+      const href = typeof version.homepage === 'string' ? version.homepage : 'https://github.com/Feahter/dsh-plugins';
+      const tip = t('updateTip', { version: 'v' + version.latest });
+      return h('a', {
+        className: 'dsh-task-ledger-version',
+        href,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: tip,
+        'aria-label': tip,
+      },
+        h('span', { className: 'dsh-task-ledger-versionLabel' }, t('updateLabel')),
+        h('span', { className: 'dsh-task-ledger-versionNumber' }, '↑ v' + version.latest));
     }
 
     function PanelIcon(props) {
@@ -1311,7 +1339,8 @@ window.__ModuleLoader__.load({
             disabled: loading,
             title: t('refresh'),
             'aria-label': t('refresh'),
-          }, loading ? h(Spinner) : h(RefreshIcon, { size: 15 }), h('span', null, t('refresh')))));
+          }, loading ? h(Spinner) : h(RefreshIcon, { size: 15 }), h('span', null, t('refresh'))),
+          h(VersionBadge, { t })));
 
       const listPane = h('aside', {
         className: 'dsh-task-ledger-col dsh-task-ledger-sidebar',
@@ -1435,6 +1464,10 @@ window.__ModuleLoader__.load({
       '.dsh-task-ledger-title{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em;color:var(--dsw-alias-label-primary)}',
       '.dsh-task-ledger-subtitle{margin:2px 0 0;font-size:12px;color:var(--dsw-alias-label-secondary)}',
       '.dsh-task-ledger-headerRight{display:flex;align-items:center;gap:8px;flex:none;min-width:0}',
+      '.dsh-task-ledger-version{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;text-decoration:none;white-space:nowrap;color:var(--dsw-alias-label-primary-foreground,var(--dsw-alias-bg-base));background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));font-size:11.5px;font-weight:600}',
+      '.dsh-task-ledger-version:hover{filter:brightness(1.08)}',
+      '.dsh-task-ledger-versionLabel{opacity:.9;font-weight:500}',
+      '.dsh-task-ledger-versionNumber{font-variant-numeric:tabular-nums}',
       '.dsh-task-ledger-activeChip{display:inline-flex;align-items:center;gap:6px;max-width:280px;min-width:0;border:0.5px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:11.5px;line-height:24px;padding:0 10px;cursor:pointer}',
       '.dsh-task-ledger-activeChip:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dsh-task-ledger-activeChipText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',

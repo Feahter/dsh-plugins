@@ -13,6 +13,7 @@
   },
   "files": [
     "index.js",
+    "version-check.js",
     "client.js",
     "lib",
     "RUBRIC.md",

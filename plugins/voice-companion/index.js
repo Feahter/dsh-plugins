@@ -16,6 +16,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { getRoute, httpError, jsonRoute } from './host/http.js'
+import { createVersionChecker, createVersionRoute } from './version-check.js'
 import { createBrain, splitSentences } from './host/persona.js'
 import { createRateLimiter, designTheme } from './host/theme.js'
 import { createSentenceSpeaker, VOICES } from './host/tts.js'
@@ -161,6 +162,7 @@ export function apply(ctx, options = {}) {
   const getApiKey = typeof options.getApiKey === 'function' ? options.getApiKey : createApiKeyReader(configPath)
   const fetchImpl = typeof options.fetchImpl === 'function' ? options.fetchImpl : globalThis.fetch
   const now = typeof options.now === 'function' ? options.now : () => Date.now()
+  const versionChecker = options.versionChecker ?? createVersionChecker({ pluginName: 'dsh-voice-companion' })
 
   const brain = createBrain({
     fetchImpl,
@@ -443,6 +445,10 @@ export function apply(ctx, options = {}) {
       }
 
       register('/health', getRoute(handleHealth))
+      register('/version', createVersionRoute({
+        checker: versionChecker,
+        getConnection: () => (typeof ctx.get === 'function' ? ctx.get('connection') : undefined),
+      }))
       register('/turn', jsonRoute({ handle: handleTurn, getOrigin: origin }))
       register('/speak', jsonRoute({ handle: handleSpeak, getOrigin: origin }))
       register('/dispatch', jsonRoute({ handle: handleDispatch, getOrigin: origin }))

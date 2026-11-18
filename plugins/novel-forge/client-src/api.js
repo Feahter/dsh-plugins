@@ -124,3 +124,7 @@ export const assist = ({ task, text, genre, tone }) =>
   request('/assist', { method: 'POST', body: { task, text, genre, tone } }).then(data => data?.text ?? '')
 
 export const getModel = () => request('/model')
+
+// ------------------------------------------------------------------ 版本自查
+// 宿主返回 { ok:true, data }，面板只关心 data。
+export const getVersion = () => request('/version').then(body => body?.data ?? body)

@@ -25,6 +25,8 @@ window.__ModuleLoader__.load({
       loading: '正在检查更新…',
       checking: '检查中…',
       refresh: '重新检查',
+      updateLabel: '新版本',
+      updateTip: '新版本 {version} 已发布，点击前往插件页更新',
       update: '立即更新',
       download: '下载安装包',
       upToDate: '已是最新版本',
@@ -62,6 +64,8 @@ window.__ModuleLoader__.load({
       loading: 'Checking for updates…',
       checking: 'Checking…',
       refresh: 'Check again',
+      updateLabel: 'Update',
+      updateTip: 'Update {version} is available — click to update on the plugin page',
       update: 'Update now',
       download: 'Download installer',
       upToDate: 'You are on the latest version',
@@ -95,7 +99,11 @@ window.__ModuleLoader__.load({
 
     const CSS = [
       '.upd-page{display:flex;flex-direction:column;gap:16px;padding:24px;height:100%;overflow:auto;box-sizing:border-box}',
-      '.upd-head{display:flex;align-items:flex-start;gap:12px}',
+      '.upd-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}',
+      '.upd-version{display:inline-flex;align-items:center;gap:5px;flex:none;height:26px;padding:0 10px;border-radius:999px;text-decoration:none;white-space:nowrap;color:#fff;background:var(--dsw-alias-brand-primary);font-size:11.5px;font-weight:600}',
+      '.upd-version:hover{filter:brightness(1.08)}',
+      '.upd-version-label{opacity:.9;font-weight:500}',
+      '.upd-version-number{font-variant-numeric:tabular-nums}',
       '.upd-title{font-size:16px;font-weight:600;color:var(--dsw-alias-label-primary)}',
       '.upd-sub{font-size:12px;color:var(--dsw-alias-label-tertiary);margin-top:2px}',
       '.upd-card{background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-md);padding:16px;display:flex;flex-direction:column;gap:12px}',
@@ -220,6 +228,52 @@ window.__ModuleLoader__.load({
     }
 
     // ------------------------------------------------------------------- views
+
+    const VERSION_TIMEOUT_MS = 10_000
+
+    /** This plugin's own release (`/version`), never the Desktop app's. Failure is silent. */
+    async function requestVersion() {
+      const controller = typeof AbortController === 'function' ? new AbortController() : null
+      const timer = controller === null ? undefined : setTimeout(() => controller.abort(), VERSION_TIMEOUT_MS)
+      try {
+        const response = await fetch(`${API_PREFIX}/version`, {
+          credentials: 'same-origin',
+          headers: { accept: 'application/json' },
+          ...(controller === null ? {} : { signal: controller.signal }),
+        })
+        if (!response.ok) return null
+        const body = await response.json()
+        return body && body.ok === true ? body.data : null
+      } catch (_error) {
+        return null
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+    }
+
+    /** 有新版本时显示「↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时什么都不渲染。 */
+    function VersionBadge(props) {
+      const t = typeof props.t === 'function' ? props.t : (key) => key
+      const [version, setVersion] = React.useState(null)
+      React.useEffect(() => {
+        let alive = true
+        requestVersion().then((data) => { if (alive) setVersion(data) })
+        return () => { alive = false }
+      }, [])
+      if (version === null || version.updateAvailable !== true || typeof version.latest !== 'string') return null
+      const href = typeof version.homepage === 'string' ? version.homepage : 'https://github.com/Feahter/dsh-plugins'
+      const tip = t('updateTip', { version: `v${version.latest}` })
+      return h('a', {
+        className: 'upd-version',
+        href,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: tip,
+        'aria-label': tip,
+      },
+      h('span', { className: 'upd-version-label' }, t('updateLabel')),
+      h('span', { className: 'upd-version-number' }, `↑ v${version.latest}`))
+    }
 
     function formatVersion(t, value) {
       return typeof value === 'string' && value !== '' ? `v${value.replace(/^v/, '')}` : t('unknown')
@@ -373,7 +427,8 @@ window.__ModuleLoader__.load({
         h('div', { className: 'upd-head' },
           h('div', null,
             h('div', { className: 'upd-title' }, t('panelTitle')),
-            h('div', { className: 'upd-sub' }, t('panelHint')))),
+            h('div', { className: 'upd-sub' }, t('panelHint'))),
+          h(VersionBadge, { t })),
         h('div', { className: 'upd-card' },
           h('div', { className: 'upd-status', 'data-tone': view.tone, role: 'status' }, statusText),
           view.detail ? h('div', { className: 'upd-detail' }, view.detail) : null,

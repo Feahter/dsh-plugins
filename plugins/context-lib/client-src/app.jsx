@@ -140,6 +140,28 @@ async function copyText(text) {
   }
 }
 /* ------------------------------------------------------------------ 顶栏 */
+/** 有新版本时显示「↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时什么都不渲染。 */
+function VersionBadge({ t }) {
+  const [version, setVersion] = React.useState(null)
+  React.useEffect(() => {
+    let alive = true
+    api.version().then(data => { if (alive) setVersion(data) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  if (!version || version.updateAvailable !== true || typeof version.latest !== 'string') return null
+  const href = typeof version.homepage === 'string' ? version.homepage : 'https://github.com/Feahter/dsh-plugins'
+  const tip = format(t('updateTip'), { version: `v${version.latest}` })
+  return h('a', {
+    className: 'clib-version',
+    href,
+    target: '_blank',
+    rel: 'noreferrer',
+    title: tip,
+    'aria-label': tip,
+  },
+  h('span', { className: 'clib-version-label' }, t('updateLabel')),
+  h('span', { className: 'clib-version-number' }, `↑ v${version.latest}`))
+}
 function Toolbar({
   t, onExit, qInput, onQuery, kind, onKind, sort, onSort, status, trashCount,
   onToggleTrash, onScan, scanning, onNewNote, onRefresh, refreshing,
@@ -185,7 +207,8 @@ function Toolbar({
       title: t('assistOpen'), 'aria-pressed': !!assistOpen,
     }, h(Icon, { name: 'sparkle', size: 13 }), t('assistOpen')),
     h('button', { type: 'button', className: 'clib-btn clib-icon', onClick: onRefresh, disabled: refreshing, title: t('refresh'), 'aria-label': t('refresh') },
-      h('span', { className: refreshing ? 'clib-spin' : undefined }, h(Icon, { name: 'refresh', size: 14 }))))
+      h('span', { className: refreshing ? 'clib-spin' : undefined }, h(Icon, { name: 'refresh', size: 14 }))),
+    h(VersionBadge, { t }))
 }
 /* ------------------------------------------------------------------ 左栏 */
 function Sidebar({ t, sources, collections, tags, filters, disabled, onFilter, onAddSource, onRemoveSource }) {

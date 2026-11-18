@@ -368,3 +368,27 @@ test('novel_read 按章读四件套，novel_write JSON 反序列化', async () =
     error => error.code === 'BAD_PARAMS',
   )
 })
+
+test('GET /version 把版本自查结果原样返回', async () => {
+  const engine = makeFakeEngine()
+  const versionChecker = {
+    check: async ({ refresh }) => ({
+      plugin: 'dsh-novel-forge',
+      current: '0.4.2',
+      latest: '0.4.3',
+      updateAvailable: true,
+      homepage: 'https://example.test/novel-forge',
+      failed: false,
+      refreshed: refresh,
+    }),
+  }
+  const result = await handle(
+    { engine, modelInfo: () => ({ available: true }), versionChecker },
+    { method: 'GET', path: '/version', query: { refresh: '1' }, body: null },
+  )
+  assert.equal(result.status, 200)
+  assert.equal(result.body.ok, true)
+  assert.equal(result.body.data.latest, '0.4.3')
+  assert.equal(result.body.data.updateAvailable, true)
+  assert.equal(result.body.data.refreshed, true)
+})

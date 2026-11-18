@@ -23,6 +23,8 @@ window.__ModuleLoader__.load({
       // shared
       refresh: '刷新',
       retry: '重试',
+      updateLabel: '新版本',
+      updateTip: '新版本 {version} 已发布，点击前往插件页更新',
       loading: '正在加载…',
       loadFailed: '加载失败：{message}',
       opFailed: '操作失败：{message}',
@@ -320,6 +322,8 @@ window.__ModuleLoader__.load({
       tabAgents: 'Agents',
       refresh: 'Refresh',
       retry: 'Retry',
+      updateLabel: 'Update',
+      updateTip: 'Update {version} is available — click to update on the plugin page',
       loading: 'Loading…',
       loadFailed: 'Failed to load: {message}',
       opFailed: 'Action failed: {message}',
@@ -676,6 +680,34 @@ window.__ModuleLoader__.load({
       } finally {
         window.clearTimeout(timer);
       }
+    }
+
+    // ----------------------------------------------------------- version badge
+
+    // 有新版本时显示「新版本 ↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时
+    // 什么都不渲染（接口失败只会 reject，这里吞掉）。
+    function VersionBadge({ t }) {
+      const [data, setData] = React.useState(null);
+      React.useEffect(() => {
+        let alive = true;
+        api('/api/dsh-360', '/version').then((value) => {
+          if (alive && value) setData(value);
+        }).catch(() => {});
+        return () => { alive = false; };
+      }, []);
+      if (!data || data.updateAvailable !== true || typeof data.latest !== 'string') return null;
+      const href = typeof data.homepage === 'string' ? data.homepage : 'https://github.com/Feahter/dsh-plugins';
+      const tip = t('updateTip', { version: 'v' + data.latest });
+      return h('a', {
+        className: 'd360-version',
+        href,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: tip,
+        'aria-label': tip,
+      },
+      h('span', { className: 'd360-versionLabel' }, t('updateLabel')),
+      h('span', { className: 'd360-versionNumber' }, '↑ v' + data.latest));
     }
 
     function errMessage(error) {
@@ -4037,7 +4069,9 @@ window.__ModuleLoader__.load({
       const header = h('div', { className: 'd360-header' },
         h('div', { className: 'd360-heading' },
           h('h1', { className: 'd360-title' }, t('title')),
-          h('p', { className: 'd360-subtitle' }, t('subtitle'))));
+          h('p', { className: 'd360-subtitle' }, t('subtitle'))),
+        h('div', { className: 'd360-headerRight' },
+          h(VersionBadge, { t })));
 
       const tabbar = h('div', { className: 'd360-tabbar', role: 'tablist' },
         h('button', {
@@ -4078,6 +4112,11 @@ window.__ModuleLoader__.load({
       '.d360-page *,.d360-page *::before,.d360-page *::after{box-sizing:border-box}',
       '.d360-page :focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-alias-label-primary);outline-offset:2px}',
       '.d360-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}',
+      '.d360-headerRight{display:flex;align-items:center;gap:8px;flex:none}',
+      '.d360-version{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;text-decoration:none;white-space:nowrap;color:var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));font-size:11.5px;font-weight:600;flex:none}',
+      '.d360-version:hover{filter:brightness(1.08)}',
+      '.d360-versionLabel{opacity:.9;font-weight:500}',
+      '.d360-versionNumber{font-variant-numeric:tabular-nums}',
       '.d360-heading{display:flex;flex-direction:column;gap:4px;min-width:0}',
       '.d360-title{margin:0;font-size:20px;line-height:1.3;font-weight:650;letter-spacing:-.01em;color:var(--dsw-alias-label-primary)}',
       '.d360-subtitle{margin:0;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',

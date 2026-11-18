@@ -202,6 +202,39 @@ await check('route: 503 without connection, 401 on rejection, 404 off-path', asy
   }
 })
 
+await check('route: GET /version answers for the plugin, separate from the Desktop /status', async () => {
+  const { createVersionChecker } = await import('../version-check.js')
+  const pkg = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
+  const homepage = 'https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check'
+  const checker = createVersionChecker({
+    pluginName: 'dsh-update-check',
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return { plugins: [{ name: 'dsh-update-check', homepage, versions: [{ version: '0.0.9' }, { version: '99.0.0' }] }] }
+      },
+    }),
+  })
+  const host = hostModule.createHost({ feedUrl: 'http://127.0.0.1:1/feeds/' }, { readInstalledVersion: async () => '0.2.1-rc.4' })
+  const handler = hostModule.createRouteHandler({ get: () => ({ requestRejection: () => undefined }) }, host, checker)
+  const server = createServer((req, res) => { handler(req, res).catch(() => res.destroy()) })
+  const port = await listen(server)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${hostModule.__internals.ROUTE_PREFIX}/version?refresh=1`)
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.ok, true)
+    assert.equal(body.data.plugin, 'dsh-update-check')
+    assert.equal(body.data.current, pkg.version)
+    assert.equal(body.data.latest, '99.0.0')
+    assert.equal(body.data.updateAvailable, true)
+    assert.equal(body.data.failed, false)
+    assert.equal(body.data.homepage, homepage)
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
 await check('route: reports available / up-to-date / unreachable against a local feed', async () => {
   let feedVersion = '0.2.2-rc.1'
   let feedStatus = 200

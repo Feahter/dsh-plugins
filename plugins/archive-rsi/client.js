@@ -32,6 +32,8 @@ window.__ModuleLoader__.load({
       refresh: '刷新',
       loading: '正在加载…',
       retry: '重试',
+      updateLabel: '新版本',
+      updateTip: '新版本 {version} 已发布，点击前往插件页更新',
       requestTimeout: '请求超时',
       emptyResponse: '归档接口返回了空响应',
       httpError: '请求失败（HTTP {status}）',
@@ -334,6 +336,8 @@ window.__ModuleLoader__.load({
       refresh: 'Refresh',
       loading: 'Loading…',
       retry: 'Retry',
+      updateLabel: 'Update',
+      updateTip: 'Update {version} is available — click to update on the plugin page',
       requestTimeout: 'Request timed out',
       emptyResponse: 'The archive route returned an empty response',
       httpError: 'Request failed (HTTP {status})',
@@ -924,6 +928,34 @@ window.__ModuleLoader__.load({
           window.clearTimeout(timer);
         }
       }
+    }
+
+    // ----------------------------------------------------------- version badge
+
+    // 有新版本时显示「新版本 ↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时
+    // 什么都不渲染。接口本身不抛：网络失败只是把 updateAvailable 留在 null。
+    function VersionBadge() {
+      const [data, setData] = React.useState(null);
+      React.useEffect(() => {
+        let alive = true;
+        api('/version').then((result) => {
+          if (alive && result && result.ok && result.data) setData(result.data);
+        }).catch(() => {});
+        return () => { alive = false; };
+      }, []);
+      if (!data || data.updateAvailable !== true || typeof data.latest !== 'string') return null;
+      const href = typeof data.homepage === 'string' ? data.homepage : 'https://github.com/Feahter/dsh-plugins';
+      const tip = tr('updateTip', { version: 'v' + data.latest });
+      return h('a', {
+        className: 'dsh-archive-rsi-version',
+        href,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: tip,
+        'aria-label': tip,
+      },
+      h('span', { className: 'dsh-archive-rsi-versionLabel' }, tr('updateLabel')),
+      h('span', { className: 'dsh-archive-rsi-versionNumber' }, '↑ v' + data.latest));
     }
 
     // Load one transcript window. `offset` is the number of characters already
@@ -3340,7 +3372,7 @@ window.__ModuleLoader__.load({
             disabled: busy === 'sync',
             title: t('refresh'),
             'aria-label': t('refresh'),
-          }, sessionsLoading ? h(Spinner) : h(RefreshIcon, { size: 15 }), h('span', null, t('refresh')))));
+          }, sessionsLoading ? h(Spinner) : h(RefreshIcon, { size: 15 }), h('span', null, t('refresh'))), h(VersionBadge)));
 
       const tabs = [
         { key: 'archive', label: t('tabArchive') },
@@ -3881,6 +3913,10 @@ window.__ModuleLoader__.load({
       '@media (max-width:1240px){.dsh-archive-rsi-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.dsh-archive-rsi-panels{grid-template-columns:minmax(0,1fr)}}',
       '@media (max-width:980px){.dsh-archive-rsi-archive{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.dsh-archive-rsi-pdca{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.dsh-archive-rsi-panels{grid-template-columns:minmax(0,1fr)}.dsh-archive-rsi-listPane,.dsh-archive-rsi-runList{max-height:300px}}',
       '@media (max-width:720px){.dsh-archive-rsi-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dsh-archive-rsi-editGrid{grid-template-columns:minmax(0,1fr)}}',
+      '.dsh-archive-rsi-version{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:999px;text-decoration:none;white-space:nowrap;color:var(--dsw-alias-label-primary-foreground,#fff);background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary));font-size:11.5px;font-weight:600;flex:none}',
+      '.dsh-archive-rsi-version:hover{filter:brightness(1.08)}',
+      '.dsh-archive-rsi-versionLabel{opacity:.9;font-weight:500}',
+      '.dsh-archive-rsi-versionNumber{font-variant-numeric:tabular-nums}',
     ].join('\n');
 
     function insertStyles() {

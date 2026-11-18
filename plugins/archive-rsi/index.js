@@ -43,9 +43,11 @@ import {
   RUN_STALE_MS,
 } from './alchemy.js';
 import { SECTION_NAME, lessonsBlock, protocolText } from './protocol.js';
+import { createVersionChecker } from './version-check.js';
 import { annotate, filterByHarnessArchive, readHarnessArchive } from './workspace-archive.js';
 
 const ROUTE_PREFIX = '/api/archive-rsi';
+const versionChecker = createVersionChecker({ pluginName: 'dsh-archive-rsi' });
 const MAX_BODY_BYTES = 256 * 1024;
 const TOOL_TIMEOUT_MS = 120_000;
 /** Corpus cap for a single status/evaluation read; decode is the expensive part. */
@@ -1004,6 +1006,13 @@ export function buildPanelHandler({ store, paths, state, config, ensureReady, ge
       .map((part) => decodeURIComponent(part));
     const method = (req.method || 'GET').toUpperCase();
     try {
+      // Version self-check is cheap and needs no archive store, so it answers
+      // before ensureReady() touches the corpus.
+      if (method === 'GET' && segments.length === 1 && segments[0] === 'version') {
+        const data = await versionChecker.check({ refresh: url.searchParams.get('refresh') === '1' });
+        sendJson(res, 200, { ok: true, data });
+        return;
+      }
       const store1 = await ensureReady();
       const body = method === 'GET' || method === 'HEAD' ? {} : await readJsonBody(req);
       const result = await route({ store: store1, paths, state, config, url, segments, method, body, ensureReady });

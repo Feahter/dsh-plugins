@@ -19,6 +19,7 @@ import path from 'node:path';
 import * as ledger from './ledger.js';
 import { regenerateIndex } from './index-md.js';
 import { SECTION_NAME, protocolText } from './protocol.js';
+import { createVersionChecker } from './version-check.js';
 
 const ROUTE_PREFIX = '/api/task-ledger';
 const MAX_BODY_BYTES = 256 * 1024;
@@ -662,7 +663,7 @@ function resolveConnection(ctx) {
 }
 
 /** One request, one decision. Every route fails closed when admission is unavailable. */
-async function dispatchRoute({ method, pathname, searchParams, headers, bodyText, connection, root, config, briefer }) {
+async function dispatchRoute({ method, pathname, searchParams, headers, bodyText, connection, root, config, briefer, versionChecker }) {
   if (!connection || typeof connection.requestRejection !== 'function') {
     return { status: 503, payload: { ok: false, error: { message: 'The task ledger panel needs the Harness connection service.', code: 'unavailable' } } };
   }
@@ -677,6 +678,11 @@ async function dispatchRoute({ method, pathname, searchParams, headers, bodyText
   const verb = method === 'HEAD' ? 'GET' : method;
   try {
     if (verb === 'GET') {
+      if (route === '/version') {
+        const refresh = ['1', 'true', 'yes'].includes(searchParams.get('refresh') ?? '');
+        const data = await versionChecker.check({ refresh });
+        return { status: 200, payload: { ok: true, data } };
+      }
       if (route === '/index' || route === '/') {
         const status = searchParams.get('status') || 'all';
         const statuses = ['open', 'blocked', 'done', 'archived', 'all'];
@@ -759,6 +765,7 @@ function createRouteHandler(services) {
         root: services.root,
         config: services.config,
         briefer: services.briefer,
+        versionChecker: services.versionChecker,
       });
       sendNodeResponse(res, method, result.status, result.payload);
     } catch (error) {
@@ -773,6 +780,7 @@ export function apply(ctx, rawConfig) {
   const { config, warnings } = readConfig(rawConfig);
   const root = ledger.resolveRoot({ rootDir: config.rootDir });
   const briefer = createBriefer(root, config);
+  const versionChecker = createVersionChecker({ pluginName: 'dsh-task-ledger' });
 
   for (const warning of warnings) {
     void ledger.appendAudit(root, { event: 'config-warning', detail: warning });
@@ -819,7 +827,7 @@ export function apply(ctx, rawConfig) {
       webCtx.webServer.register({
         kind: 'prefix',
         path: ROUTE_PREFIX,
-        handler: createRouteHandler({ ctx: webCtx, root, config, briefer }),
+        handler: createRouteHandler({ ctx: webCtx, root, config, briefer, versionChecker }),
       }),
     );
   });

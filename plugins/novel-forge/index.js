@@ -17,6 +17,7 @@ import { novelRecipe } from './src/recipes/novel/index.js'
 import { makeHandler, ROUTE_PREFIX } from './src/host/routes.js'
 import { registerNovelTools } from './src/host/tools.js'
 import { createActivation } from './src/host/activation.js'
+import { createVersionChecker } from './version-check.js'
 
 export const name = 'dsh-novel-forge'
 
@@ -43,6 +44,7 @@ export default {
 
   apply(ctx) {
     const root = join(dshHome(), 'novel-forge')
+    const versionChecker = createVersionChecker({ pluginName: name })
 
     const gateway = createLlmGateway({
       service: () => ctx.get('llm'),
@@ -74,6 +76,7 @@ export default {
         engine,
         modelInfo: () => modelInfo(ctx),
         activation,
+        versionChecker,
         guard: req => {
           const connection = ctx.get('connection')
           if (typeof connection?.requestRejection !== 'function') return 403

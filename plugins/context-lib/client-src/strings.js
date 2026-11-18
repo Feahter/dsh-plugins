@@ -35,6 +35,8 @@ export const zh = {
   trashToggle: '回收站',
   refresh: '刷新',
   backToChat: '返回对话',
+  updateLabel: '新版本',
+  updateTip: '新版本 {version} 已发布，点击前往插件页更新',
 
   sources: '来源',
   collections: '归类',
@@ -220,6 +222,8 @@ export const en = {
   trashToggle: 'Trash',
   refresh: 'Refresh',
   backToChat: 'Back to chat',
+  updateLabel: 'Update',
+  updateTip: 'Update {version} is available — click to update on the plugin page',
 
   sources: 'Sources',
   collections: 'Collections',

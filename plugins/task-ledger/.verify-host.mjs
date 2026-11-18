@@ -861,6 +861,32 @@ async function phaseRoutes() {
     assertEqual(response.headers['content-type'], 'application/json; charset=utf-8', 'content-type');
   });
 
+  await runCheck('9.1b', 'GET /api/task-ledger/version reports the installed and advertised versions', async () => {
+    const pkg = await readJson(path.join(HERE, 'package.json'));
+    const homepage = 'https://github.com/Feahter/dsh-plugins/tree/main/plugins/task-ledger';
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      async json() {
+        return { plugins: [{ name: 'dsh-task-ledger', homepage, versions: [{ version: '1.0.0' }, { version: '99.0.0' }] }] };
+      },
+    });
+    try {
+      const response = await httpCall(handler, { url: '/api/task-ledger/version?refresh=1' });
+      assertEqual(response.status, 200, `status (body: ${String(response.body).slice(0, 200)})`);
+      assert(response.json && response.json.ok === true, 'body.ok is not true');
+      const data = response.json.data || {};
+      assertEqual(data.plugin, 'dsh-task-ledger', 'data.plugin');
+      assertEqual(data.current, pkg.version, 'data.current');
+      assertEqual(data.latest, '99.0.0', 'data.latest');
+      assertEqual(data.updateAvailable, true, 'data.updateAvailable');
+      assertEqual(data.failed, false, 'data.failed');
+      assertEqual(data.homepage, homepage, 'data.homepage');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
   await runCheck('9.2', 'GET /api/task-ledger/task?task_id= returns the task detail', async () => {
     const response = await httpCall(handler, { url: `/api/task-ledger/task?task_id=${encodeURIComponent(tidA)}` });
     assertEqual(response.status, 200, `status (body: ${String(response.body).slice(0, 200)})`);

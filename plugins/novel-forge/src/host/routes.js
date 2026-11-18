@@ -101,12 +101,20 @@ function decodePart(raw, label) {
   }
 }
 
-export async function handle({ engine, modelInfo, activation }, request) {
+export async function handle({ engine, modelInfo, activation, versionChecker }, request) {
   const method = (request.method ?? 'GET').toUpperCase()
   const path = request.path ?? '/'
   const query = request.query ?? {}
   const body = request.body ?? null
   const parts = path.split('/').filter(Boolean)
+
+  if (parts.length === 1 && parts[0] === 'version' && method === 'GET') {
+    if (!versionChecker) {
+      return { status: 503, body: { ok: false, error: { code: 'UNAVAILABLE', message: '版本自查未接入' } } }
+    }
+    const data = await versionChecker.check({ refresh: query.refresh === '1' })
+    return { status: 200, body: { ok: true, data } }
+  }
 
   if (parts.length === 1 && parts[0] === 'recipes' && method === 'GET') {
     return { status: 200, body: { recipes: listRecipes(engine).map(recipeView) } }
@@ -321,7 +329,7 @@ export async function handle({ engine, modelInfo, activation }, request) {
  * 适配 DSH webServer 的 handler。
  * guard(req) 返回 falsy 放行，返回数字用该状态码拒绝（默认 403）。
  */
-export function makeHandler({ engine, modelInfo, guard, activation }) {
+export function makeHandler({ engine, modelInfo, guard, activation, versionChecker }) {
   const info = modelInfo ?? (() => ({ available: false, message: '未对接模型服务' }))
   return async function novelForgeHandler(req, res) {
     try {
@@ -342,7 +350,7 @@ export function makeHandler({ engine, modelInfo, guard, activation }) {
       const method = (req.method ?? 'GET').toUpperCase()
       const body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readBody(req) : null
       const result = await handle(
-        { engine, modelInfo: info, activation },
+        { engine, modelInfo: info, activation, versionChecker },
         { method, path, query: Object.fromEntries(url.searchParams), body },
       )
       sendJson(res, result.status, result.body)

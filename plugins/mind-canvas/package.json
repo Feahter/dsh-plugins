@@ -19,7 +19,8 @@
     "icon.svg",
     "README.md",
     "src",
-    "docs"
+    "docs",
+    "version-check.js"
   ],
   "engines": {
     "dsh": ">=0.2.1-rc.4 <0.3.0-0",

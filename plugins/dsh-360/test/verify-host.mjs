@@ -386,9 +386,10 @@ assert.deepEqual(
 );
 
 const routePaths = captured.routes.map((route) => route.path).sort();
-assert.deepEqual(routePaths, ['/api/dsh-360/agents', '/api/dsh-360/health', '/api/dsh-360/skills']);
+assert.deepEqual(routePaths, ['/api/dsh-360/agents', '/api/dsh-360/health', '/api/dsh-360/skills', '/api/dsh-360/version']);
 for (const route of captured.routes) {
-  assert.equal(route.kind, 'prefix', `${route.path} is a prefix route`);
+  const expectedKind = route.path === '/api/dsh-360/version' ? 'exact' : 'prefix';
+  assert.equal(route.kind, expectedKind, `${route.path} is a ${expectedKind} route`);
   assert.equal(typeof route.handler, 'function', `${route.path} has a handler`);
 }
 
@@ -403,6 +404,16 @@ assert.equal(response.body.data.surfaces[0], 'skills');
 assert.equal(response.body.data.surfaces[1], 'agents');
 assert.equal(typeof response.body.data.version, 'string');
 console.log('PASS 2 health:', JSON.stringify(response.body.data));
+
+// 2b. version route: shape only — the index fetch is network-dependent, so the
+// assertion must hold whether it succeeds or reports `failed`.
+const versionResponse = await request('GET', '/api/dsh-360/version');
+assert.equal(versionResponse.status, 200);
+assert.equal(versionResponse.body.ok, true);
+assert.equal(versionResponse.body.data.plugin, 'dsh-360');
+assert.ok('latest' in versionResponse.body.data, 'version payload carries latest');
+assert.ok('updateAvailable' in versionResponse.body.data, 'version payload carries updateAvailable');
+console.log('PASS 2b version:', JSON.stringify({ plugin: versionResponse.body.data.plugin, current: versionResponse.body.data.current, latest: versionResponse.body.data.latest, failed: versionResponse.body.data.failed }));
 
 // 2b. quick snapshot is absent before the first scan --------------------
 response = await request('GET', '/api/dsh-360/skills/scan?quick=1');

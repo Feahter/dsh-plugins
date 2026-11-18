@@ -90,6 +90,14 @@ body[data-ds-dark-theme] .nf-root{
 .nf-top-rule{ width: 1px; height: 22px; background: var(--nf-line); margin: 0 4px; }
 .nf-grow{ flex: 1 1 auto; min-width: 0; }
 .nf-top-actions{ display: flex; align-items: center; gap: 8px; }
+.nf-version{
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px;
+  border-radius: 999px; text-decoration: none; white-space: nowrap; flex: none;
+  color: #fff; background: var(--nf-cinnabar); font-size: 11.5px; font-weight: 600;
+}
+.nf-version:hover{ filter: brightness(1.08); }
+.nf-version-label{ opacity: .92; font-weight: 500; }
+.nf-version-number{ font-variant-numeric: tabular-nums; }
 
 .nf-icon-btn{
   display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;

@@ -50,3 +50,8 @@ export function listInspirations(options) {
 export function expandNode(payload, options) {
   return request('/expand', { ...options, method: 'POST', body: payload })
 }
+
+/** 版本自查：宿主返回 { ok:true, data }，这里只把 data 交给面板。 */
+export function version(options) {
+  return request('/version', options).then(payload => payload?.data ?? payload)
+}

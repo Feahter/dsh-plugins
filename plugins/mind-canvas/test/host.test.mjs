@@ -238,9 +238,38 @@ function fakeRes() {
 
 async function call(ctx, store, options) {
   const res = fakeRes()
-  await route(ctx, store, fakeReq(options), res, new URL(options.url ?? '/mind-canvas/state', 'http://localhost'))
+  await route(ctx, store, fakeReq(options), res, new URL(options.url ?? '/mind-canvas/state', 'http://localhost'), options.versionChecker)
   return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null, headers: res.headers }
 }
+
+
+test('GET /version 由版本自查返回最新版本', async () => {
+  const { store, cleanup } = await tempStore()
+  try {
+    const versionChecker = {
+      check: async ({ refresh }) => ({
+        plugin: 'dsh-mind-canvas',
+        current: '0.3.3',
+        latest: '0.3.4',
+        updateAvailable: true,
+        homepage: 'https://example.test/mind-canvas',
+        failed: false,
+        refreshed: refresh,
+      }),
+    }
+    const result = await call({ get: () => undefined }, store, {
+      url: '/mind-canvas/version?refresh=1',
+      versionChecker,
+    })
+    assert.equal(result.status, 200)
+    assert.equal(result.json.ok, true)
+    assert.equal(result.json.data.latest, '0.3.4')
+    assert.equal(result.json.data.updateAvailable, true)
+    assert.equal(result.json.data.refreshed, true)
+  } finally {
+    await cleanup()
+  }
+})
 
 test('GET /state 在没有文件时返回 null 而不是报错', async () => {
   const { store, cleanup } = await tempStore()

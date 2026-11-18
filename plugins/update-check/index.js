@@ -15,6 +15,8 @@
 import { open, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import { createVersionChecker } from './version-check.js'
+
 export const name = 'dsh-update-check'
 export const inject = ['webServer']
 
@@ -442,7 +444,7 @@ function send(res, status, payload) {
  * Build the raw `WebRoute` handler. Exported for the standalone verifier, which
  * drives it through a real HTTP server.
  */
-export function createRouteHandler(ctx, host) {
+export function createRouteHandler(ctx, host, versionChecker) {
   return async function handle(req, res, { bodyText = '' } = {}) {
     const connection = typeof ctx?.get === 'function' ? ctx.get('connection') : undefined
     if (!connection || typeof connection.requestRejection !== 'function') {
@@ -468,6 +470,13 @@ export function createRouteHandler(ctx, host) {
     const route = url.pathname.slice(ROUTE_PREFIX.length) || '/'
     const method = req.method === 'HEAD' ? 'GET' : req.method ?? 'GET'
     try {
+      // The plugin's own release badge. Deliberately separate from `/status`,
+      // which answers for the Desktop app (`currentVersion`/`latest` there).
+      if (method === 'GET' && route === '/version' && versionChecker !== undefined) {
+        const refresh = ['1', 'true', 'yes'].includes(url.searchParams.get('refresh') ?? '')
+        send(res, 200, { ok: true, data: await versionChecker.check({ refresh }) })
+        return
+      }
       if (method === 'GET' && route === '/status') {
         const refresh = ['1', 'true', 'yes'].includes(url.searchParams.get('refresh') ?? '')
         send(res, 200, await host.status({ refresh }))
@@ -491,10 +500,11 @@ export function createRouteHandler(ctx, host) {
 
 export function apply(ctx, config = {}) {
   const host = createHost(config)
+  const versionChecker = createVersionChecker({ pluginName: name })
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: ROUTE_PREFIX,
-    handler: createRouteHandler(ctx, host),
+    handler: createRouteHandler(ctx, host, versionChecker),
   }))
 }
 

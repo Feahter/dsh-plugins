@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
     const HOTKEY_RESERVED = new Set(['ctrl+w', 'ctrl+t', 'ctrl+n', 'ctrl+r', 'meta+q', 'meta+w', 'meta+m', 'alt+f4']);
     const REFINE_PATH = '/plugins/realtime-voice/refine';
     const HEALTH_PATH = '/plugins/realtime-voice/health';
+    const VERSION_PATH = '/plugins/realtime-voice/version';
 
     // ---------------------------------------------------------------- locale
     const zh = {
@@ -44,6 +45,8 @@ window.__ModuleLoader__.load({
       stopped: '已停止',
       settings: '实时语音设置',
       close: '关闭',
+      updateLabel: '新版本',
+      updateTip: '新版本 {version} 已发布，点击前往插件页更新',
       tabInput: '输入',
       tabPolish: '润色',
       tabTranslate: '翻译',
@@ -117,6 +120,8 @@ window.__ModuleLoader__.load({
       stopped: 'Stopped',
       settings: 'Realtime voice settings',
       close: 'Close',
+      updateLabel: 'Update',
+      updateTip: 'Update {version} is available — click to update on the plugin page',
       tabInput: 'Input',
       tabPolish: 'Polish',
       tabTranslate: 'Translate',
@@ -1546,6 +1551,50 @@ window.__ModuleLoader__.load({
       return typeof props.t === 'function' ? props.t : fallbackTranslate;
     }
 
+    /** 本插件自己的版本探针；网络失败、离线、未发布时都静默返回 null。 */
+    async function requestVersion() {
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 10000) : null;
+      try {
+        const response = await fetch(VERSION_PATH, {
+          method: 'GET',
+          headers: { accept: 'application/json' },
+          ...(controller ? { signal: controller.signal } : {}),
+        });
+        if (!response.ok) return null;
+        const body = await response.json();
+        return body && body.ok === true ? body.data : null;
+      } catch (_error) {
+        return null;
+      } finally {
+        if (timer !== null) clearTimeout(timer);
+      }
+    }
+
+    /** 有新版本时显示「↑ vX.Y.Z」，点击打开插件页；检查失败或已最新时什么都不渲染。 */
+    function VersionBadge(props) {
+      const translate = useTranslator(props);
+      const [version, setVersion] = React.useState(null);
+      React.useEffect(() => {
+        let alive = true;
+        void requestVersion().then((data) => { if (alive) setVersion(data); });
+        return () => { alive = false; };
+      }, []);
+      if (version === null || version.updateAvailable !== true || typeof version.latest !== 'string') return null;
+      const href = typeof version.homepage === 'string' ? version.homepage : 'https://github.com/Feahter/dsh-plugins';
+      const tip = translate('updateTip', { version: 'v' + version.latest });
+      return h('a', {
+        className: 'rv-update',
+        href,
+        target: '_blank',
+        rel: 'noreferrer',
+        title: tip,
+        'aria-label': tip,
+      },
+      h('span', { className: 'rv-update-label' }, translate('updateLabel')),
+      h('span', { className: 'rv-update-number' }, '↑ v' + version.latest));
+    }
+
     function SurfaceActions(props) {
       // Every slot that owns an input hands us insertion actions; remember them so
       // the mic (which may live in a different slot) can insert into that input.
@@ -1768,7 +1817,9 @@ window.__ModuleLoader__.load({
           onClick: () => setTab(id),
         }, label))),
         body,
-        h('div', { className: 'rv-settingsFoot' }, h('span', { className: 'rv-version' }, 'v' + VERSION)));
+        h('div', { className: 'rv-settingsFoot' },
+          h('span', { className: 'rv-version' }, 'v' + VERSION),
+          h(VersionBadge, { t: props.t })));
     }
 
     function VoiceBar(props) {
@@ -1909,6 +1960,11 @@ window.__ModuleLoader__.load({
       '.rv-settingsFoot{display:flex;justify-content:space-between;align-items:center}',
       '.rv-foot{display:flex;justify-content:space-between;align-items:center;gap:8px}',
       '.rv-version{opacity:.5;font-size:11px}',
+      '.rv-settingsFoot{gap:8px}',
+      '.rv-update{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;text-decoration:none;white-space:nowrap;color:#fff;background:var(--dsw-alias-brand-primary);font-size:11px;font-weight:600}',
+      '.rv-update:hover{filter:brightness(1.08)}',
+      '.rv-update-label{opacity:.9;font-weight:500}',
+      '.rv-update-number{font-variant-numeric:tabular-nums}',
     ].join('\n');
 
     // ------------------------------------------------------------------ mount

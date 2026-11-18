@@ -19,6 +19,7 @@ import { classifyError, getRoute, jsonRoute } from './host/http.js'
 import { planRoute, resolveOrdinal, spokenConfirmation } from './host/router.js'
 import { createSessionBridge } from './host/sessions.js'
 import { createSpeechSynthesizer, readApiKeyFromConfig, VOICES } from './host/tts.js'
+import { createVersionChecker, createVersionRoute } from './version-check.js'
 
 export const name = 'dsh-voice-control'
 
@@ -55,6 +56,8 @@ export function apply(ctx) {
   }
 
   const synthesizer = createSpeechSynthesizer({ getApiKey, logger })
+  // One checker per Host lifetime: its index cache is shared across requests.
+  const versionChecker = createVersionChecker({ pluginName: name })
 
   const bridge = createSessionBridge({
     getController: () => ctx.get('sessionController'),
@@ -268,6 +271,21 @@ export function apply(ctx) {
                 voiceId: result.voiceId,
                 cached: result.cached,
               },
+            }
+          },
+        }),
+      }))
+
+      disposers.push(server.register({
+        kind: 'exact',
+        path: `${ROUTE_PREFIX}/version`,
+        handler: createVersionRoute({
+          checker: versionChecker,
+          getConnection: () => {
+            try {
+              return ctx.get?.('connection')
+            } catch {
+              return undefined
             }
           },
         }),

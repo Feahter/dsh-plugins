@@ -585,6 +585,7 @@ window.__ModuleLoader__.load({
       transcribeAbort: null,
       hud: null,
       fallback: null,
+      updateBadge: null,
       disposers: [],
     };
 
@@ -755,6 +756,85 @@ window.__ModuleLoader__.load({
       doc.body.appendChild(button);
       runtime.fallback = { button, down, up, click };
       return runtime.fallback;
+    }
+
+    // ------------------------------------------------------------- version badge
+
+    /** 本插件自己的版本探针；离线、网络失败、索引里没有本插件时都返回 null。 */
+    async function requestVersion() {
+      try {
+        const response = await fetch(ROUTE_PREFIX + '/version', {
+          method: 'GET',
+          headers: { accept: 'application/json' },
+        });
+        if (!response.ok) return null;
+        const body = await response.json();
+        return body && body.ok === true ? body.data : null;
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function updateCopies() {
+      const language = typeof navigator !== 'undefined' && navigator ? String(navigator.language || '') : '';
+      if (language === '' || /^zh/i.test(language)) {
+        return { label: '新版本', tip: '新版本 {version} 已发布，点击前往插件页更新' };
+      }
+      return { label: 'Update', tip: 'Update {version} is available — click to update on the plugin page' };
+    }
+
+    /** 有新版本时在右下角挂一个「新版本 ↑ vX.Y.Z」，点击打开插件页；否则什么都不渲染。 */
+    function mountUpdateBadge() {
+      if (runtime.updateBadge) return runtime.updateBadge;
+      const doc = typeof document !== 'undefined' ? document : null;
+      if (!doc || !doc.body || typeof doc.createElement !== 'function' || typeof doc.body.appendChild !== 'function') return null;
+      const anchor = doc.createElement('a');
+      anchor.setAttribute('data-dsh-voice-control', 'version');
+      anchor.style.cssText = [
+        'position:fixed',
+        'right:18px',
+        'bottom:64px',
+        'z-index:2147483000',
+        'display:none',
+        'align-items:center',
+        'gap:6px',
+        'padding:5px 11px',
+        'border-radius:999px',
+        'text-decoration:none',
+        'white-space:nowrap',
+        'background:#4f8cff',
+        'color:#fff',
+        'font:600 11.5px/1.3 system-ui,-apple-system,"PingFang SC",sans-serif',
+        'box-shadow:0 8px 20px rgba(79,140,255,.35)',
+      ].join(';');
+      doc.body.appendChild(anchor);
+      runtime.updateBadge = { anchor };
+      void requestVersion().then((data) => {
+        if (!data || data.updateAvailable !== true || typeof data.latest !== 'string') return;
+        if (!runtime.updateBadge || runtime.updateBadge.anchor !== anchor) return;
+        const copies = updateCopies();
+        const tip = copies.tip.replace('{version}', 'v' + data.latest);
+        anchor.setAttribute('href', typeof data.homepage === 'string' ? data.homepage : 'https://github.com/Feahter/dsh-plugins');
+        anchor.setAttribute('target', '_blank');
+        anchor.setAttribute('rel', 'noreferrer');
+        anchor.setAttribute('title', tip);
+        anchor.setAttribute('aria-label', tip);
+        anchor.textContent = copies.label + ' ↑ v' + data.latest;
+        anchor.style.display = 'inline-flex';
+      });
+      return runtime.updateBadge;
+    }
+
+    function unmountUpdateBadge() {
+      const badge = runtime.updateBadge;
+      runtime.updateBadge = null;
+      if (!badge || !badge.anchor) return;
+      try {
+        if (typeof badge.anchor.remove === 'function') badge.anchor.remove();
+        else if (badge.anchor.parentNode && typeof badge.anchor.parentNode.removeChild === 'function') {
+          badge.anchor.parentNode.removeChild(badge.anchor);
+        }
+      } catch (_removeError) {}
     }
 
     function unmountFallback() {
@@ -1133,6 +1213,7 @@ window.__ModuleLoader__.load({
         } catch (_blurError) {}
       }
       mountFallback();
+      mountUpdateBadge();
       return () => {
         if (bound.ok && keyTarget && typeof keyTarget.removeEventListener === 'function') {
           keyTarget.removeEventListener('keydown', onKeyDown);
@@ -1142,6 +1223,7 @@ window.__ModuleLoader__.load({
           blurTarget.removeEventListener('blur', onBlur);
         }
         unmountFallback();
+        unmountUpdateBadge();
         removeHud();
       };
     }
@@ -1220,6 +1302,7 @@ window.__ModuleLoader__.load({
           } catch (_disposeError) {}
         }
         disposers.length = 0;
+        unmountUpdateBadge();
         removeHud();
         try {
           if (typeof window !== 'undefined' && window) delete window.__dshVoiceControl;

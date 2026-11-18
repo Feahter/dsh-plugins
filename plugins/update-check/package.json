@@ -24,6 +24,7 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
+    "version-check.js",
     "README.md",
     "test"
   ],
