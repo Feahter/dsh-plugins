@@ -213,7 +213,7 @@ const provided = record.provides.find(([name]) => name === 'voiceInput')
 ok('voiceInput service provided', Boolean(provided))
 const api = provided && provided[1]
 ok('api exposes version/surfaces/settings', Boolean(api.version && api.surfaces && api.settings))
-eq('api version', api.version, '0.3.0')
+eq('api version', api.version, '0.4.0')
 eq('settings default mode', api.settings.get().mode, 'dictate')
 
 // ---------------------------------------------------- cross-plugin API contract
