@@ -463,7 +463,8 @@ test('材料包：到期线索走引擎草稿路径（draft 的 packet 里带「
   const engine = new ForgeEngine({ root, recipes: [createNovelRecipe({ prompts })], llm })
   const project = await engine.createProject({
     title: '长夜将明',
-    params: { premise: PREMISE, chapters: 6, wordsPerChapter: 800, pov: '第三人称限知' },
+    // reviewGate 默认 true 后，不开闸的 run 会在审稿门停住；本test 只验材料包内容，显式关闸。
+    params: { premise: PREMISE, chapters: 6, wordsPerChapter: 800, pov: '第三人称限知', reviewGate: false },
   })
   const boot = await engine.startRun(project.id, { stages: ['premise', 'bible', 'characters', 'spine', 'outline'] })
   await waitRun(engine, boot.id)

@@ -36,17 +36,14 @@ test('提交对象包含七个新字段', () => {
   }
 })
 
-test('estimateFor 与 recipe.estimate 同口径', () => {
-  const start = wizard.indexOf('export function estimateFor')
-  assert.ok(start > -1, '找不到 estimateFor')
-  const end = wizard.indexOf('\nfunction duration', start)
-  assert.ok(end > start, '找不到 estimateFor 的结束位置')
-  const body = wizard.slice(start, end)
-  // 固定 7 段 + 每章 3.5 次（关审校 2.5 次）+ 卷纲；数字用正则断言，不写死整行。
-  assert.match(body, /\b7\b\s*\+/, '固定调用段 7 缺失')
-  assert.match(body, /\b3\.5\b/, '每章 3.5 次缺失')
-  assert.match(body, /\b2\.5\b/, '不开审校时每章 2.5 次缺失')
-  assert.match(body, /chaptersPerVolume/, '卷数计算没有吃 chaptersPerVolume')
+test('预估只用服务端结果，参数包含上下文预算且失败明确提示', () => {
+  assert.doesNotMatch(wizard, /estimateFor|localEstimate|form\.autoReview|5483|6324/)
+  assert.match(wizard, /api\.estimateNew\(estimateParams\)/)
+  assert.match(wizard, /contextBudget: Number\(form\.contextBudget\)/)
+  assert.match(wizard, /autoReview: true/)
+  assert.match(wizard, /估算中…/)
+  assert.match(wizard, /估算暂不可用/)
+  assert.match(wizard, /serverEstimate\?\.params === estimateParams/)
 })
 
 test('strings.js 里有频道 / 节奏 / 七个字段文案', () => {

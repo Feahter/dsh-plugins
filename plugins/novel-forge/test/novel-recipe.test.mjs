@@ -147,11 +147,11 @@ test('paramsSchema / paramsDefaults 符合 §4.1', () => {
   assert.equal(premise.minLength, 8)
   assert.equal(premise.maxLength, 2000)
   assert.equal(paramsDefaults.genre, '悬疑')
-  assert.equal(paramsDefaults.chapters, 24)
+  assert.equal(paramsDefaults.chapters, 100)
   assert.equal(paramsDefaults.wordsPerChapter, 3000)
   assert.equal(paramsDefaults.pov, '第三人称限知')
   assert.equal(paramsDefaults.autoReview, true)
-  assert.equal(paramsDefaults.reviewGate, false)
+  assert.equal(paramsDefaults.reviewGate, true)
   assert.deepEqual(paramsSchema.properties.genre.enum, ['悬疑', '奇幻', '科幻', '都市', '历史', '言情', '恐怖', '武侠', '通用'])
 })
 

@@ -13,6 +13,7 @@ import { chapterRequirements } from '../recipes/novel/packet.js'
 import { migrateOutline, nextActions, volumeOfChapter } from '../recipes/novel/plan.js'
 import { checkOpeningContract } from '../recipes/novel/outline.js'
 import { commitChapter, ensureVolume, prepareChapter } from '../recipes/novel/chapter.js'
+import { paramsSchema } from '../recipes/novel/index.js'
 import { deconstruct } from '../recipes/novel/deconstruct.js'
 
 // 需要按 JSON 存的产物 key。ledger 保留：v1 项目还有账本，读的时候要能迁移。
@@ -407,50 +408,9 @@ export function createTools(engine) {
     defineTool(
       'novel_create',
       '新建一个小说项目。只需一句话故事核（premise），其他参数可选。创建后不会自动开写，需要 novel_run 启动流水线。',
-      {
-        type: 'object',
-        properties: {
-          premise: { type: 'string', description: '一句话故事核，8–2000 字。', minLength: 8, maxLength: 2000 },
-          title: { type: 'string', description: '书名；留空则由模型起名。' },
-          genre: { type: 'string', description: '类型：悬疑/奇幻/科幻/都市/历史/言情/恐怖/武侠/通用。' },
-          chapters: { type: 'number', description: '章数，6–3000，默认 24。超过 60 章按卷惰性展开。' },
-          chaptersPerVolume: { type: 'number', description: '每卷章数，10–60，默认 30；卷数超过 40 时脚本会自动抬高。' },
-          contextBudget: { type: 'number', description: '单章写作材料包的字数预算，默认 12000。长篇不必调大：各分片有固定上限，包不会越写越长。' },
-          wordsPerChapter: { type: 'number', description: '每章字数，800–8000，默认 3000。' },
-          pov: { type: 'string', description: '第一人称/第三人称限知/第三人称全知。' },
-          tone: { type: 'string', description: '文风关键词，如“冷、克制、潮湿的温情”。' },
-          styleGuide: { type: 'string', description: '用户给的写作规矩或样本段落。' },
-          channel: { type: 'string', description: '男频/女频/通用，默认通用。决定读者预期与爽点密度。' },
-          platform: { type: 'string', description: '起点/番茄/晋江/七猫/未定；只记录，供后续调优。' },
-          tags: { type: 'string', description: '标签，逗号分隔 3–6 个，如“无限流,克苏鲁,群像”。' },
-          sellingPoint: { type: 'string', description: '一句话卖点：冲突 + 读者能持续得到的体验（≤60 字）。' },
-          comps: { type: 'string', description: '对标作品，格式“书名：借什么机制”（≤160 字）。' },
-          updateCadence: { type: 'string', description: '日更/周更/不定期，默认日更。' },
-          goldenFinger: { type: 'string', description: '金手指/核心外挂：规则、边界、代价（≤200 字，可空）。' },
-        },
-        required: ['premise'],
-        additionalProperties: false,
-      },
+      paramsSchema,
       async args => {
-        const params = {
-          premise: args.premise,
-          title: args.title ?? '',
-          genre: args.genre,
-          chapters: args.chapters,
-          chaptersPerVolume: args.chaptersPerVolume,
-          contextBudget: args.contextBudget,
-          wordsPerChapter: args.wordsPerChapter,
-          pov: args.pov,
-          tone: args.tone,
-          styleGuide: args.styleGuide,
-          channel: args.channel,
-          platform: args.platform,
-          tags: args.tags,
-          sellingPoint: args.sellingPoint,
-          comps: args.comps,
-          updateCadence: args.updateCadence,
-          goldenFinger: args.goldenFinger,
-        }
+        const params = { ...args, title: args.title ?? '' }
         for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key]
         const project = await engine.createProject({ recipeId: 'novel', title: args.title, params })
         const estimate = await engine.estimate(project.id)

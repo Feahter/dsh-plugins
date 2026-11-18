@@ -1,7 +1,7 @@
-// 新建长篇：一屏向导。左边是参数，右边是本地公式算出来的实时预估。
+// 新建长篇：一屏向导。左边是参数，右边是服务端按当前参数返回的预估。
 import React from 'react'
 import { Button, Field, Switch, formatNumber, formatTokens } from './bits.jsx'
-import { CADENCES, CHANNELS, GENRES, LONGFORM_FIELDS, POVS, STAGES } from '../strings.js'
+import { CADENCES, CHANNELS, GENRES, LONGFORM_FIELDS, POVS } from '../strings.js'
 import { randomIdea } from '../ideas.js'
 import * as api from '../api.js'
 
@@ -10,11 +10,13 @@ const DEFAULT = {
   title: '',
   genre: '悬疑',
   channel: '通用',
+  platform: '未定',
   tags: '',
   sellingPoint: '',
-  chapters: 24,
+  chapters: 100,
   wordsPerChapter: 3000,
   chaptersPerVolume: 30,
+  contextBudget: 12000,
   updateCadence: '日更',
   goldenFinger: '',
   comps: '',
@@ -23,11 +25,11 @@ const DEFAULT = {
   audience: '成年',
   tone: '',
   styleGuide: '',
-  reviewGate: false,
+  reviewGate: true,
 }
 
 // 网文动辄几百章：上限跟 recipe 的 paramsSchema 对齐（6–3000），预设取常见连载体量。
-const CHAPTER_PRESETS = [100, 300, 600, 1000]
+const CHAPTER_PRESETS = [24, 100, 300, 600, 1000]
 const CHAPTER_MIN = 6
 const CHAPTER_MAX = 3000
 const CHAPTERS_PER_VOLUME_PRESETS = [20, 30, 40, 50]
@@ -59,29 +61,6 @@ function volumeCountFor(chapters, chaptersPerVolume = CHAPTERS_PER_VOLUME_DEFAUL
   return Math.ceil(total / effective)
 }
 
-/** 本地预估，不调模型；公式与 recipe.estimate 保持一致，服务端可达时以服务端为准。 */
-export function estimateFor(chapters, wordsPerChapter, autoReview = true, chaptersPerVolume = CHAPTERS_PER_VOLUME_DEFAULT) {
-  const chapterCount = Math.max(0, Number(chapters) || 0)
-  const words = Math.max(0, Number(wordsPerChapter) || 0)
-  // 固定 7 段（pitch/brief/设定/人物/脊柱/开篇/首卷章纲）+ 每章 3.5 次
-  // （细纲 / 草稿（含内联摘要）/ 审校 / 修订（含内联摘要））；不开审校只有 2.5 次。
-  const perChapter = autoReview ? 3.5 : 2.5
-  const volumes = volumeCountFor(chapterCount, chaptersPerVolume)
-  const calls = Math.ceil(7 + chapterCount * perChapter + volumes)
-  const perChar = 1 / 1.6 // 中文约 1.6 字/token
-  // 常量来自 12 章 × 3000 字的实测聚合（docs/architecture.md §6.5）。
-  // 与 recipe.estimate 同步：pitch/opener 各多一次调用，固定段 6→7。
-  const fixedIn = 32000
-  const fixedOut = 13700
-  const prose = ratio => Math.round(words * ratio)
-  const perIn = 5483 + 6324 + (autoReview ? 6331 + prose(1.05) + 4581 + prose(1.05) : 0)
-  const perOut = 1757 + prose(1.03) + (autoReview ? 1053 + prose(1.07) : 0)
-  const tokens = Math.round((fixedIn + chapterCount * perIn + fixedOut + chapterCount * perOut) * perChar)
-  // 一次调用大致 2 分钟（含写正文的长调用），只给一个量级。
-  const minutes = calls * 2
-  return { chapters: chapterCount, calls, tokens, minutes }
-}
-
 function duration(minutes) {
   if (minutes < 60) return `${minutes} 分钟`
   const hours = minutes / 60
@@ -89,7 +68,7 @@ function duration(minutes) {
   return `${Math.round(hours)} 小时`
 }
 
-function NumberField({ label, hint, value, onChange, min, max, presets, suffix }) {
+function NumberField({ label, hint, value, onChange, min, max, presets, suffix, presetLabel }) {
   return React.createElement(Field, { label, hint },
     React.createElement('div', { className: 'nf-actions', style: { marginTop: 0, alignItems: 'stretch' } },
       React.createElement('input', {
@@ -106,7 +85,7 @@ function NumberField({ label, hint, value, onChange, min, max, presets, suffix }
           onClick: () => onChange(preset),
           'aria-pressed': value === preset,
           style: value === preset ? { borderColor: 'var(--nf-ink)', color: 'var(--nf-ink)' } : undefined,
-        }, `${preset}${suffix || ''}`)),
+        }, presetLabel ? presetLabel(preset) : `${preset}${suffix || ''}`)),
       ),
     ),
   )
@@ -137,46 +116,50 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [showMore, setShowMore] = React.useState(false)
-  const localEstimate = React.useMemo(
-    () => estimateFor(form.chapters, form.wordsPerChapter, form.autoReview !== false, form.chaptersPerVolume),
-    [form.chapters, form.wordsPerChapter, form.autoReview, form.chaptersPerVolume],
-  )
-  // 后端按 recipe.estimate 算（含审校/修订的真实调用数）；拿不到就退回本地公式。
+  // 只采用当前参数对应的服务端预估；切换参数后立即显示等待状态。
+  const estimateParams = React.useMemo(() => ({
+    genre: form.genre,
+    chapters: Number(form.chapters) || DEFAULT.chapters,
+    wordsPerChapter: Number(form.wordsPerChapter) || DEFAULT.wordsPerChapter,
+    chaptersPerVolume: clampPerVolume(form.chaptersPerVolume),
+    contextBudget: Number(form.contextBudget) || DEFAULT.contextBudget,
+    autoReview: true,
+  }), [form.chapters, form.wordsPerChapter, form.chaptersPerVolume, form.genre, form.contextBudget])
   const [serverEstimate, setServerEstimate] = React.useState(null)
   React.useEffect(() => {
     let live = true
     const timer = setTimeout(() => {
-      // 估算只吃篇幅、每卷章数与审校开关：主角性别不影响调用数，不往这里带。
-      api.estimateNew({
-        genre: form.genre,
-        chapters: Number(form.chapters) || 24,
-        wordsPerChapter: Number(form.wordsPerChapter) || 3000,
-        chaptersPerVolume: clampPerVolume(form.chaptersPerVolume),
-        autoReview: form.autoReview !== false,
-      }).then(value => {
-        if (live && value && Number.isFinite(value.calls)) setServerEstimate(value)
-      }).catch(() => {})
+      api.estimateNew(estimateParams).then(value => {
+        if (!value || ![value.calls, value.estTokensIn, value.estTokensOut].every(Number.isFinite)) {
+          throw new Error('服务端未返回有效估算')
+        }
+        if (live) setServerEstimate({ params: estimateParams, value })
+      }).catch(() => {
+        if (live) setServerEstimate({ params: estimateParams, error: true })
+      })
     }, 300)
     return () => {
       live = false
       clearTimeout(timer)
     }
-  }, [form.chapters, form.wordsPerChapter, form.chaptersPerVolume, form.genre, form.autoReview])
-  const estimate = serverEstimate
+  }, [estimateParams])
+  const currentEstimate = serverEstimate?.params === estimateParams ? serverEstimate : null
+  const estimate = currentEstimate?.value
     ? {
-        chapters: serverEstimate.chapters ?? localEstimate.chapters,
-        calls: serverEstimate.calls,
-        tokens: (serverEstimate.estTokensIn ?? 0) + (serverEstimate.estTokensOut ?? 0),
-        minutes: serverEstimate.calls * 2,
-        note: serverEstimate.note,
+        calls: currentEstimate.value.calls,
+        tokens: currentEstimate.value.estTokensIn + currentEstimate.value.estTokensOut,
+        minutes: currentEstimate.value.calls * 2,
+        note: currentEstimate.value.note,
       }
-    : localEstimate
+    : null
+  const estimateStatus = currentEstimate?.error ? '估算暂不可用，请稍后重试或调整参数。' : '估算中…'
 
   const set = (key, value) => setForm(previous => ({ ...previous, [key]: value }))
 
-  // 本地随机：不调模型，一次把故事核/书名/类型/文风/篇幅都填上，用户再改。
+  // 本地随机只换故事核和书名，保留用户已选的参数。
   const randomize = () => {
-    setForm(previous => ({ ...previous, ...randomIdea() }))
+    const { premise, title } = randomIdea()
+    setForm(previous => ({ ...previous, premise, title }))
     setError(null)
   }
 
@@ -202,7 +185,8 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
         set('tone', text.split('\n')[0].slice(0, 200))
       } else {
         set('premise', text.slice(0, 2000))
-        notify('润色好了，可以接着改。', 'ok')
+        if (text.length > 2000) notify('润色结果超过 2000 字，已截断')
+        else notify('润色好了，可以接着改。', 'ok')
       }
     } catch (caught) {
       const message = caught?.message || String(caught)
@@ -217,13 +201,14 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
     event?.preventDefault?.()
     const premise = form.premise.trim()
     if (premise.length < 8) {
-      setError('故事核至少写 8 个字——一句话也行，但要能看出人和事。')
+      setError(`故事核至少 8 个字，还差 ${8 - premise.length} 个字。`)
       return
     }
     setBusy(true)
     setError(null)
+    let project = null
     try {
-      const project = await api.createProject({
+      project = await api.createProject({
         title: form.title.trim() || undefined,
         recipeId: 'novel',
         params: {
@@ -231,13 +216,15 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
           title: form.title.trim(),
           genre: form.genre,
           channel: form.channel,
-          tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean).join(','),
+          platform: form.platform,
+          tags: [...new Set(form.tags.split(/[,，、]/).map(tag => tag.trim()).filter(Boolean))].join(','),
           sellingPoint: form.sellingPoint.trim(),
           audience: form.audience,
           language: 'zh',
-          chapters: Number(form.chapters) || 24,
+          chapters: Number(form.chapters) || DEFAULT.chapters,
           wordsPerChapter: Number(form.wordsPerChapter) || 3000,
           chaptersPerVolume: clampPerVolume(form.chaptersPerVolume),
+          contextBudget: Number(form.contextBudget) || DEFAULT.contextBudget,
           pov: form.pov,
           protagonistGender: form.protagonistGender,
           tone: form.tone.trim(),
@@ -252,13 +239,19 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
       await api.startRun(project.id, {
         from: 'premise',
         autoApprove: !form.reviewGate,
+        window: 10,
       })
       notify(`《${project.title || '未命名'}》已开炉。`, 'ok')
       onCreated(project.id)
     } catch (caught) {
-      setError(caught.message || String(caught))
-      notify(caught.message || '创建失败', 'error')
-      setBusy(false)
+      if (project) {
+        notify(`项目已创建，开炉失败：${caught.message || String(caught)}`, 'error')
+        onCreated(project.id)
+      } else {
+        setError(caught.message || String(caught))
+        notify(caught.message || '创建失败', 'error')
+        setBusy(false)
+      }
     }
   }
 
@@ -279,14 +272,14 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
     React.createElement('form', { className: 'nf-create', onSubmit: submit },
       React.createElement('div', { className: 'nf-create-head' },
         React.createElement('h1', null, '新建长篇'),
-        React.createElement('p', null, '先给一句话。其余的，墨炉在写的过程中替你问清楚。'),
+        React.createElement('p', null, '其余参数先用默认值，开炉后随时可以在工作台里改。'),
       ),
 
       React.createElement('div', { className: 'nf-create-grid' },
         React.createElement('div', { className: 'nf-form' },
           React.createElement(Field, {
             label: '故事核',
-            hint: '必填 · 8–2000 字 · 一句话或一小段都行',
+            hint: '必填 · 至少 8 个字，最多 2000 字 · 一句话或一小段都行',
           },
           React.createElement('div', { className: 'nf-actions', style: { marginTop: 0, marginBottom: 6, justifyContent: 'flex-start' } },
             React.createElement('button', {
@@ -334,6 +327,13 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
             onChange: value => set('channel', value),
           }),
 
+          React.createElement(SegmentField, {
+            label: '目标平台',
+            hint: '只记录，供后续调优',
+            value: form.platform, options: ['起点', '番茄', '晋江', '七猫', '未定'],
+            onChange: value => set('platform', value),
+          }),
+
           React.createElement('div', { className: 'nf-row' },
             React.createElement(Field, { label: LONGFORM_FIELDS.tags, hint: '3–6 个，逗号分隔 · 可空，留空由 AI 起' },
               React.createElement('input', {
@@ -355,6 +355,7 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
               hint: `6–3000 章 · 每卷约 ${perVolume} 章，当前约 ${volumes} 卷${volumeLifted ? '（超 40 卷会自动加厚每卷）' : ''}`,
               value: form.chapters, min: CHAPTER_MIN, max: CHAPTER_MAX,
               onChange: value => set('chapters', value), presets: CHAPTER_PRESETS, suffix: ' 章',
+              presetLabel: preset => preset === 24 ? '24 章 · 短篇试水' : `${preset} 章`,
             }),
             React.createElement(NumberField, {
               label: '每章字数', hint: '800–8000 字', value: form.wordsPerChapter, min: 800, max: 8000,
@@ -362,13 +363,20 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
             }),
           ),
 
-          React.createElement(NumberField, {
+          React.createElement(Switch, {
+            checked: form.reviewGate,
+            onChange: value => set('reviewGate', value),
+            label: '审稿门：每步停下来让我看',
+            hint: '打开后，大纲与每章草稿写出来会先停住，等你说「继续」再往下炼。',
+          }),
+
+          Number(form.chapters) > 60 ? React.createElement(NumberField, {
             label: LONGFORM_FIELDS.chaptersPerVolume,
             hint: `10–60 章 · 当前约 ${volumes} 卷${volumeLifted ? '（已按 40 卷上限自动加厚）' : ''}`,
             value: form.chaptersPerVolume, min: CHAPTERS_PER_VOLUME_MIN, max: CHAPTERS_PER_VOLUME_MAX,
             onChange: value => set('chaptersPerVolume', value),
             presets: CHAPTERS_PER_VOLUME_PRESETS, suffix: ' 章',
-          }),
+          }) : null,
 
           React.createElement('div', { className: 'nf-row-3' },
             React.createElement(Field, { label: '视角' },
@@ -421,10 +429,15 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
               onClick: () => setShowMore(value => !value),
               'aria-expanded': showMore,
             }, showMore ? `收起${LONGFORM_FIELDS.more}` : LONGFORM_FIELDS.more,
-              showMore ? null : React.createElement('em', null, ' · 更新节奏 / 金手指 / 对标作品，都可空')),
+              showMore ? null : React.createElement('em', null, ' · 高级：上下文预算 / 更新节奏 / 金手指 / 对标作品')),
           ),
 
           showMore ? React.createElement('div', { style: { display: 'grid', gap: 12 } },
+            React.createElement(NumberField, {
+              label: '上下文预算', hint: '4000–30000 字 · 每章写作材料包上限，会影响 token 估算',
+              value: form.contextBudget, min: 4000, max: 30000,
+              onChange: value => set('contextBudget', value), presets: [4000, 12000, 30000], suffix: ' 字',
+            }),
             React.createElement(SegmentField, {
               label: LONGFORM_FIELDS.updateCadence,
               hint: '影响卷末钩子与存稿建议',
@@ -457,20 +470,13 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
           }),
           ),
 
-          React.createElement(Switch, {
-            checked: form.reviewGate,
-            onChange: value => set('reviewGate', value),
-            label: '审稿门：每步停下来让我看',
-            hint: '打开后，大纲与每章草稿写出来会先停住，等你说「继续」再往下炼。',
-          }),
-
           error ? React.createElement('div', { className: 'nf-error' }, error) : null,
 
           React.createElement('div', { className: 'nf-actions' },
             React.createElement(Button, { variant: 'primary', type: 'submit', busy, disabled: busy }, busy ? '正在开炉…' : '开始炼'),
             React.createElement(Button, { variant: 'quiet', onClick: onCancel, disabled: busy }, '返回书架'),
             React.createElement('span', { className: 'nf-grow' }),
-            React.createElement('span', { className: 'nf-muted', style: { fontSize: 10.5 } }, '创建后立即从「故事核心」开始'),
+            React.createElement('span', { className: 'nf-muted', style: { fontSize: 10.5 } }, '创建后立即从「故事核心」开始；本轮最多 10 章，跑完再点开炉'),
           ),
         ),
 
@@ -478,25 +484,25 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
           React.createElement('h3', null, '这本大概要'),
           React.createElement('div', { className: 'nf-est-row' },
             React.createElement('span', null, '篇幅'),
-            React.createElement('b', null, `${estimate.chapters} 章 · ${formatNumber(form.wordsPerChapter * estimate.chapters)} 字`),
+            React.createElement('b', null, `${estimateParams.chapters} 章 · ${formatNumber(estimateParams.wordsPerChapter * estimateParams.chapters)} 字`),
           ),
           React.createElement('div', { className: 'nf-est-row' },
             React.createElement('span', null, '模型调用'),
-            React.createElement('b', null, `约 ${formatNumber(estimate.calls)} 次模型调用`),
+            React.createElement('b', null, estimate ? `约 ${formatNumber(estimate.calls)} 次模型调用` : estimateStatus),
           ),
           React.createElement('div', { className: 'nf-est-row' },
             React.createElement('span', null, 'token 量级'),
-            React.createElement('b', null, formatTokens(estimate.tokens)),
+            React.createElement('b', null, estimate ? formatTokens(estimate.tokens) : estimateStatus),
           ),
           React.createElement('div', { className: 'nf-est-row' },
             React.createElement('span', null, '预计耗时'),
-            React.createElement('b', null, duration(estimate.minutes)),
+            React.createElement('b', null, estimate ? duration(estimate.minutes) : estimateStatus),
           ),
           React.createElement('div', { className: 'nf-est-bar' },
             React.createElement('span', { className: 'nf-progress' },
               React.createElement('i', { style: { width: form.reviewGate ? '55%' : '100%', opacity: form.reviewGate ? .6 : 1 } }))),
           React.createElement('p', { className: 'nf-est-note' },
-            estimate.note || '预估不调模型，按当前参数与审校开关折算；公式与 recipe 一致。',
+            estimate?.note || '调用数与 token 由服务端按当前参数估算；耗时按每次调用约 2 分钟粗估，不调用模型。',
             form.reviewGate ? ' 审稿门打开后，中途停下的时间不算在内。' : '',
           ),
         ),

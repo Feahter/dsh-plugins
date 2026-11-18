@@ -465,7 +465,7 @@ export function Workbench({ projectId, onBack, notify }) {
     setRunError('')
     setSettling(false)
     try {
-      const created = await startRun(projectId, options)
+      const created = await startRun(projectId, { ...options, window: 10 })
       refreshRun(created)
       setChapter(null)
       notify(message, 'ok')
@@ -479,7 +479,7 @@ export function Workbench({ projectId, onBack, notify }) {
 
   const onContinue = () => {
     const from = project?.pendingReview?.nextStages?.[0] ?? resumeStage(project)
-    // 引擎明确要求 stages 与 from/to 二选一；只传 from 让它跑到底。
+    // 引擎要求 stages 与 from/to 二选一；from 指定起点，本轮最多写 10 章。
     begin({ from, autoApprove: !project?.params?.reviewGate }, '已开炉，继续炼')
   }
 

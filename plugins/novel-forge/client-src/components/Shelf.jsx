@@ -48,6 +48,7 @@ export function Shelf({ onOpen, onNew, notify }) {
       await startRun(project.id, {
         from: startStage(project.raw ?? project),
         autoApprove: !project.raw?.params?.reviewGate,
+        window: 10,
       })
       notify(`《${project.title}》已开炉`, 'ok')
     } catch (cause) {
