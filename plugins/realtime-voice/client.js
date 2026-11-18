@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const NS = 'realtime-voice';
-    const VERSION = '0.3.0';
+    const VERSION = '0.4.0';
     const SAMPLE_RATE = 16000;
     const FRAME = 320; // 20 ms @ 16 kHz
     const FRAME_MS = (FRAME / SAMPLE_RATE) * 1000;

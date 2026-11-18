@@ -17,7 +17,7 @@ import { createSkillsSurface } from './lib/host-skills.js';
 import { createAgentsSurface } from './lib/host-agents.js';
 import { createVersionChecker, createVersionRoute } from './version-check.js';
 
-const VERSION = '0.2.3';
+const VERSION = '0.3.0';
 const HEALTH_PREFIX = '/api/dsh-360/health';
 const VERSION_ROUTE = '/api/dsh-360/version';
 const versionChecker = createVersionChecker({ pluginName: 'dsh-360' });

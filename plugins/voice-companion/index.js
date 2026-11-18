@@ -33,7 +33,7 @@ import { DEFAULT_CHARACTER, listCharacters, resolveCharacter } from './src/clien
 
 export const name = 'voice-companion'
 export const ROUTE_PREFIX = '/api/voice-companion'
-export const VERSION = '0.4.0'
+export const VERSION = '0.5.0'
 
 const CONFIG_PATH = join(homedir(), '.deepseek', 'config.toml')
 const CONFIG_TTL_MS = 60_000

@@ -260,7 +260,7 @@ test('GET /version exposes the version-check payload', async () => {
   const versionChecker = {
     check: async ({ refresh }) => ({
       plugin: 'dsh-voice-companion',
-      current: '0.4.2',
+      current: '0.5.0',
       latest: '0.4.3',
       updateAvailable: true,
       homepage: 'https://example.test/voice-companion',

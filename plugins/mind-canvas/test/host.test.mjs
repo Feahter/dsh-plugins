@@ -249,7 +249,7 @@ test('GET /version 由版本自查返回最新版本', async () => {
     const versionChecker = {
       check: async ({ refresh }) => ({
         plugin: 'dsh-mind-canvas',
-        current: '0.3.3',
+        current: '0.4.0',
         latest: '0.3.4',
         updateAvailable: true,
         homepage: 'https://example.test/mind-canvas',

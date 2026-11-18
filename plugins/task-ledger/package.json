@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-ledger",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Task-centric ledger for the DeepSeek Harness: an external, canonical task ledger with resume leases, evidence-gated closeout, agent tools, and a management panel.",
   "license": "MIT",
   "author": "Feahter",

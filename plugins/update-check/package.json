@@ -1,6 +1,6 @@
 {
   "name": "dsh-update-check",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "DSH Desktop 版本更新检查：侧边栏面板显示已安装版本与更新源的最新版本，发现问题时一键交给应用内更新器（下载 → 校验 → 确认重启）。",
   "license": "MIT",
   "keywords": [
