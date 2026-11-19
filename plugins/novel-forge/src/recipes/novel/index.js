@@ -82,6 +82,8 @@ export const paramsDefaults = {
   comps: '',
   updateCadence: '日更',
   goldenFinger: '',
+  marketMode: 'off',
+  marketYear: 0,
 }
 
 const paramsSchema = {
@@ -135,6 +137,17 @@ const paramsSchema = {
     comps: { type: 'string', maxLength: 160, description: '对标作品，格式「书名：借什么机制」' },
     updateCadence: { type: 'string', enum: CADENCES, description: '更新节奏；影响卷末钩子与存稿建议' },
     goldenFinger: { type: 'string', maxLength: 200, description: '金手指/核心外挂：规则、边界、代价（可空）' },
+    marketMode: {
+      type: 'string',
+      enum: ['off', 'year', 'tags'],
+      description: '市场坐标：off 关闭；year 按某年榜单风向注入商业定位；tags 按已填标签匹配头部作品（只借机制）',
+    },
+    marketYear: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 2026,
+      description: '对标年份 2015–2026，0=不指定；2026 为进行中年份',
+    },
   },
 }
 

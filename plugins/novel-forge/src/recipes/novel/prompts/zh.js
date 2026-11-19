@@ -9,6 +9,8 @@
  * 本文件是纯函数：不读盘、不发网络、不调模型、不改 ctx。
  */
 
+import { marketBrief } from '../market.js'
+
 const FENCE = '```'
 
 /* ------------------------------------------------------------------ *
@@ -1027,6 +1029,7 @@ function goldenFingerText(value) {
 function commercialLines(ctx) {
   const pitch = pitchOf(ctx)
   const p = paramsOf(ctx)
+  const mode = str(p.marketMode) || 'off'
   const channel = str(pitch.channel) || str(p.channel)
   const platform = str(pitch.platform) || str(p.platform)
   const tags = tagList(pitch.tags && pitch.tags.length ? pitch.tags : p.tags)
@@ -1040,7 +1043,7 @@ function commercialLines(ctx) {
   const opening = pitch.opening && typeof pitch.opening === 'object' ? pitch.opening : {}
   const firstLine = str(opening.firstLine) || str(p.firstLine)
   const question = str(opening.chapterOneQuestion) || str(p.chapterOneQuestion)
-  return [
+  const lines = [
     channel || platform ? `- 频道／平台：${channel || '未定'}｜${platform || '未定'}` : '',
     tags.length ? `- 标签：${tags.join('、')}` : '',
     sellingPoint ? `- 卖点：${sellingPoint}` : '',
@@ -1052,9 +1055,16 @@ function commercialLines(ctx) {
     cadence ? `- 更新节奏：${cadence}` : '',
     firstLine ? `- 开篇第一句：${firstLine}` : '',
     question ? `- 第 1 章要回答的问题：${question}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean)
+
+  let brief = ''
+  if (mode === 'year') {
+    brief = marketBrief({ year: p.marketYear, channel: str(p.channel) }, { maxChars: 700 })
+  } else if (mode === 'tags') {
+    brief = marketBrief({ year: p.marketYear || undefined, tags: tagList(p.tags), channel: str(p.channel) }, { maxChars: 700 })
+  }
+  if (brief) lines.push('', brief)
+  return lines.join('\n')
 }
 
 /**
