@@ -165,8 +165,8 @@
         "zh": "语音看板娘"
       },
       "description": {
-        "zh": "语音看板娘 0.4：核心形象换成自研的 3D 发光体（core3d.js，单文件 WebGL，不依赖 three.js、不加载贴图）——idle / listening / thinking / speaking / error 五套状态调色板，87 个样式 token 全部可改；跟模型说一句「换成暖金色、切换慢一点」就能改主题，连同名字存成你自己的主题。面板收窄回两件事：语音输入（通话模式逐句朗读、输入框听写、按住热键说话）与派活给 DSH。音色按形象与每句话的情绪自适应，声音与语速可选。",
-        "en": "Voice companion 0.4: the mascot is now an original 3D surface drawn by core3d.js — one WebGL file, no three.js, no textures — with five state palettes (idle, listening, thinking, speaking, error) and 87 style tokens open to edit. Ask the model in one sentence (\"make it warm gold, slower transitions\") and it rewrites the theme; name it and it is stored as your own. The panel is narrowed back to two jobs: voice input (call mode speaking replies sentence by sentence, composer dictation, hold-to-talk) and handing work to DSH. Voice and speed follow the character and each sentence mood."
+        "zh": "语音看板娘 0.6：设置面板收成「语音管家设置」一页，形象、声音、主题分组可改；挂断会中止本次通话的 /turn 请求，人声打断后把触发停播的那 220 毫秒语音交给识别，麦克风意外断开时结束当前通话并提示重连。形象仍是自研的 3D 发光核（单文件 WebGL，不依赖 three.js、不加载贴图），五套状态调色板、87 个样式 token 可改，跟模型说一句就能换主题并存成自己的。面板只做两件事：语音输入（通话逐句朗读、输入框听写、按住热键说话）与派活给 DSH。",
+        "en": "Voice companion 0.6: the settings panel is one sheet with grouped appearance, voice and theme sections. Hanging up aborts the call in-flight /turn request, a spoken interruption hands the 220 ms that stopped playback to recognition, and an unexpected microphone disconnect ends the call with a reconnect hint. The mascot is still an original 3D surface (one WebGL file, no three.js, no textures) with five state palettes and 87 style tokens; say one sentence to restyle it and save your own theme. The panel keeps two jobs: voice input (call-mode speech, composer dictation, hold-to-talk) and handing work to DSH."
       },
       "icon": "plugins/voice-companion/icon.svg",
       "author": "Feahter",
@@ -192,10 +192,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795018195
+          "updated": 1795091455
         }
       },
       "versions": [
+        {
+          "version": "0.6.0",
+          "publishTimestamp": 1795091455,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "6a92aac092bd5a8d196f39c0ec714d91b187cb0c",
+            "path": "plugins/voice-companion"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.5.0",
           "publishTimestamp": 1795018195,
@@ -386,8 +400,8 @@
         "zh": "归档会话与 PDCA 炼金"
       },
       "description": {
-        "zh": " 0.3.2 打磨详情页：没选中会话时给功能清单式空态，加排序标签与刷新提示，标签文案去掉中英并列的冗余。",
-        "en": " 0.3.2 polishes the detail pane: an empty state that lists what the pane shows, a sort label and a refresh hint, and cleaner tab labels without the duplicated English."
+        "zh": "0.4.1 修转写阅读窗分页：加载更多不再把过期页拼进当前转写，切换会话不再残留上一份的加载状态；服务端分页真正按 maxChars 截断（不再预留字节），maxChars 传 0 回退默认值。归档会话（标签/备注/检索/回收站，只读镜像 Harness 的归档开关、不改原始会话文件）与 PDCA 炼金（本地算指标、生成上下文补丁、采纳可回滚）不变，数据在 ~/.dsh/archive-rsi/。",
+        "en": "0.4.1 fixes transcript paging in the reading pane: load-more no longer appends a page that belongs to a session you already left, switching sessions no longer keeps the previous loading state, the server spends the whole maxChars budget per page, and maxChars=0 falls back to the default. Session curation (tags, notes, search, trash — a read-only mirror of the Harness archive flag, never touching original session files) and the PDCA loop (local metrics, context patches, reversible adoption) are unchanged; data lives in ~/.dsh/archive-rsi/."
       },
       "icon": "plugins/archive-rsi/icon.svg",
       "author": "Feahter",
@@ -414,10 +428,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795091455
         }
       },
       "versions": [
+        {
+          "version": "0.4.1",
+          "publishTimestamp": 1795091455,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "cf05cde1f224db88e3f1b1143d8cf28db08bf63d",
+            "path": "plugins/archive-rsi"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.4.0",
           "publishTimestamp": 1795014753,
