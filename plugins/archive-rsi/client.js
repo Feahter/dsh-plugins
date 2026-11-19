@@ -2805,6 +2805,7 @@ window.__ModuleLoader__.load({
       // Synchronous in-flight guard: two clicks can land before the busy state
       // re-renders and would otherwise fire the same mutation twice.
       const pendingRef = React.useRef('');
+      const transcriptRequestRef = React.useRef(null);
 
       const refresh = React.useCallback(() => setReloadKey((value) => value + 1), []);
 
@@ -2848,6 +2849,8 @@ window.__ModuleLoader__.load({
       }, [reloadKey, statusFilter, tagFilter]);
 
       React.useEffect(() => {
+        setTranscriptLoading(false);
+        setTranscriptError('');
         if (!selectedId) {
           setDetail(null);
           setDetailError('');
@@ -2858,8 +2861,6 @@ window.__ModuleLoader__.load({
         let alive = true;
         setDetailLoading(true);
         setDetailError('');
-        setTranscriptLoading(false);
-        setTranscriptError('');
         api('/sessions/' + encodeURIComponent(selectedId) + '?transcript=1&maxChars=' + String(TRANSCRIPT_INITIAL_MAX)).then((result) => {
           if (!alive) return;
           setDetailLoading(false);
@@ -2891,7 +2892,10 @@ window.__ModuleLoader__.load({
           });
           setSessions((previous) => previous.map((item) => (item.id === entry.id ? entry : item)));
         });
-        return () => { alive = false; };
+        return () => {
+          alive = false;
+          transcriptRequestRef.current = null;
+        };
       }, [selectedId, reloadKey, detailKey]);
 
       React.useEffect(() => {
@@ -3074,14 +3078,17 @@ window.__ModuleLoader__.load({
       }
 
       async function loadTranscriptMore() {
-        if (!detail || !detail.entry || !detail.entry.id) return;
-        if (transcriptLoading || !detail.transcriptTruncated) return;
+        if (!detail || !detail.entry || !selectedId || detail.entry.id !== selectedId) return;
+        if (detailLoading || transcriptRequestRef.current || !detail.transcriptTruncated) return;
         const entryId = detail.entry.id;
         const offset = typeof detail.transcript === 'string' ? detail.transcript.length : 0;
+        const request = {};
+        transcriptRequestRef.current = request;
         setTranscriptLoading(true);
         setTranscriptError('');
         try {
           const result = await fetchTranscriptChunk(entryId, offset, TRANSCRIPT_MORE_MAX);
+          if (transcriptRequestRef.current !== request) return;
           if (!result.ok) {
             setTranscriptError(result.message);
             return;
@@ -3091,7 +3098,7 @@ window.__ModuleLoader__.load({
           const offsetRaw = toNumber(data.transcriptOffset);
           const totalRaw = toNumber(data.transcriptTotal);
           setDetail((previous) => {
-            if (!previous) return previous;
+            if (!previous || previous.entry.id !== entryId) return previous;
             return {
               ...previous,
               transcript: (previous.transcript || '') + chunk,
@@ -3101,7 +3108,10 @@ window.__ModuleLoader__.load({
             };
           });
         } finally {
-          setTranscriptLoading(false);
+          if (transcriptRequestRef.current === request) {
+            transcriptRequestRef.current = null;
+            setTranscriptLoading(false);
+          }
         }
       }
 

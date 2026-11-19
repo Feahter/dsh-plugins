@@ -235,7 +235,7 @@ archive-rsi/
 ```bash
 node --check archive-rsi/*.js
 node archive-rsi/.verify-host.mjs    # 58 项：配置、多帧解码、事实、存储、指标、R1–R10、PDCA、采纳/回滚、工具、路由、真实语料
-node archive-rsi/.verify-client.mjs  # 6 项：模块注册、插槽、locale、渲染
+node archive-rsi/.verify-client.mjs  # 11 项：模块注册、插槽、locale、渲染、转写分页（含过期页丢弃）
 ```
 
 **已验证的版本对**（2026-11-08，独立验证方与 Lead 各跑一遍，结果一致）：

@@ -2604,11 +2604,21 @@ async function phaseRoutes() {
   });
 
   await check('WEB.14', 'GET /sessions/:id?transcript=1 paginates: offset slices concatenate to the original and transcriptTotal equals the full length', async () => {
-    const listing = await httpCall(handler, { url: '/api/archive-rsi/sessions?limit=1' });
-    assertEqual(listing.status, 200, 'sessions status');
-    const entry = listing.json && Array.isArray(listing.json.entries) ? listing.json.entries[0] : null;
-    assert(entry && typeof entry.id === 'string', 'no session to inspect');
-    pageId = entry.id;
+    pageId = 'web-pagination-fixture';
+    const t0 = 1_700_000_000_000;
+    const header = { type: 'session', version: 4, id: pageId, createdAt: t0, cwd: '/tmp', origin: 'user', isSeeded: false };
+    const events = [
+      { type: 'turn/start', seq: 1, time: t0 + 1000, data: { turn: 1 } },
+      { type: 'assistant/message', seq: 2, time: t0 + 2000, data: {
+        turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '0123456789abcdefghijklmnopqrstuvwxyz\n'.repeat(100) }] }, stream: false,
+      } },
+      { type: 'turn/end', seq: 3, time: t0 + 3000, data: { turn: 1, reason: { kind: 'completed' } } },
+    ];
+    // The newest corpus session can be shorter than a page. Import a known
+    // multi-page conversation through the same store instead of depending on it.
+    await writeSessionFixture(fixture.root, 'web-pagination', { header, events });
+    const synced = await callTool(stub, 'archive_sync', { refresh: false });
+    assert(synced && synced.ok === true, 'pagination fixture sync failed');
     const mdPath = path.join(base, 'root', 'sessions', `${pageId}.md`);
     pageFull = await readText(mdPath);
     if (!pageFull || pageFull.length <= 2000) {
@@ -2817,7 +2827,13 @@ async function phaseTranscriptContract() {
     if (!rendered.includes(longText)) {
       throw new Error('the 6000-char assistant text was cut from the transcript (block cap still active?)');
     }
-    return `6000-char assistant text fully present (rendered ${rendered.length} chars)`;
+    const exactFit = renderTranscript(facts, events, { maxBytes: Buffer.byteLength(rendered) });
+    assertEqual(exactFit.length, rendered.length, 'transcript length when it fits the byte cap exactly');
+    assert(exactFit === rendered, 'transcript was modified despite fitting the byte cap exactly');
+    const belowCap = renderTranscript(facts, events, { maxBytes: Buffer.byteLength(rendered) - 1 });
+    assert(belowCap.includes('[truncated:'), 'transcript exceeding the byte cap has no truncation marker');
+    assert(Buffer.byteLength(belowCap) < Buffer.byteLength(rendered), 'truncated transcript exceeds its byte cap');
+    return `6000-char assistant text fully present (rendered ${rendered.length} chars), including at the exact byte cap`;
   });
 
   await check('TXT.2', 'maxChars is clamped to [1000, 400000]', async () => {
@@ -2870,7 +2886,15 @@ async function phaseTranscriptContract() {
       throw new Error(`maxChars=999999: expected transcriptTruncated=true, got ${JSON.stringify(big.json.transcriptTruncated)}`);
     }
     if (big.json.transcriptOffset !== 0) throw new Error(`maxChars=999999: expected transcriptOffset=0, got ${JSON.stringify(big.json.transcriptOffset)}`);
-    return `maxChars=10 -> 1000; maxChars=999999 -> 400000 of ${total}`;
+    const defaultPage = await httpCall(handler, { url: '/api/archive-rsi/sessions/clamp-fixture?transcript=1' });
+    assertEqual(defaultPage.status, 200, 'omitted maxChars status');
+    assertEqual(defaultPage.json.transcript.length, 24000, 'omitted maxChars page length');
+    const zero = await httpCall(handler, { url: '/api/archive-rsi/sessions/clamp-fixture?transcript=1&maxChars=0&offset=-10' });
+    assertEqual(zero.status, 200, 'maxChars=0 and negative offset status');
+    assertEqual(zero.json.transcriptOffset, 0, 'negative offset clamps to zero');
+    assertEqual(zero.json.transcript.length, 24000, 'maxChars=0 uses the web default');
+    assert(zero.json.transcript === defaultPage.json.transcript, 'zero maxChars returned a different default page');
+    return `maxChars=10 -> 1000; maxChars=999999 -> 400000 of ${total}; maxChars=0 -> 24000`;
   });
 
   // The model-facing `archive_get` must page exactly like the panel route: a
@@ -2920,6 +2944,8 @@ async function phaseTranscriptContract() {
     const dflt = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true });
     assertEqual(dflt.transcript.length, 12_000, 'default maxChars');
     assertEqual(dflt.transcriptTruncated, true, 'default page transcriptTruncated');
+    const zero = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 0 });
+    assert(zero.ok === true && zero.transcript === dflt.transcript, 'maxChars=0 should return the default tool page');
     const floored = await callTool(stub, 'archive_get', { id: 'page-fixture', transcript: true, maxChars: 10 });
     assertEqual(floored.transcript.length, 1000, 'maxChars floor');
 

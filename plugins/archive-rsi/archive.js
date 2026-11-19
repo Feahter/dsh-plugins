@@ -53,7 +53,6 @@ const MAX_TITLE_CHARS = 200;
 const MAX_CALL_PREVIEW = 200;
 const TRANSCRIPT_CALL_PREVIEW = 120;
 const TRANSCRIPT_BLOCK_CHARS = 12000;
-const MARKER_RESERVE = 128;
 const SESSION_FILE_RE = /^session(?:\.v(\d+))?\.jsonl(?:\.zstd)?$/;
 
 // ------------------------------------------------ contract patterns (§3, §5.1)
@@ -1175,7 +1174,7 @@ export function renderTranscript(facts, events, { maxBytes = DEFAULT_MAX_TRANSCR
   let covered = -1;
   for (const chunk of chunks) {
     const size = Buffer.byteLength(chunk.text);
-    if (used + size + MARKER_RESERVE > limit) break;
+    if (used + size > limit) break;
     included.push(chunk);
     used += size;
     covered = chunk.upto;

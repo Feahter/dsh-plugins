@@ -52,6 +52,10 @@ function printFail(id, description, detail) {
 function check(id, description, fn) {
   try {
     const detail = fn();
+    if (detail && typeof detail.then === 'function') {
+      return detail.then((message) => printPass(id, description, message),
+        (error) => printFail(id, description, (error && error.message) || String(error)));
+    }
     printPass(id, description, typeof detail === 'string' ? detail : '');
   } catch (error) {
     printFail(id, description, (error && error.message) || String(error));
@@ -473,12 +477,15 @@ check('CLI.10', 'the new transcript-viewer keys exist in inline zh/en and in zh/
   return '5 transcript keys consistent across all four dictionaries';
 });
 
-check('CLI.11', 'a truncated transcript renders a load-more button that requests an offset', () => {
-  // Load in a sandbox that records `fetch` so clicking the real viewer's button
-  // can be asserted against the exact URL the chunk loader sends.
+await check('CLI.11', 'a truncated transcript requests the next offset and ignores stale pages', async () => {
+  // Track hook state and effect cleanup for the registered page as well as
+  // rendering its real transcript button with the DOM-less React stub.
   const react = makeReact();
   const registrations = [];
   const requests = [];
+  const pendingPages = [];
+  const initialPage = (id) => ({ entry: { id }, transcript: id.repeat(8000), transcriptOffset: 0, transcriptTotal: 48000, transcriptTruncated: true });
+  const reply = (data) => ({ ok: true, json: async () => ({ ok: true, data }) });
   const sandbox = {
     console,
     setTimeout,
@@ -491,13 +498,15 @@ check('CLI.11', 'a truncated transcript renders a load-more button that requests
     TextDecoder,
     fetch(url, options) {
       requests.push({ url: String(url), options });
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({
-          ok: true,
-          data: { transcript: 'more', transcriptOffset: 24000, transcriptTotal: 100000, transcriptTruncated: false },
-        }),
-      });
+      const request = new URL(url, 'http://localhost');
+      const id = request.pathname.split('/').pop();
+      if (id === 'session-abc') return Promise.resolve(reply({ transcript: 'more', transcriptOffset: 24000, transcriptTotal: 100000, transcriptTruncated: false }));
+      if (id === 'sessions') return Promise.resolve(reply({ entries: [{ id: 'aaa' }, { id: 'bbb' }] }));
+      if (id === 'aaa' || id === 'bbb') {
+        if (!request.searchParams.has('offset')) return Promise.resolve(reply(initialPage(id)));
+        return new Promise((resolve) => pendingPages.push({ id, resolve }));
+      }
+      return Promise.resolve(reply({}));
     },
     window: {
       __ModuleLoader__: {
@@ -540,7 +549,77 @@ check('CLI.11', 'a truncated transcript renders a load-more button that requests
   const url = requests[0].url;
   assert(url.indexOf('offset=24000') !== -1, `load-more request is missing the offset parameter: ${url}`);
   assert(url.indexOf('maxChars=200000') !== -1, `load-more request is missing the maxChars parameter: ${url}`);
-  return 'load-more button renders; click requests offset=24000&maxChars=200000';
+  const hooks = [];
+  let cursor = 0;
+  let effects = [];
+  react.useState = (initial) => {
+    const index = cursor++;
+    if (!hooks[index]) hooks[index] = { value: typeof initial === 'function' ? initial() : initial };
+    const state = hooks[index];
+    return [state.value, (update) => { state.value = typeof update === 'function' ? update(state.value) : update; }];
+  };
+  react.useRef = (initial) => (hooks[cursor++] ??= { current: initial });
+  react.useEffect = (effect, deps) => {
+    const index = cursor++;
+    const previous = hooks[index];
+    if (previous && deps && deps.length === previous.deps?.length && deps.every((value, i) => Object.is(value, previous.deps[i]))) return;
+    effects.push(() => {
+      previous?.cleanup?.();
+      hooks[index] = { deps, cleanup: effect() };
+    });
+  };
+
+  let Page;
+  exported.apply({
+    effect() {},
+    slots: {
+      inject(_name, register) { register(); },
+      register(slot, Component) { if (slot.name === 'main') Page = Component; },
+    },
+  });
+  assert(typeof Page === 'function', 'the main slot did not register the page');
+  function renderPage() {
+    cursor = 0;
+    effects = [];
+    react.created.length = 0;
+    Page();
+    effects.forEach((effect) => effect());
+    return react.created.find((element) => element.type?.name === 'SessionDetailPane')?.props;
+  }
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  async function select(id) {
+    const row = react.created.find((element) => element.type?.name === 'SessionRow' && element.props.entry.id === id);
+    assert(row, `session row ${id} missing`);
+    row.props.onSelect(id);
+    renderPage();
+    await settle();
+    const pane = renderPage();
+    assert(pane?.detail?.entry.id === id, `detail for ${id} missing`);
+    return pane;
+  }
+
+  renderPage();
+  await settle();
+  renderPage();
+  const first = await select('aaa');
+  const stale = first.onLoadMore();
+  const second = await select('bbb');
+  const current = second.onLoadMore();
+  assert(pendingPages.map(({ id }) => id).join(',') === 'aaa,bbb', 'expected one pending page per session');
+  pendingPages[0].resolve(reply({ transcript: 'stale', transcriptOffset: 24000, transcriptTotal: 24005, transcriptTruncated: false }));
+  await stale;
+  const whileLoading = renderPage();
+  assert(whileLoading.detail.transcript === initialPage('bbb').transcript, 'stale page appended to the selected session');
+  assert(whileLoading.transcriptLoading, 'stale page cleared the active session loading state');
+  const duplicate = second.onLoadMore(); // Even a second click from the same render is ignored.
+  assert(pendingPages.length === 2, 'duplicate click requested another copy of the active page');
+  await duplicate;
+  pendingPages[1].resolve(reply({ transcript: 'current', transcriptOffset: 24000, transcriptTotal: 24007, transcriptTruncated: false }));
+  await current;
+  const done = renderPage();
+  assert(done.detail.transcript === initialPage('bbb').transcript + 'current', 'active page was not appended exactly once');
+  assert(!done.transcriptLoading && !done.detail.transcriptTruncated, 'final page did not clear loading and truncation');
+  return 'load-more requests offset=24000&maxChars=200000; stale response leaves the active transcript unchanged';
 });
 
 // --------------------------------------------------------------------- summary

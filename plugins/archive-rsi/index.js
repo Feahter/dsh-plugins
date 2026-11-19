@@ -211,14 +211,14 @@ function asLimit(value, fallback, max = 500) {
 }
 
 /**
- * Transcript page size: default 24000, clamped to [1000, 400000]. A missing or
- * non-numeric value falls back to the default rather than collapsing to 1000.
+ * Transcript page size: default 24000, clamped to [1000, 400000]. A missing,
+ * zero or non-numeric value falls back to the default.
  */
 function asMaxChars(value, fallback = 24_000) {
   const base = Number.isFinite(fallback) && fallback > 0 ? fallback : 24_000;
   if (value === null || value === undefined || value === '') return base;
   const number = Number(value);
-  if (!Number.isFinite(number)) return base;
+  if (!Number.isFinite(number) || number === 0) return base;
   return Math.min(400_000, Math.max(1000, Math.floor(number)));
 }
 
