@@ -429,10 +429,10 @@ function renderCharacter(doc, id, face) {
 // ---- src/client/core3d.js ----
 const TAU = Math.PI * 2;
 const FALLBACK = {
-  idle: ['#dfe9ff', '#8fb4ff', '#6b85ff'],
+  idle: ['#e2fcff', '#63d8ef', '#2878ad'],
   listening: ['#d8ffe9', '#7fe3a8', '#2fbf86'],
-  thinking: ['#e2ecff', '#9db4ff', '#6b85ff'],
-  speaking: ['#eef4ff', '#a9c0ff', '#7d95ff'],
+  thinking: ['#efe7ff', '#bba0fa', '#6d52d1'],
+  speaking: ['#f0f7ff', '#8cbaff', '#5266eb'],
   error: ['#ffd9d9', '#ff7676', '#7a2020'],
 };
 const KIND = { webgl2: 'webgl2', webgl1: 'webgl', canvas2d: '2d' };
@@ -449,7 +449,7 @@ function pickCoreBackend(env) {
 }
 
 const CORE_STATE_STYLE = {
-  idle: { spin: 1.0, ring: 1.0, glow: 0.55, jitter: 0, desat: 0, pulse: 0.10 },
+  idle: { spin: 0.65, ring: 1.0, glow: 0.45, jitter: 0, desat: 0, pulse: 0.10 },
   listening: { spin: 1.4, ring: 1.35, glow: 0.70, jitter: 0, desat: 0, pulse: 0.18 },
   thinking: { spin: 2.6, ring: 1.15, glow: 0.62, jitter: 0, desat: 0, pulse: 0.22 },
   speaking: { spin: 1.8, ring: 1.10, glow: 0.85, jitter: 0, desat: 0, pulse: 0.40 },
@@ -1254,10 +1254,10 @@ const TOKEN_GROUPS = [
     ['core.width','length','264px'],['core.height','length','140px'],['core.spin','duration','8s'],
     ['core.glow','number', 0.55, { min: 0, max: 1 }],['core.displace','number', 0.18, { min: 0, max: 1 }],
     ['core.rim','color','#8fb4ff'],['core.quality','enum','auto', { options: ['auto','high','low','off'] }],
-    ['core.palette.idle','css','#dfe9ff,#8fb4ff,#6b85ff', { parts: 3 }],
+    ['core.palette.idle','css','#e2fcff,#63d8ef,#2878ad', { parts: 3 }],
     ['core.palette.listening','css','#d8ffe9,#7fe3a8,#2fbf86', { parts: 3 }],
-    ['core.palette.thinking','css','#e2ecff,#9db4ff,#6b85ff', { parts: 3 }],
-    ['core.palette.speaking','css','#eef4ff,#a9c0ff,#7d95ff', { parts: 3 }],
+    ['core.palette.thinking','css','#efe7ff,#bba0fa,#6d52d1', { parts: 3 }],
+    ['core.palette.speaking','css','#f0f7ff,#8cbaff,#5266eb', { parts: 3 }],
     ['core.palette.error','css','#ffd9d9,#ff7676,#7a2020', { parts: 3 }]],
   ['surface', ['bubble.bg','color','rgba(120,150,255,.10)'],['bubble.border','color','rgba(140,170,255,.14)'],
     ['bubble.color','color','#e8eeff'],['bubble.radius','length','12px'],['bubble.fontSize','length','12px'],
@@ -1682,7 +1682,7 @@ const FACE_QUALITY = 0.85;
 const FACE_NAME = '我的形象';
 const FACE_TOO_BIG = '图片太大了，换一张小一点的吧（上限 800KB）';
 
-const SHEET_TITLE = '声音与形象';
+const SHEET_TITLE = '语音管家设置';
 const SHEET_SAVED_MS = 800;
 const SLOT_LABELS = { base: '基础声音', bright: '开心时', soft: '温柔时' };
 const VOICE_FALLBACK = 'tide';
@@ -1698,7 +1698,10 @@ border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba
 [data-vc-avatar] .vc-head{display:flex;align-items:center;gap:var(--vc-board-gap, 6px);min-height:22px;flex:none;font-size:11px;letter-spacing:.02em;color:var(--vc-text-secondary, #cfd9f5)}
 [data-vc-avatar] .vc-dot{width:var(--vc-dot-size, 6px);height:var(--vc-dot-size, 6px);border-radius:50%;background:var(--vc-dot-idle, #8b93a7);flex:none;transition:background .2s ease,box-shadow .2s ease}
 [data-vc-avatar] .vc-label{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-[data-vc-avatar] .vc-picker{display:none;gap:4px;flex:none}
+[data-vc-avatar] .vc-picker{display:flex;flex-wrap:wrap;gap:5px}
+[data-vc-avatar] .vc-picker .vc-chip{width:auto;max-width:100%;min-height:26px;padding:0 8px;border-radius:8px}
+[data-vc-avatar] .vc-settings-group{display:grid;gap:6px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.12)}
+[data-vc-avatar] .vc-settings-heading{margin:0;color:#e8eeff;font:600 12px/1.4 system-ui,sans-serif}
 [data-vc-avatar] .vc-chip{appearance:none;width:var(--vc-chip-size, 21px);height:var(--vc-chip-size, 21px);padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:var(--vc-chip-bg, rgba(255,255,255,.06));color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;display:grid;place-items:center;transition:transform .12s ease,background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-chip:hover{background:rgba(255,255,255,.12)}
 [data-vc-avatar] .vc-chip:active{transform:translateY(1px)}
@@ -1947,8 +1950,8 @@ function createAvatar(options = {}) {
   const dot = element(doc, 'span', { class: 'vc-dot', 'aria-hidden': 'true' });
   const label = element(doc, 'span', { class: 'vc-label' }, initial.labels.idle);
 
-  const picker = element(doc, 'div', { class: 'vc-picker', role: 'group', 'aria-label': '切换看板娘' });
-  const chips = listCharacters().map((entry) => {
+  const picker = element(doc, 'div', { class: 'vc-picker', role: 'group', 'aria-label': '切换形象' });
+  const chips = [resolveCharacter('core'), ...listCharacters()].map((entry) => {
     const chip = element(doc, 'button', {
       class: 'vc-chip',
       type: 'button',
@@ -1956,7 +1959,7 @@ function createAvatar(options = {}) {
       'aria-pressed': entry.id === initial.id ? 'true' : 'false',
       'aria-label': entry.name,
       title: entry.name + ' · ' + entry.tagline,
-    }, entry.name.slice(0, 1));
+    }, entry.name);
     if (typeof chip.addEventListener === 'function') {
       chip.addEventListener('click', () => selectCharacter(entry.id, true));
     }
@@ -1993,13 +1996,13 @@ function createAvatar(options = {}) {
         'aria-pressed': initial.id === CUSTOM_CHARACTER_ID ? 'true' : 'false',
         'aria-label': face.name,
         title: face.name + ' · 自定义形象',
-      }, face.name.slice(0, 1));
+      }, face.name);
       if (typeof faceChip.addEventListener === 'function') {
         faceChip.addEventListener('click', () => selectCharacter(CUSTOM_CHARACTER_ID, true));
       }
       chips.push({ id: CUSTOM_CHARACTER_ID, node: faceChip });
     } else {
-      faceChip.textContent = face.name.slice(0, 1);
+      faceChip.textContent = face.name;
       faceChip.setAttribute('aria-label', face.name);
       faceChip.setAttribute('title', face.name + ' · 自定义形象');
     }
@@ -2091,7 +2094,6 @@ function createAvatar(options = {}) {
   holdRow.appendChild(element(doc, 'span', { class: 'vc-hold-hint' }, '松开结束 / release to send'));
   head.appendChild(dot);
   head.appendChild(label);
-  head.appendChild(picker);
   head.appendChild(modeButton);
   head.appendChild(gearButton);
   head.appendChild(minButton);
@@ -2139,6 +2141,13 @@ function createAvatar(options = {}) {
   sheetHead.appendChild(closeButton);
   sheetCard.appendChild(sheetHead);
 
+  const appearance = element(doc, 'section', { class: 'vc-settings-group', 'aria-label': '形象' });
+  appearance.appendChild(element(doc, 'h3', { class: 'vc-settings-heading' }, '形象'));
+  appearance.appendChild(picker);
+  sheetCard.appendChild(appearance);
+
+  const voiceSection = element(doc, 'section', { class: 'vc-settings-group', 'aria-label': '声音' });
+  voiceSection.appendChild(element(doc, 'h3', { class: 'vc-settings-heading' }, '声音'));
   const slotSelects = Object.create(null);
   for (const slot of VOICE_SLOTS) {
     const field = element(doc, 'label', { class: 'vc-field' });
@@ -2153,7 +2162,7 @@ function createAvatar(options = {}) {
     }
     slotSelects[slot] = select;
     field.appendChild(select);
-    sheetCard.appendChild(field);
+    voiceSection.appendChild(field);
   }
 
   const speedField = element(doc, 'label', { class: 'vc-field' });
@@ -2169,7 +2178,7 @@ function createAvatar(options = {}) {
   const speedValue = element(doc, 'span', { class: 'vc-speed-value' }, '×1.00');
   speedField.appendChild(speedInput);
   speedField.appendChild(speedValue);
-  sheetCard.appendChild(speedField);
+  voiceSection.appendChild(speedField);
 
   const nameField = element(doc, 'label', { class: 'vc-field' });
   nameField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '名字'));
@@ -2180,10 +2189,9 @@ function createAvatar(options = {}) {
     'aria-label': '形象名字',
   });
   nameField.appendChild(nameInput);
-  sheetCard.appendChild(nameField);
+  appearance.appendChild(nameField);
 
   const faceField = element(doc, 'div', { class: 'vc-field' });
-  faceField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '形象'));
   const changeFaceButton = element(doc, 'button', {
     class: 'vc-btn vc-change-face',
     type: 'button',
@@ -2197,7 +2205,7 @@ function createAvatar(options = {}) {
   }, '移除自定义形象');
   faceField.appendChild(changeFaceButton);
   faceField.appendChild(removeFaceButton);
-  sheetCard.appendChild(faceField);
+  appearance.appendChild(faceField);
 
   const sheetActions = element(doc, 'div', { class: 'vc-sheet-actions' });
   const previewButton = element(doc, 'button', {
@@ -2214,17 +2222,18 @@ function createAvatar(options = {}) {
     class: 'vc-btn vc-reset',
     type: 'button',
     'data-kind': 'quiet',
-  }, '恢复默认');
+  }, '重置声音');
   sheetActions.appendChild(previewButton);
   sheetActions.appendChild(saveButton);
   sheetActions.appendChild(resetButton);
-  sheetCard.appendChild(sheetActions);
+  voiceSection.appendChild(sheetActions);
+  sheetCard.appendChild(voiceSection);
 
   const themeSection = element(doc, 'div', {
     class: 'vc-theme-section',
     'data-role': 'theme',
   });
-  themeSection.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '外观'));
+  themeSection.appendChild(element(doc, 'h3', { class: 'vc-settings-heading' }, '主题'));
 
   const themeChips = element(doc, 'div', {
     class: 'vc-theme-chips',
@@ -2935,7 +2944,7 @@ function createAvatar(options = {}) {
     face = { name: next, src: face.src };
     writeStore(FACE_KEY, JSON.stringify(face));
     if (faceChip) {
-      faceChip.textContent = next.slice(0, 1);
+      faceChip.textContent = next;
       faceChip.setAttribute('aria-label', next);
       faceChip.setAttribute('title', next + ' · 自定义形象');
     }
@@ -3463,6 +3472,7 @@ const __test = {
 const SAMPLE_RATE = 16000;
 const FRAME_MS = 20;
 const FRAME = (SAMPLE_RATE * FRAME_MS) / 1000;
+const BARGE_FRAMES = Math.ceil(220 / FRAME_MS);
 
 /** RMS of a Float32 frame, 0..1. */
 function rms(frame) {
@@ -3609,14 +3619,14 @@ function createVad(config) {
     current() {
       return concatFloat(segment);
     },
-    reset() {
+    reset({ calibrated = false } = {}) {
       pre = [];
       segment = [];
       voicedMs = 0;
       silentMs = 0;
       segmentMs = 0;
       active = false;
-      elapsedMs = 0;
+      elapsedMs = calibrated ? CALIBRATION_MS : 0;
       noiseWindow.length = 0;
       threshold = config.threshold;
     },
@@ -3715,6 +3725,7 @@ function createAudioEngine(deps) {
   const partialWindowMs = 12000;
 
   let media = null;
+  let removeTrackListeners = null;
   let audioContext = null;
   let source = null;
   let processor = null;
@@ -3732,10 +3743,10 @@ function createAudioEngine(deps) {
   let startToken = 0;
 
   let playQueue = [];
-  let playing = false;
+  let playGeneration = 0;
   let currentSource = null;
   let prefetched = new Map();
-  let bargeMs = 0;
+  let bargeFrames = [];
 
   function emit() {
     deps.onState && deps.onState({ ...state });
@@ -3750,7 +3761,7 @@ function createAudioEngine(deps) {
     emit();
   }
 
-  async function transcribe(samples) {
+  async function transcribe(samples, token) {
     const wav = pcm16ToWav(floatToPcm16(samples));
     const audioBase64 = bytesToBase64(wav);
     if (deps.transcribeRemote) {
@@ -3761,8 +3772,8 @@ function createAudioEngine(deps) {
         throw new Error(result.error.message || 'transcribe failed');
       }
     }
-    const text = await deps.transcribeHttp(audioBase64);
-    return text;
+    if (token !== startToken) return '';
+    return deps.transcribeHttp(audioBase64);
   }
 
   async function redecode() {
@@ -3777,8 +3788,9 @@ function createAudioEngine(deps) {
     inFlight = true;
     lastCallAt = now;
     const run = generation;
+    const token = startToken;
     try {
-      const text = (await transcribe(windowSamples)).trim();
+      const text = (await transcribe(windowSamples, token)).trim();
       if (run !== generation) return;
       if (text && text !== lastPartial) {
         lastPartial = text;
@@ -3787,12 +3799,13 @@ function createAudioEngine(deps) {
       }
     } catch (_error) {
     } finally {
-      inFlight = false;
+      if (token === startToken) inFlight = false;
     }
   }
 
   async function finalize(samples) {
     const run = ++generation;
+    const token = startToken;
     vad && vad.reset();
     lastPartial = '';
     state.partial = '';
@@ -3802,7 +3815,7 @@ function createAudioEngine(deps) {
     }
     setPhase('thinking', { partial: '' });
     try {
-      const text = (await transcribe(samples)).trim();
+      const text = (await transcribe(samples, token)).trim();
       if (run !== generation) return;
       if (!text) {
         setPhase(running ? 'listening' : 'idle');
@@ -3810,9 +3823,10 @@ function createAudioEngine(deps) {
       }
       deps.onFinal && (await deps.onFinal(text));
     } catch (error) {
+      if (run !== generation) return;
       setPhase('error', { error: (error && error.message) || String(error) });
       setTimeout(() => {
-        if (running && !disposed) setPhase('listening');
+        if (run === generation && running && !disposed && state.phase === 'error') setPhase('listening');
       }, 2500);
     }
   }
@@ -3834,27 +3848,30 @@ function createAudioEngine(deps) {
     }
   }
 
-  async function playOne(bytes, rate) {
+  async function playOne(bytes, rate, batch) {
     if (!audioContext) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    const analyser = audioContext.createAnalyser();
+    const context = audioContext;
+    if (context.state === 'suspended') await context.resume();
+    if (batch !== playGeneration) return;
+    const buffer = await context.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    if (batch !== playGeneration) return;
+    const analyser = context.createAnalyser();
     analyser.fftSize = 512;
     const data = new Float32Array(analyser.fftSize);
-    const src = audioContext.createBufferSource();
+    const src = context.createBufferSource();
     src.buffer = buffer;
     src.playbackRate.value = clampPlaybackRate(rate);
     src.connect(analyser);
-    analyser.connect(audioContext.destination);
+    analyser.connect(context.destination);
     currentSource = src;
     const done = new Promise((resolve) => {
       src.onended = () => resolve();
     });
     src.start();
     const tick = () => {
-      if (currentSource !== src) return;
+      if (batch !== playGeneration || currentSource !== src) return;
       analyser.getFloatTimeDomainData(data);
       let peak = 0;
       for (let i = 0; i < data.length; i += 1) peak = Math.max(peak, Math.abs(data[i]));
@@ -3863,11 +3880,16 @@ function createAudioEngine(deps) {
     };
     requestAnimationFrame(tick);
     await done;
+    src.disconnect();
+    analyser.disconnect();
+    if (batch !== playGeneration) return;
     if (currentSource === src) currentSource = null;
     deps.onLevel && deps.onLevel(0);
   }
 
   function interrupt() {
+    playGeneration += 1;
+    bargeFrames = [];
     playQueue = [];
     prefetched.clear();
     if (currentSource) {
@@ -3878,23 +3900,23 @@ function createAudioEngine(deps) {
       }
       currentSource = null;
     }
-    playing = false;
     deps.onLevel && deps.onLevel(0);
   }
 
   async function playSentences(sentences) {
+    if (disposed) return;
+    interrupt();
+    const batch = playGeneration;
     if (!Array.isArray(sentences) || !sentences.length) {
       setPhase(running ? 'listening' : 'idle');
       return;
     }
-    interrupt();
     playQueue = sentences.map((entry, index) =>
       typeof entry === 'string'
         ? { text: entry, index }
         : { text: entry.text, voiceId: entry.voiceId, rate: entry.rate, index },
     );
     prefetch(playQueue.slice(0, 2));
-    playing = true;
     setPhase('speaking');
     while (playQueue.length) {
       const item = playQueue.shift();
@@ -3904,54 +3926,61 @@ function createAudioEngine(deps) {
       } catch (error) {
         payload = { error };
       }
+      if (batch !== playGeneration) return;
       prefetched.delete(item.index);
-      if (!playing) return;
       if (!payload || payload.error || !payload.audioBase64) {
         continue;
       }
       prefetch(playQueue.slice(0, 2));
       try {
-        await playOne(base64ToBytes(payload.audioBase64), item.rate);
+        await playOne(base64ToBytes(payload.audioBase64), item.rate, batch);
       } catch (_error) {
         /* decode failure: skip */
       }
-      if (running) deps.onLevel && deps.onLevel(0);
+      if (batch !== playGeneration) return;
     }
-    playing = false;
-    if (!disposed) setPhase(running ? 'listening' : 'idle');
+    finishPlayback();
+  }
+
+  function finishPlayback() {
+    bargeFrames = [];
+    setPhase(running ? 'listening' : 'idle');
   }
 
   /** Play one already-synthesised clip right away (latency filler). */
   async function playClip(payload) {
     if (!payload || !payload.audioBase64 || !audioContext || !running) return;
     interrupt();
-    playing = true;
+    const batch = playGeneration;
     setPhase('speaking');
     try {
-      await playOne(base64ToBytes(payload.audioBase64));
+      await playOne(base64ToBytes(payload.audioBase64), undefined, batch);
     } catch (_error) {
       /* skip a broken clip */
     }
-    if (!disposed && playing) {
-      playing = false;
-      setPhase(running ? 'listening' : 'idle');
-    }
+    if (batch === playGeneration) finishPlayback();
   }
 
   function onFrame(frame) {
     if (!vad) return;
     const level = rms(frame);
     if (state.phase === 'speaking') {
-      bargeMs = level >= Math.max(0.02, vad.threshold * 1.6) ? bargeMs + FRAME_MS : 0;
+      if (level >= Math.max(0.02, vad.threshold * 1.6)) bargeFrames.push(frame.slice());
+      else bargeFrames = [];
       deps.onLevel && deps.onLevel(Math.min(1, level * 1.6));
-      if (bargeMs >= 220) {
-        bargeMs = 0;
+      if (bargeFrames.length >= BARGE_FRAMES) {
+        const replay = bargeFrames;
         interrupt();
-        vad.reset();
+        vad.reset({ calibrated: true });
         setPhase('listening');
+        for (const recent of replay) pushVad(recent);
       }
       return;
     }
+    pushVad(frame);
+  }
+
+  function pushVad(frame) {
     const outcome = vad.push(frame);
     state.level = Math.min(1, outcome.level * 1.8);
     if (outcome.started) setPhase('listening');
@@ -3979,6 +4008,7 @@ function createAudioEngine(deps) {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (error) {
+      if (token !== startToken || disposed) return;
       const info = microphoneErrorInfo(error);
       setPhase('error', { error: info.message, mic: info });
       return;
@@ -3988,15 +4018,35 @@ function createAudioEngine(deps) {
       return;
     }
     media = stream;
-    media.getAudioTracks().forEach((track) => {
-      track.addEventListener('ended', () => {
-        if (running) stop();
-      });
-    });
+    const audioTracks = stream.getAudioTracks();
+    const onEnded = () => {
+      if (token !== startToken || media !== stream) return;
+      const info = {
+        state: 'missing',
+        code: 'disconnected',
+        message: '麦克风已断开 · Microphone disconnected\n重新连接麦克风后，点「开始通话」重试 / reconnect the microphone and start a new call.',
+      };
+      stop(info);
+      deps.onDeviceLost && deps.onDeviceLost(info);
+    };
+    audioTracks.forEach((track) => track.addEventListener('ended', onEnded));
+    removeTrackListeners = () => audioTracks.forEach((track) => track.removeEventListener?.('ended', onEnded));
+    if (audioTracks.some((track) => track.readyState === 'ended')) {
+      onEnded();
+      return;
+    }
     if (!audioContext) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    if (audioContext.state === 'suspended') await audioContext.resume();
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch (error) {
+        if (token !== startToken || disposed) return;
+        stop(microphoneErrorInfo(error));
+        return;
+      }
+    }
     if (token !== startToken || disposed) {
       return;
     }
@@ -4008,6 +4058,7 @@ function createAudioEngine(deps) {
     frameFill = 0;
     leftover = new Float32Array(0);
     processor.onaudioprocess = (event) => {
+      if (token !== startToken) return;
       const input = event.inputBuffer.getChannelData(0);
       let offset = 0;
       if (leftover.length) {
@@ -4041,9 +4092,14 @@ function createAudioEngine(deps) {
     setPhase('listening');
   }
 
-  function stop() {
+  function stop(mic = { state: 'idle', code: '', message: '' }) {
     running = false;
     startToken += 1;
+    generation += 1;
+    inFlight = false;
+    lastCallAt = 0;
+    lastPartial = '';
+    state.partial = '';
     interrupt();
     if (processor) {
       try {
@@ -4070,6 +4126,10 @@ function createAudioEngine(deps) {
       }
       sink = null;
     }
+    if (removeTrackListeners) {
+      removeTrackListeners();
+      removeTrackListeners = null;
+    }
     if (media) {
       media.getTracks().forEach((track) => track.stop());
       media = null;
@@ -4079,7 +4139,7 @@ function createAudioEngine(deps) {
       audioContext = null;
     }
     vad = null;
-    setPhase('idle');
+    setPhase('idle', { mic, error: '' });
   }
 
   function dispose() {
@@ -5899,7 +5959,7 @@ async function requestJson(path, options, timeoutMs) {
       credentials: 'same-origin',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
       body: options && options.body ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal,
+      signal: options && options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
     });
     const text = await response.text();
     let body = null;
@@ -5935,6 +5995,7 @@ function apply(ctx) {
     fillers: [],
     fillerIndex: 0,
     active: false,
+    call: null,
     sessionId: undefined,
     receiptTask: null,
     character: resolveCharacter(storedValue(CHARACTER_KEY) || 'core', storedFace()).id,
@@ -6006,6 +6067,8 @@ function apply(ctx) {
   }
 
   async function handleTurn(utterance) {
+    const call = runtime.call;
+    if (!call) return;
     runtime.avatar && runtime.avatar.setPartial('');
     runtime.avatar && runtime.avatar.setSubtitle(utterance, { role: 'user' });
     runtime.engine.setThinking();
@@ -6016,6 +6079,7 @@ function apply(ctx) {
         '/turn',
         {
           method: 'POST',
+          signal: call.signal,
           body: {
             utterance,
             character: runtime.character,
@@ -6026,13 +6090,13 @@ function apply(ctx) {
         45000,
       );
     } catch (error) {
+      if (runtime.call !== call) return;
       log('turn:error', error && error.message);
-      if (!runtime.active) return;
       runtime.avatar && runtime.avatar.setState('error');
       await runtime.engine.speak(['抱歉，我这边出了点问题。']);
       return;
     }
-    if (!runtime.active) return;
+    if (runtime.call !== call) return;
     const say = Array.isArray(reply.say) && reply.say.length ? reply.say : [reply.reply || '我在。'];
     runtime.history.push({ role: 'user', content: utterance });
     runtime.history.push({ role: 'assistant', content: say.join('') });
@@ -6095,6 +6159,8 @@ function apply(ctx) {
   async function startCall() {
     if (runtime.active) return;
     runtime.active = true;
+    const call = new AbortController();
+    runtime.call = call;
     const intro = micIntroOnce();
     if (runtime.avatar && typeof runtime.avatar.setMicNote === 'function') {
       runtime.avatar.setMicNote(MIC_DEFAULT_NOTE);
@@ -6104,8 +6170,10 @@ function apply(ctx) {
     }
     runtime.avatar && runtime.avatar.setSubtitle('喂，我在。', { role: 'assistant' });
     await runtime.engine.start();
+    if (runtime.call !== call) return;
     if (!runtime.engine.listening) {
       runtime.active = false;
+      runtime.call = null;
       const mic = typeof runtime.engine.mic === 'object' && runtime.engine.mic ? runtime.engine.mic : null;
       if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
         runtime.avatar.setNotice(micPermissionNotice(mic), 'error');
@@ -6124,14 +6192,18 @@ function apply(ctx) {
     }
   }
 
-  function endCall() {
+  function endCall(deviceLost) {
     runtime.active = false;
+    runtime.call?.abort();
+    runtime.call = null;
     stopPolling();
-    runtime.engine.interrupt();
-    runtime.engine.stop();
+    if (!deviceLost) runtime.engine.stop();
+    runtime.avatar && runtime.avatar.setPartial('');
     runtime.avatar && runtime.avatar.setState('idle');
-    runtime.avatar && runtime.avatar.setSubtitle('通话结束。');
-    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') runtime.avatar.setNotice('');
+    runtime.avatar && runtime.avatar.setSubtitle(deviceLost ? '麦克风已断开。' : '通话结束。');
+    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
+      runtime.avatar.setNotice(deviceLost ? micPermissionNotice(deviceLost) : '', deviceLost ? 'error' : undefined);
+    }
   }
 
   /**
@@ -6284,6 +6356,7 @@ function apply(ctx) {
           runtime.avatar && runtime.avatar.setSubtitle(state.error);
         }
       },
+      onDeviceLost: endCall,
       onPartial: (text) => runtime.avatar && runtime.avatar.setPartial(text),
       onLevel: (level) => runtime.avatar && runtime.avatar.setLevel(level),
       onFinal: (text) => (runtime.mode === 'dictation' ? dictate(text) : handleTurn(text)),
@@ -6350,7 +6423,7 @@ function apply(ctx) {
 
     window.__dshVoiceCompanion = {
       start: startCall,
-      stop: endCall,
+      stop: () => endCall(),
       status: () => ({
         active: runtime.active,
         phase: runtime.engine && runtime.engine.phase,

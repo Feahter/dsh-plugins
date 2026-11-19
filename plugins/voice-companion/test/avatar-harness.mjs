@@ -732,7 +732,7 @@ check('a custom face can be renamed and removed from the drawer', () => {
   assert.equal(renamed.src, 'data:image/webp;base64,FACE');
   const chip = collectByClass(tenth.root, 'vc-chip').find((node) => node.getAttribute('aria-label') === '小鲸');
   assert.ok(chip, 'the face chip must follow the new name');
-  assert.equal(chip.textContent, '小', 'the chip keeps a one-character monogram');
+  assert.equal(chip.textContent, '小鲸', 'the picker shows the full custom name');
   assert.equal(tenth.root.getAttribute('aria-label'), '小鲸语音管家');
 
   // Saving voices must never touch the custom face record.

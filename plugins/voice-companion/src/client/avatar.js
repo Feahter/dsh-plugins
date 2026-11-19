@@ -60,7 +60,7 @@ const FACE_NAME = '我的形象';
 const FACE_TOO_BIG = '图片太大了，换一张小一点的吧（上限 800KB）';
 
 // 抽屉里的中文文案与保存反馈时长。
-const SHEET_TITLE = '声音与形象';
+const SHEET_TITLE = '语音管家设置';
 const SHEET_SAVED_MS = 800;
 const SLOT_LABELS = { base: '基础声音', bright: '开心时', soft: '温柔时' };
 const VOICE_FALLBACK = 'tide';
@@ -77,7 +77,10 @@ border:var(--vc-board-border-width, 1px) solid var(--vc-board-border-color, rgba
 [data-vc-avatar] .vc-head{display:flex;align-items:center;gap:var(--vc-board-gap, 6px);min-height:22px;flex:none;font-size:11px;letter-spacing:.02em;color:var(--vc-text-secondary, #cfd9f5)}
 [data-vc-avatar] .vc-dot{width:var(--vc-dot-size, 6px);height:var(--vc-dot-size, 6px);border-radius:50%;background:var(--vc-dot-idle, #8b93a7);flex:none;transition:background .2s ease,box-shadow .2s ease}
 [data-vc-avatar] .vc-label{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-[data-vc-avatar] .vc-picker{display:none;gap:4px;flex:none}
+[data-vc-avatar] .vc-picker{display:flex;flex-wrap:wrap;gap:5px}
+[data-vc-avatar] .vc-picker .vc-chip{width:auto;max-width:100%;min-height:26px;padding:0 8px;border-radius:8px}
+[data-vc-avatar] .vc-settings-group{display:grid;gap:6px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.12)}
+[data-vc-avatar] .vc-settings-heading{margin:0;color:#e8eeff;font:600 12px/1.4 system-ui,sans-serif}
 [data-vc-avatar] .vc-chip{appearance:none;width:var(--vc-chip-size, 21px);height:var(--vc-chip-size, 21px);padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.18);background:var(--vc-chip-bg, rgba(255,255,255,.06));color:#c3d0f7;font:600 11px/1 "PingFang SC","Microsoft YaHei",sans-serif;cursor:pointer;display:grid;place-items:center;transition:transform .12s ease,background .15s ease,border-color .15s ease}
 [data-vc-avatar] .vc-chip:hover{background:rgba(255,255,255,.12)}
 [data-vc-avatar] .vc-chip:active{transform:translateY(1px)}
@@ -331,10 +334,9 @@ export function createAvatar(options = {}) {
   const dot = element(doc, 'span', { class: 'vc-dot', 'aria-hidden': 'true' });
   const label = element(doc, 'span', { class: 'vc-label' }, initial.labels.idle);
 
-  // The cast picker: one round chip per character, first letter on the chip and
-  // the full name in the accessible label.
-  const picker = element(doc, 'div', { class: 'vc-picker', role: 'group', 'aria-label': '切换看板娘' });
-  const chips = listCharacters().map((entry) => {
+  // Keep the default core selectable after switching to another avatar.
+  const picker = element(doc, 'div', { class: 'vc-picker', role: 'group', 'aria-label': '切换形象' });
+  const chips = [resolveCharacter('core'), ...listCharacters()].map((entry) => {
     const chip = element(doc, 'button', {
       class: 'vc-chip',
       type: 'button',
@@ -342,7 +344,7 @@ export function createAvatar(options = {}) {
       'aria-pressed': entry.id === initial.id ? 'true' : 'false',
       'aria-label': entry.name,
       title: entry.name + ' · ' + entry.tagline,
-    }, entry.name.slice(0, 1));
+    }, entry.name);
     if (typeof chip.addEventListener === 'function') {
       chip.addEventListener('click', () => selectCharacter(entry.id, true));
     }
@@ -380,13 +382,13 @@ export function createAvatar(options = {}) {
         'aria-pressed': initial.id === CUSTOM_CHARACTER_ID ? 'true' : 'false',
         'aria-label': face.name,
         title: face.name + ' · 自定义形象',
-      }, face.name.slice(0, 1));
+      }, face.name);
       if (typeof faceChip.addEventListener === 'function') {
         faceChip.addEventListener('click', () => selectCharacter(CUSTOM_CHARACTER_ID, true));
       }
       chips.push({ id: CUSTOM_CHARACTER_ID, node: faceChip });
     } else {
-      faceChip.textContent = face.name.slice(0, 1);
+      faceChip.textContent = face.name;
       faceChip.setAttribute('aria-label', face.name);
       faceChip.setAttribute('title', face.name + ' · 自定义形象');
     }
@@ -489,7 +491,6 @@ export function createAvatar(options = {}) {
   holdRow.appendChild(element(doc, 'span', { class: 'vc-hold-hint' }, '松开结束 / release to send'));
   head.appendChild(dot);
   head.appendChild(label);
-  head.appendChild(picker);
   head.appendChild(modeButton);
   head.appendChild(gearButton);
   head.appendChild(minButton);
@@ -539,6 +540,13 @@ export function createAvatar(options = {}) {
   sheetHead.appendChild(closeButton);
   sheetCard.appendChild(sheetHead);
 
+  const appearance = element(doc, 'section', { class: 'vc-settings-group', 'aria-label': '形象' });
+  appearance.appendChild(element(doc, 'h3', { class: 'vc-settings-heading' }, '形象'));
+  appearance.appendChild(picker);
+  sheetCard.appendChild(appearance);
+
+  const voiceSection = element(doc, 'section', { class: 'vc-settings-group', 'aria-label': '声音' });
+  voiceSection.appendChild(element(doc, 'h3', { class: 'vc-settings-heading' }, '声音'));
   const slotSelects = Object.create(null);
   for (const slot of VOICE_SLOTS) {
     const field = element(doc, 'label', { class: 'vc-field' });
@@ -553,7 +561,7 @@ export function createAvatar(options = {}) {
     }
     slotSelects[slot] = select;
     field.appendChild(select);
-    sheetCard.appendChild(field);
+    voiceSection.appendChild(field);
   }
 
   const speedField = element(doc, 'label', { class: 'vc-field' });
@@ -569,7 +577,7 @@ export function createAvatar(options = {}) {
   const speedValue = element(doc, 'span', { class: 'vc-speed-value' }, '×1.00');
   speedField.appendChild(speedInput);
   speedField.appendChild(speedValue);
-  sheetCard.appendChild(speedField);
+  voiceSection.appendChild(speedField);
 
   const nameField = element(doc, 'label', { class: 'vc-field' });
   nameField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '名字'));
@@ -580,10 +588,9 @@ export function createAvatar(options = {}) {
     'aria-label': '形象名字',
   });
   nameField.appendChild(nameInput);
-  sheetCard.appendChild(nameField);
+  appearance.appendChild(nameField);
 
   const faceField = element(doc, 'div', { class: 'vc-field' });
-  faceField.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '形象'));
   const changeFaceButton = element(doc, 'button', {
     class: 'vc-btn vc-change-face',
     type: 'button',
@@ -597,7 +604,7 @@ export function createAvatar(options = {}) {
   }, '移除自定义形象');
   faceField.appendChild(changeFaceButton);
   faceField.appendChild(removeFaceButton);
-  sheetCard.appendChild(faceField);
+  appearance.appendChild(faceField);
 
   const sheetActions = element(doc, 'div', { class: 'vc-sheet-actions' });
   const previewButton = element(doc, 'button', {
@@ -614,11 +621,12 @@ export function createAvatar(options = {}) {
     class: 'vc-btn vc-reset',
     type: 'button',
     'data-kind': 'quiet',
-  }, '恢复默认');
+  }, '重置声音');
   sheetActions.appendChild(previewButton);
   sheetActions.appendChild(saveButton);
   sheetActions.appendChild(resetButton);
-  sheetCard.appendChild(sheetActions);
+  voiceSection.appendChild(sheetActions);
+  sheetCard.appendChild(voiceSection);
 
   // 外观：主题 chip 行 + 一句话生成 + 预览/保存/删除/导入导出。
   // 生成只预览（applyTheme 不落盘），点「保存主题」才写进主题库。
@@ -626,7 +634,7 @@ export function createAvatar(options = {}) {
     class: 'vc-theme-section',
     'data-role': 'theme',
   });
-  themeSection.appendChild(element(doc, 'span', { class: 'vc-field-label' }, '外观'));
+  themeSection.appendChild(element(doc, 'h3', { class: 'vc-settings-heading' }, '主题'));
 
   const themeChips = element(doc, 'div', {
     class: 'vc-theme-chips',
@@ -1369,7 +1377,7 @@ export function createAvatar(options = {}) {
     face = { name: next, src: face.src };
     writeStore(FACE_KEY, JSON.stringify(face));
     if (faceChip) {
-      faceChip.textContent = next.slice(0, 1);
+      faceChip.textContent = next;
       faceChip.setAttribute('aria-label', next);
       faceChip.setAttribute('title', next + ' · 自定义形象');
     }

@@ -90,8 +90,28 @@ const body = createElement('body');
 const SAMPLE_RATE = 16000;
 const FRAME = 320;
 let processorNode = null;
-const tracks = [{ stopped: false, addEventListener() {}, stop() { this.stopped = true; } }];
+function makeTrack() {
+  const listeners = new Set();
+  return {
+    stopped: false,
+    readyState: 'live',
+    listeners,
+    addEventListener(_type, listener) { listeners.add(listener); },
+    removeEventListener(_type, listener) { listeners.delete(listener); },
+    stop() { this.stopped = true; this.readyState = 'ended'; },
+    endUnexpectedly() {
+      this.readyState = 'ended';
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+function makeStream(track = makeTrack()) {
+  return { getAudioTracks: () => [track], getTracks: () => [track] };
+}
 let getUserMediaCalls = 0;
+const playback = [];
+const heldPlayback = new Set();
+const pendingDecodes = new Map();
 
 function makeAudioContext() {
   return {
@@ -115,16 +135,23 @@ function makeAudioContext() {
     createBufferSource: () => {
       const src = {
         buffer: null,
+        playbackRate: { value: 1 },
         connect() {},
         disconnect() {},
+        finish() { src.onended?.(); },
         start() {
-          setTimeout(() => src.onended && src.onended(), 5);
+          playback.push(src);
+          if (!heldPlayback.has(src.buffer.text)) setTimeout(src.finish, 5);
         },
         stop() { src.stopped = true; },
       };
       return src;
     },
-    decodeAudioData: async () => ({ duration: 0.5, numberOfChannels: 1, sampleRate: SAMPLE_RATE }),
+    decodeAudioData: async (bytes) => {
+      const text = Buffer.from(bytes).toString('utf8');
+      await pendingDecodes.get(text)?.();
+      return { text, duration: 0.5, numberOfChannels: 1, sampleRate: SAMPLE_RATE };
+    },
   };
 }
 
@@ -133,7 +160,21 @@ const calls = [];
 let turnPlan = { say: ['收到。', '我去清一下日志。'], task: null, kind: 'chat', reply: '收到。我去清一下日志。' };
 let eventPlan = { events: [], cursor: 0 };
 let eventDelayMs = 0;
-let turnDelayMs = 0;
+let nextTurn = null;
+let nextFinalAsr = null;
+const pendingSpeaks = new Map();
+const finalAudio = [];
+const flush = () => new Promise(setImmediate);
+function gate() {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  return {
+    entered: entered.promise,
+    resolve: release.resolve,
+    reject: release.reject,
+    wait(info) { entered.resolve(info); return release.promise; },
+  };
+}
 let speakCounter = 0;
 
 async function fakeFetch(url, init = {}) {
@@ -146,9 +187,10 @@ async function fakeFetch(url, init = {}) {
   });
   if (String(url).includes('/speak')) {
     speakCounter += 1;
+    await pendingSpeaks.get(bodyText.text)?.();
     return respond({
       ok: true,
-      audioBase64: Buffer.from('RIFFxxxxWAVEfmt ').toString('base64'),
+      audioBase64: Buffer.from(bodyText.text).toString('base64'),
       mimeType: 'audio/wav',
       durationMs: 900,
       voiceId: 'stella',
@@ -156,14 +198,23 @@ async function fakeFetch(url, init = {}) {
     });
   }
   if (String(url).includes('/turn')) {
-    if (turnDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, turnDelayMs));
-    return respond({ ok: true, ...turnPlan });
+    const pending = nextTurn;
+    nextTurn = null;
+    const reply = pending ? await pending(init.signal) : turnPlan;
+    return respond({ ok: true, ...reply });
   }
   if (String(url).includes('/events')) {
     if (eventDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, eventDelayMs));
     return respond({ ok: true, ...eventPlan });
   }
   if (String(url).includes('/transcribe')) {
+    const wav = Buffer.from(bodyText.audioBase64, 'base64');
+    if (wav.length > 16000) {
+      finalAudio.push(wav);
+      const pending = nextFinalAsr;
+      nextFinalAsr = null;
+      if (pending) return respond({ ok: true, text: await pending() });
+    }
     return respond({ ok: true, text: '帮我把日志清一下' });
   }
   return respond({ ok: false, code: 'not-found', message: 'unknown route ' + url });
@@ -214,7 +265,7 @@ const fakeNavigator = {
 };
 let getUserMediaImpl = async () => {
   getUserMediaCalls += 1;
-  return { getAudioTracks: () => tracks, getTracks: () => tracks };
+  return makeStream();
 };
 Object.defineProperty(globalThis, 'navigator', { value: fakeNavigator, configurable: true, writable: true });
 const navigator = fakeNavigator;
@@ -232,7 +283,10 @@ new Function('window', 'document', 'navigator', 'fetch', 'requestAnimationFrame'
 
 group('module shape');
 check('module id is dsh-voice-companion', moduleId === 'dsh-voice-companion', moduleId);
-const plugin = factory(() => { throw new Error('unexpected require'); });
+const plugin = factory((name) => {
+  if (name === 'react') return {};
+  throw new Error('unexpected require');
+});
 check('exports apply + __test', !!(plugin.apply && plugin.__test));
 check(
   'client half injects no host service',
@@ -242,8 +296,12 @@ check(
 
 // ------------------------------------------------------------------ fake ctx
 const disposes = [];
+let slotProbe = null;
 let settingsScope = null;
 const ctx = {
+  slots: {
+    register(_options, probe) { slotProbe = probe; return () => {}; },
+  },
   inject(deps, callback) {
     settingsScope = callback({
       remote: {
@@ -300,7 +358,8 @@ check('/turn issued after endpoint', calls.some((c) => c.url.endsWith('/turn')),
 const turnCall = calls.find((c) => c.url.endsWith('/turn'));
 check('/turn carries the recognised text', !!turnCall && /日志/.test(turnCall.body.utterance), turnCall && turnCall.body);
 const replySpeaks = calls.filter((c) => c.url.endsWith('/speak') && /收到|清一下/.test(c.body.text));
-check('reply sentences synthesised', replySpeaks.length === 2, replySpeaks.map((c) => c.body.text).concat(calls.map((c) => c.url + ':' + (c.body && c.body.text))));
+check('reply sentences synthesised', replySpeaks.length === 2, replySpeaks.map((c) => c.body.text));
+check('reply sentences play in order', playback.slice(-2).map((source) => source.buffer.text).join('') === '收到。我去清一下日志。');
 
 group('conversation memory');
 const turnCallsBeforeSecond = calls.filter((c) => c.url.endsWith('/turn')).length;
@@ -368,16 +427,18 @@ const modeButton = () => findAll(body, (n) => hasClass(n, 'vc-mode'))[0] || stub
 const labelNode = () => findAll(body, (n) => hasClass(n, 'vc-label'))[0] || stub;
 
 group('character picker (看板娘切换)');
-const builtinChips = () => chips().filter((c) => ['whale', 'chibi'].includes(c.getAttribute('data-character')));
-check('two builtin character chips rendered', builtinChips().length === 2, chips().map((c) => c.getAttribute('data-character')));
+const characterChip = (id) => chips().find((c) => c.getAttribute('data-character') === id) || stub;
+const coreChip = characterChip('core');
+const chibiChip = characterChip('chibi');
+check('all three built-in avatars are selectable', ['core', 'whale', 'chibi'].every((id) => characterChip(id) !== stub));
 check('custom-face add chip is present', chips().some((c) => hasClass(c, 'vc-add')));
-// v0.4 contract change: the stage boots on the 3D core, which is a renderer
-// rather than a picker entry, so no builtin chip is pressed until the user picks.
-check('stage starts on the core', avatarRoot().getAttribute('data-character') === 'core');
-check('no builtin chip is pressed while the core renders', builtinChips().every((c) => c.getAttribute('aria-pressed') !== 'true'));
-chipAt(1).dispatch('click');
+check('stage starts on the selected core', avatarRoot().getAttribute('data-character') === 'core' && coreChip.getAttribute('aria-pressed') === 'true');
+chibiChip.dispatch('click');
 check('clicking the chibi chip swaps the stage', avatarRoot().getAttribute('data-character') === 'chibi');
-check('chips stay mutually exclusive', chipAt(1).getAttribute('aria-pressed') === 'true' && chipAt(0).getAttribute('aria-pressed') === 'false');
+check('chips stay mutually exclusive', chibiChip.getAttribute('aria-pressed') === 'true' && coreChip.getAttribute('aria-pressed') === 'false');
+coreChip.dispatch('click');
+check('clicking the core chip restores the default avatar', avatarRoot().getAttribute('data-character') === 'core' && coreChip.getAttribute('aria-pressed') === 'true');
+chibiChip.dispatch('click');
 check('label follows the cast', /小肥鱼/.test(labelNode().textContent), labelNode().textContent);
 const beforeSwitch = calls.length;
 await window.__dshVoiceCompanion.say('我在呢。');
@@ -443,20 +504,141 @@ check('reset restores defaults', window.__dshVoiceCompanion.voice().speed === 1 
 gear.dispatch('click');
 check('gear closes the drawer again', sheet.getAttribute('data-open') === '0', sheet.getAttribute('data-open'));
 
-group('hangup during an in-flight turn');
-turnDelayMs = 300;
-const callsBeforeHangup = calls.length;
-feedSpeech(900, 0.3);
-feedSpeech(900, 0.001);
-await new Promise((r) => setTimeout(r, 220));
-window.__dshVoiceCompanion.stop();
-await new Promise((r) => setTimeout(r, 500));
-const staleReplySpeaks = calls
-  .slice(callsBeforeHangup)
-  .filter((c) => c.url.endsWith('/speak') && /收到|清一下/.test(c.body.text || ''));
-check('a reply that resolves after hangup is not spoken', staleReplySpeaks.length === 0, staleReplySpeaks.map((c) => c.body.text));
-check('the engine stays idle after the late reply', window.__dshVoiceCompanion.status().phase === 'idle', window.__dshVoiceCompanion.status());
-turnDelayMs = 0;
+group('hangup cancels /turn and redial isolates old replies and errors');
+const callUi = window.__dshVoiceCompanion;
+const speakCalls = () => calls.filter((entry) => entry.url.endsWith('/speak'));
+const countTurns = () => calls.filter((entry) => entry.url.endsWith('/turn')).length;
+const utter = () => { feedSpeech(900, 0.3); feedSpeech(660, 0.001); };
+for (const reject of [false, true]) {
+  const oldTurn = gate();
+  nextTurn = oldTurn.wait;
+  utter();
+  const signal = await oldTurn.entered;
+  callUi.stop();
+  check('hangup aborts the in-flight request signal', signal.aborted);
+  await callUi.start();
+  const currentTurn = gate();
+  nextTurn = currentTurn.wait;
+  utter();
+  await currentTurn.entered;
+  const receipt = { taskId: 'fresh', sessionId: 'fresh', title: '新任务' };
+  currentTurn.resolve({ say: ['新通话回复。'], task: receipt });
+  await flush();
+  check('a current turn updates subtitle and receipt', byClass('vc-bubble').textContent === '新通话回复。' && byClass('vc-receipt').textContent.includes('新任务'));
+  const speaksBefore = speakCalls().length;
+  if (reject) oldTurn.reject(new Error('old error'));
+  else oldTurn.resolve({ say: ['旧通话回复。'], task: { taskId: 'old', sessionId: 'old', title: '旧任务' } });
+  await flush();
+  check('late ' + (reject ? 'error' : 'reply') + ' changes neither subtitle, receipt nor speech',
+    byClass('vc-bubble').textContent === '新通话回复。' && byClass('vc-receipt').textContent.includes('新任务') && speakCalls().length === speaksBefore);
+  // Wait for all audio in this test before starting the next utterance.
+  await callUi.say('检查历史。');
+  utter();
+  await flush();
+  const historyAfterRedial = calls.findLast((entry) => entry.url.endsWith('/turn'))?.body.history || [];
+  check('late turn adds nothing to the next turn history', historyAfterRedial.at(-1)?.content === '新通话回复。' && !historyAfterRedial.some((entry) => /旧通话/.test(entry.content)));
+  callUi.stop();
+  await callUi.start();
+}
+
+group('hangup invalidates ASR before the next call or dictation');
+const inserted = [];
+slotProbe({ inputActions: { insertText(text) { inserted.push(text); return true; } } });
+for (const mode of ['call', 'dictation']) {
+  callUi.mode(mode);
+  const oldAsr = gate();
+  nextFinalAsr = oldAsr.wait;
+  const beforeAsr = countTurns();
+  utter();
+  await oldAsr.entered;
+  callUi.stop();
+  await callUi.start();
+  oldAsr.resolve('旧通话识别');
+  await flush();
+  check('stale ASR cannot change subtitle, dispatch a turn or insert text in ' + mode,
+    countTurns() === beforeAsr && inserted.length === 0 && byClass('vc-bubble').textContent === '喂，我在。');
+}
+utter();
+await flush();
+check('current dictation reaches the composer exactly once', inserted.length === 1 && /日志/.test(inserted[0]));
+callUi.mode('call');
+callUi.stop();
+
+group('playback batches isolate old TTS, decode and source completion');
+for (const [stage, pending] of [['TTS', pendingSpeaks], ['decode', pendingDecodes]]) {
+  const old = gate();
+  const oldText = '旧音频 ' + stage;
+  const newText = '新音频 ' + stage;
+  const beforePlay = playback.length;
+  pending.set(oldText, old.wait);
+  heldPlayback.add(newText);
+  const oldSay = callUi.say(oldText);
+  await old.entered;
+  const newSay = callUi.say(newText);
+  await flush();
+  old.resolve();
+  await oldSay;
+  const newSource = playback.at(-1);
+  check('late ' + stage + ' cannot play or reset the new batch', playback.length === beforePlay + 1 && newSource?.buffer.text === newText && callUi.status().phase === 'speaking');
+  newSource?.finish();
+  await newSay;
+  pending.delete(oldText);
+  heldPlayback.delete(newText);
+}
+heldPlayback.add('旧音源');
+heldPlayback.add('当前音源');
+const oldSay = callUi.say('旧音源');
+await flush();
+const oldSource = playback.at(-1);
+const newSay = callUi.say('当前音源');
+await flush();
+const newSource = playback.at(-1);
+oldSource?.finish();
+await oldSay;
+check('old source completion cannot reset the current batch', oldSource?.stopped && newSource?.buffer.text === '当前音源' && callUi.status().phase === 'speaking');
+newSource?.finish();
+await newSay;
+heldPlayback.clear();
+
+group('barge-in keeps only the current 220 ms trigger audio');
+await callUi.start();
+for (const [index, amplitude] of [0.25, 0.4, 0.55].entries()) {
+  if (index === 2) {
+    // Leave a partial trigger in playback, then stop and immediately restart.
+    heldPlayback.add('停止前播报');
+    const stoppedSay = callUi.say('停止前播报');
+    await flush();
+    const stoppedSource = playback.at(-1);
+    feedSpeech(200, 0.85);
+    callUi.stop();
+    stoppedSource?.finish();
+    await stoppedSay;
+    await callUi.start();
+  }
+  const text = '插话目标 ' + index;
+  heldPlayback.add(text);
+  const reading = callUi.say(text);
+  await flush();
+  const source = playback.at(-1);
+  const beforeAudio = finalAudio.length;
+  const beforeTurns = countTurns();
+  feedSpeech(200, amplitude);
+  check('playback continues until the complete 220 ms trigger', !source?.stopped && callUi.status().phase === 'speaking');
+  feedSpeech(20, amplitude);
+  check('the 220 ms frame stops the active source', source?.stopped);
+  source?.finish();
+  await reading;
+  feedSpeech(660, 0);
+  await flush();
+  const wav = finalAudio[beforeAudio];
+  check('the short utterance produces exactly one final recognition and turn', finalAudio.length === beforeAudio + 1 && countTurns() === beforeTurns + 1);
+  check('WAV starts with this utterance and contains all trigger frames',
+    wav?.length === 44 + (11 + 33) * FRAME * 2 && Math.abs(wav.readInt16LE(44 + 25 * 2) / 32767 - amplitude) < 0.01);
+  heldPlayback.delete(text);
+  await callUi.say('继续。');
+}
+heldPlayback.clear();
+callUi.stop();
 
 group('microphone race: stop during the permission prompt');
 window.__dshVoiceCompanion.stop();
@@ -490,7 +672,7 @@ const introStart = window.__dshVoiceCompanion.start();
 await new Promise((r) => setTimeout(r, 30));
 check('the first-call notice explains why the mic is needed', noticeNode().textContent.includes('首次使用') && noticeNode().textContent.includes('First use'), noticeNode().textContent);
 check('the notice promises on-device recognition', noticeNode().textContent.includes('本机') && noticeNode().textContent.includes('this device'));
-releasePrompt({ getAudioTracks: () => tracks, getTracks: () => tracks });
+releasePrompt(makeStream());
 await introStart;
 await new Promise((r) => setTimeout(r, 80));
 check('a granted start clears the consent notice', noticeNode().textContent === '', noticeNode().textContent);
@@ -513,7 +695,7 @@ check('the mic state is denied, not cached as granted', window.__dshVoiceCompani
 
 getUserMediaImpl = async () => {
   getUserMediaCalls += 1;
-  return { getAudioTracks: () => tracks, getTracks: () => tracks };
+  return makeStream();
 };
 await window.__dshVoiceCompanion.start();
 await new Promise((r) => setTimeout(r, 120));
@@ -539,6 +721,33 @@ getUserMediaImpl = async () => {
 await window.__dshVoiceCompanion.start();
 await new Promise((r) => setTimeout(r, 60));
 check('NotReadableError has its own copy', noticeNode().textContent.includes('被其他应用占用') && noticeNode().textContent.includes('Microphone is busy'), noticeNode().textContent);
+
+group('microphone disconnect resets the call and allows a fresh device');
+const devices = [];
+getUserMediaImpl = async () => {
+  const track = makeTrack();
+  devices.push(track);
+  return makeStream(track);
+};
+await callUi.start();
+const staleEnded = [...devices[0].listeners][0];
+const interruptedTurn = gate();
+nextTurn = interruptedTurn.wait;
+utter();
+const lostDeviceSignal = await interruptedTurn.entered;
+devices[0].endUnexpectedly();
+check('current ended stops capture, aborts the turn and restores idle UI',
+  devices[0].stopped && lostDeviceSignal.aborted && !callUi.status().active && avatarRoot().getAttribute('data-state') === 'idle');
+check('device recovery notice names the disconnect and how to restart',
+  callUi.permission().code === 'disconnected' && /麦克风已断开/.test(noticeNode().textContent) && /开始通话/.test(noticeNode().textContent));
+await callUi.start();
+staleEnded();
+interruptedTurn.resolve({ say: ['设备断开前的旧回复。'] });
+await flush();
+check('redial requests a new device and late ended cannot stop it', devices.length === 2 && !devices[1].stopped && callUi.status().active && noticeNode().textContent === '');
+check('the turn from the disconnected device cannot update the redial', byClass('vc-bubble').textContent === '喂，我在。');
+callUi.stop();
+check('manual stop cleans up the track without a disconnect notice', devices[1].stopped && devices[1].listeners.size === 0 && !callUi.status().active && noticeNode().textContent === '');
 
 group('hotkey binding: candidate fallback is visible in the panel');
 const originalDocumentAdd = document.addEventListener;
@@ -592,7 +801,7 @@ group('teardown');
 if (window.__dshVoiceCompanion) {
   window.__dshVoiceCompanion.stop();
   await new Promise((r) => setTimeout(r, 60));
-  check('microphone tracks stopped', tracks.every((track) => track.stopped));
+  check('microphone tracks stopped', devices.every((track) => track.stopped));
   check('status inactive after stop', window.__dshVoiceCompanion.status().active === false);
 }
 disposer();

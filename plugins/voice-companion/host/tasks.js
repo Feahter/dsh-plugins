@@ -178,8 +178,9 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
    * Switch the Session to the full-access preset before the prompt is queued.
    * Idempotent: a Session already on the target preset is left alone.
    * @param {string} sessionId
+   * @param {AbortSignal} [signal]
    */
-  function applyPermission(sessionId) {
+  async function applyPermission(sessionId, signal) {
     const presets = service('permissionPresets')
     if (presets === null || presets === undefined || typeof presets.set !== 'function') return
     const sessions = service('sessions')
@@ -199,7 +200,8 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
       }
       if (currentPresetName(current) === name) return
     }
-    presets.set(session, name)
+    signal?.throwIfAborted()
+    await presets.set(session, name)
   }
 
   /**
@@ -234,8 +236,9 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
    * EFFORT_FALLBACKS; when the model advertises nothing we still try `high` and
    * let a rejection be warned about, never thrown.
    * @param {string} sessionId
+   * @param {AbortSignal} [signal]
    */
-  async function applyEffort(sessionId) {
+  async function applyEffort(sessionId, signal) {
     const agents = service('agents')
     const agent = typeof agents?.get === 'function' ? agents.get(sessionId) : undefined
     if (agent === null || agent === undefined) return
@@ -253,6 +256,7 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
     const modelId = current?.model
     if (typeof provider !== 'string' || provider === '' || typeof modelId !== 'string' || modelId === '') return
 
+    signal?.throwIfAborted()
     let effort = TASK_REASONING_EFFORT
     const efforts = await readEfforts(provider, modelId)
     if (Array.isArray(efforts) && efforts.length > 0) {
@@ -260,6 +264,7 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
       if (supported !== undefined) effort = supported
     }
     if (typeof model.select !== 'function') return
+    signal?.throwIfAborted()
     try {
       await model.select({ provider, model: modelId, reasoningEffort: effort })
     } catch (error) {
@@ -271,16 +276,21 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
    * Apply permission + reasoning defaults for a Session. Every step is
    * best-effort: a missing service or a failing call must never fail dispatch.
    * @param {string} sessionId
+   * @param {AbortSignal} [signal]
    */
-  async function applyDefaults(sessionId) {
+  async function applyDefaults(sessionId, signal) {
+    signal?.throwIfAborted()
     try {
-      applyPermission(sessionId)
+      await applyPermission(sessionId, signal)
     } catch (error) {
+      signal?.throwIfAborted()
       logger.warn?.(`[voice-companion] could not apply permission preset: ${errorMessage(error)}`)
     }
+    signal?.throwIfAborted()
     try {
-      await applyEffort(sessionId)
+      await applyEffort(sessionId, signal)
     } catch (error) {
+      signal?.throwIfAborted()
       logger.warn?.(`[voice-companion] could not apply reasoning effort: ${errorMessage(error)}`)
     }
   }
@@ -428,10 +438,11 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
 
   return {
     /**
-     * @param {{ text?: unknown, sessionId?: unknown, title?: unknown, cwd?: unknown }} input
+     * @param {{ text?: unknown, sessionId?: unknown, title?: unknown, cwd?: unknown, signal?: AbortSignal }} input
      * @returns {Promise<{ taskId: string, sessionId: string, title: string }>}
      */
-    async dispatch({ text, sessionId, title, cwd } = {}) {
+    async dispatch({ text, sessionId, title, cwd, signal } = {}) {
+      signal?.throwIfAborted()
       const body = asString(text)
       if (body === '') throw boardError(400, 'invalid', '任务内容不能为空')
 
@@ -448,9 +459,10 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
       const taskTitle = truncate(asString(title) || body, 12) || '新任务'
       const taskId = `vc-task-${now()}-${Math.random().toString(16).slice(2, 8)}`
       const entry = { taskId, sessionId: targetSessionId, title: taskTitle, text: body, dispatchedAt: now() }
-      // Apply permission/reasoning defaults before the prompt is queued. The
-      // 20s prompt timeout still bounds the whole dispatch.
-      await applyDefaults(targetSessionId)
+      // Apply defaults before committing work to the queue. Once prompt() is
+      // invoked, its existing timeout and task tracking own the outcome.
+      await applyDefaults(targetSessionId, signal)
+      signal?.throwIfAborted()
       // Track before prompting: the Session may start and finish fast, and the
       // status event must find an entry by then.
       tracked.set(targetSessionId, entry)

@@ -123,12 +123,14 @@ export function originAllowed(request, getOrigin) {
 /**
  * Wrap a JSON POST handler with method, origin and body parsing.
  * @param {object} options
- * @param {(payload: any, request: import('node:http').IncomingMessage) => Promise<{ status?: number, body: unknown }>} options.handle
+ * @param {(payload: any, request: import('node:http').IncomingMessage, signal?: AbortSignal) => Promise<{ status?: number, body: unknown }>} options.handle
  * @param {() => string | undefined} [options.getOrigin]
  * @param {string} [options.method]
+ * @param {boolean} [options.cancelOnDisconnect]
  */
-export function jsonRoute({ handle, getOrigin = () => undefined, method = 'POST' }) {
+export function jsonRoute({ handle, getOrigin = () => undefined, method = 'POST', cancelOnDisconnect = false }) {
   return async function route(request, response) {
+    let onClose
     try {
       if (request.method !== method) {
         if (!response.writableEnded) response.writeHead(405, { allow: method }).end()
@@ -158,11 +160,26 @@ export function jsonRoute({ handle, getOrigin = () => undefined, method = 'POST'
         sendFailure(response, 400, 'invalid', '请求体必须是一个 JSON 对象')
         return
       }
-      const result = await handle(payload, request)
-      sendJson(response, result.status ?? 200, result.body)
+      let signal
+      if (cancelOnDisconnect) {
+        const cancellation = new AbortController()
+        signal = cancellation.signal
+        // IncomingMessage can close as soon as the request body is consumed.
+        // Only a premature ServerResponse close means the caller went away.
+        onClose = () => {
+          if (!response.writableFinished) cancellation.abort()
+        }
+        response.once('close', onClose)
+        if (response.destroyed) onClose()
+        if (signal.aborted) return
+      }
+      const result = await handle(payload, request, signal)
+      if (!signal?.aborted) sendJson(response, result.status ?? 200, result.body)
     } catch (error) {
       const failure = classifyError(error)
       sendFailure(response, failure.status, failure.code, failure.message)
+    } finally {
+      if (onClose) response.off('close', onClose)
     }
   }
 }

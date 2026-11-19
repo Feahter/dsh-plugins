@@ -199,7 +199,7 @@ test('CORE_STATE_STYLE has all five states with six numeric knobs', () => {
       assert.equal(typeof style[key], 'number', `${name}.${key}`);
     }
   }
-  assert.equal(CORE_STATE_STYLE.idle.spin, 1.0);
+  assert.equal(CORE_STATE_STYLE.idle.spin, 0.65);
   assert.equal(CORE_STATE_STYLE.listening.ring, 1.35);
   assert.equal(CORE_STATE_STYLE.thinking.spin, 2.6);
   assert.equal(CORE_STATE_STYLE.speaking.pulse, 0.4);

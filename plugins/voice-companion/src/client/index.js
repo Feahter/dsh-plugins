@@ -115,7 +115,7 @@ async function requestJson(path, options, timeoutMs) {
       credentials: 'same-origin',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
       body: options && options.body ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal,
+      signal: options && options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
     });
     const text = await response.text();
     let body = null;
@@ -151,6 +151,7 @@ function apply(ctx) {
     fillers: [],
     fillerIndex: 0,
     active: false,
+    call: null,
     sessionId: undefined,
     receiptTask: null,
     character: resolveCharacter(storedValue(CHARACTER_KEY) || 'core', storedFace()).id,
@@ -225,6 +226,8 @@ function apply(ctx) {
   }
 
   async function handleTurn(utterance) {
+    const call = runtime.call;
+    if (!call) return;
     runtime.avatar && runtime.avatar.setPartial('');
     runtime.avatar && runtime.avatar.setSubtitle(utterance, { role: 'user' });
     runtime.engine.setThinking();
@@ -235,6 +238,7 @@ function apply(ctx) {
         '/turn',
         {
           method: 'POST',
+          signal: call.signal,
           body: {
             utterance,
             character: runtime.character,
@@ -245,15 +249,13 @@ function apply(ctx) {
         45000,
       );
     } catch (error) {
+      if (runtime.call !== call) return;
       log('turn:error', error && error.message);
-      if (!runtime.active) return;
       runtime.avatar && runtime.avatar.setState('error');
       await runtime.engine.speak(['抱歉，我这边出了点问题。']);
       return;
     }
-    // The user can hang up while the model is still thinking. The reply must not
-    // start speaking (and reopen an AudioContext) after the call ended.
-    if (!runtime.active) return;
+    if (runtime.call !== call) return;
     const say = Array.isArray(reply.say) && reply.say.length ? reply.say : [reply.reply || '我在。'];
     runtime.history.push({ role: 'user', content: utterance });
     runtime.history.push({ role: 'assistant', content: say.join('') });
@@ -323,6 +325,8 @@ function apply(ctx) {
   async function startCall() {
     if (runtime.active) return;
     runtime.active = true;
+    const call = new AbortController();
+    runtime.call = call;
     const intro = micIntroOnce();
     if (runtime.avatar && typeof runtime.avatar.setMicNote === 'function') {
       runtime.avatar.setMicNote(MIC_DEFAULT_NOTE);
@@ -332,8 +336,10 @@ function apply(ctx) {
     }
     runtime.avatar && runtime.avatar.setSubtitle('喂，我在。', { role: 'assistant' });
     await runtime.engine.start();
+    if (runtime.call !== call) return;
     if (!runtime.engine.listening) {
       runtime.active = false;
+      runtime.call = null;
       const mic = typeof runtime.engine.mic === 'object' && runtime.engine.mic ? runtime.engine.mic : null;
       if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
         runtime.avatar.setNotice(micPermissionNotice(mic), 'error');
@@ -352,14 +358,18 @@ function apply(ctx) {
     }
   }
 
-  function endCall() {
+  function endCall(deviceLost) {
     runtime.active = false;
+    runtime.call?.abort();
+    runtime.call = null;
     stopPolling();
-    runtime.engine.interrupt();
-    runtime.engine.stop();
+    if (!deviceLost) runtime.engine.stop();
+    runtime.avatar && runtime.avatar.setPartial('');
     runtime.avatar && runtime.avatar.setState('idle');
-    runtime.avatar && runtime.avatar.setSubtitle('通话结束。');
-    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') runtime.avatar.setNotice('');
+    runtime.avatar && runtime.avatar.setSubtitle(deviceLost ? '麦克风已断开。' : '通话结束。');
+    if (runtime.avatar && typeof runtime.avatar.setNotice === 'function') {
+      runtime.avatar.setNotice(deviceLost ? micPermissionNotice(deviceLost) : '', deviceLost ? 'error' : undefined);
+    }
   }
 
   /**
@@ -518,6 +528,7 @@ function apply(ctx) {
           runtime.avatar && runtime.avatar.setSubtitle(state.error);
         }
       },
+      onDeviceLost: endCall,
       onPartial: (text) => runtime.avatar && runtime.avatar.setPartial(text),
       onLevel: (level) => runtime.avatar && runtime.avatar.setLevel(level),
       onFinal: (text) => (runtime.mode === 'dictation' ? dictate(text) : handleTurn(text)),
@@ -592,7 +603,7 @@ function apply(ctx) {
 
     window.__dshVoiceCompanion = {
       start: startCall,
-      stop: endCall,
+      stop: () => endCall(),
       status: () => ({
         active: runtime.active,
         phase: runtime.engine && runtime.engine.phase,

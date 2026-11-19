@@ -5,6 +5,7 @@
 const SAMPLE_RATE = 16000;
 const FRAME_MS = 20;
 const FRAME = (SAMPLE_RATE * FRAME_MS) / 1000;
+const BARGE_FRAMES = Math.ceil(220 / FRAME_MS);
 
 /** RMS of a Float32 frame, 0..1. */
 function rms(frame) {
@@ -151,14 +152,14 @@ function createVad(config) {
     current() {
       return concatFloat(segment);
     },
-    reset() {
+    reset({ calibrated = false } = {}) {
       pre = [];
       segment = [];
       voicedMs = 0;
       silentMs = 0;
       segmentMs = 0;
       active = false;
-      elapsedMs = 0;
+      elapsedMs = calibrated ? CALIBRATION_MS : 0;
       noiseWindow.length = 0;
       threshold = config.threshold;
     },
@@ -259,6 +260,7 @@ function createAudioEngine(deps) {
   const partialWindowMs = 12000;
 
   let media = null;
+  let removeTrackListeners = null;
   let audioContext = null;
   let source = null;
   let processor = null;
@@ -280,10 +282,10 @@ function createAudioEngine(deps) {
 
   // playback
   let playQueue = [];
-  let playing = false;
+  let playGeneration = 0;
   let currentSource = null;
   let prefetched = new Map();
-  let bargeMs = 0;
+  let bargeFrames = [];
 
   function emit() {
     deps.onState && deps.onState({ ...state });
@@ -299,7 +301,7 @@ function createAudioEngine(deps) {
   }
 
   // ------------------------------------------------------------------ ASR
-  async function transcribe(samples) {
+  async function transcribe(samples, token) {
     const wav = pcm16ToWav(floatToPcm16(samples));
     const audioBase64 = bytesToBase64(wav);
     if (deps.transcribeRemote) {
@@ -311,8 +313,8 @@ function createAudioEngine(deps) {
         throw new Error(result.error.message || 'transcribe failed');
       }
     }
-    const text = await deps.transcribeHttp(audioBase64);
-    return text;
+    if (token !== startToken) return '';
+    return deps.transcribeHttp(audioBase64);
   }
 
   async function redecode() {
@@ -327,8 +329,9 @@ function createAudioEngine(deps) {
     inFlight = true;
     lastCallAt = now;
     const run = generation;
+    const token = startToken;
     try {
-      const text = (await transcribe(windowSamples)).trim();
+      const text = (await transcribe(windowSamples, token)).trim();
       if (run !== generation) return;
       if (text && text !== lastPartial) {
         lastPartial = text;
@@ -338,12 +341,13 @@ function createAudioEngine(deps) {
     } catch (_error) {
       // a failed partial is not worth surfacing: the final decode will retry
     } finally {
-      inFlight = false;
+      if (token === startToken) inFlight = false;
     }
   }
 
   async function finalize(samples) {
     const run = ++generation;
+    const token = startToken;
     vad && vad.reset();
     lastPartial = '';
     state.partial = '';
@@ -353,7 +357,7 @@ function createAudioEngine(deps) {
     }
     setPhase('thinking', { partial: '' });
     try {
-      const text = (await transcribe(samples)).trim();
+      const text = (await transcribe(samples, token)).trim();
       if (run !== generation) return;
       if (!text) {
         setPhase(running ? 'listening' : 'idle');
@@ -361,9 +365,10 @@ function createAudioEngine(deps) {
       }
       deps.onFinal && (await deps.onFinal(text));
     } catch (error) {
+      if (run !== generation) return;
       setPhase('error', { error: (error && error.message) || String(error) });
       setTimeout(() => {
-        if (running && !disposed) setPhase('listening');
+        if (run === generation && running && !disposed && state.phase === 'error') setPhase('listening');
       }, 2500);
     }
   }
@@ -386,29 +391,32 @@ function createAudioEngine(deps) {
     }
   }
 
-  async function playOne(bytes, rate) {
+  async function playOne(bytes, rate, batch) {
     // A settings-panel audition may play outside a call, before start() created the
     // context; create it on demand (the click is the user gesture Chrome wants).
     if (!audioContext) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    const buffer = await audioContext.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    const analyser = audioContext.createAnalyser();
+    const context = audioContext;
+    if (context.state === 'suspended') await context.resume();
+    if (batch !== playGeneration) return;
+    const buffer = await context.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    if (batch !== playGeneration) return;
+    const analyser = context.createAnalyser();
     analyser.fftSize = 512;
     const data = new Float32Array(analyser.fftSize);
-    const src = audioContext.createBufferSource();
+    const src = context.createBufferSource();
     src.buffer = buffer;
     src.playbackRate.value = clampPlaybackRate(rate);
     src.connect(analyser);
-    analyser.connect(audioContext.destination);
+    analyser.connect(context.destination);
     currentSource = src;
     const done = new Promise((resolve) => {
       src.onended = () => resolve();
     });
     src.start();
     const tick = () => {
-      if (currentSource !== src) return;
+      if (batch !== playGeneration || currentSource !== src) return;
       analyser.getFloatTimeDomainData(data);
       let peak = 0;
       for (let i = 0; i < data.length; i += 1) peak = Math.max(peak, Math.abs(data[i]));
@@ -417,11 +425,16 @@ function createAudioEngine(deps) {
     };
     requestAnimationFrame(tick);
     await done;
+    src.disconnect();
+    analyser.disconnect();
+    if (batch !== playGeneration) return;
     if (currentSource === src) currentSource = null;
     deps.onLevel && deps.onLevel(0);
   }
 
   function interrupt() {
+    playGeneration += 1;
+    bargeFrames = [];
     playQueue = [];
     prefetched.clear();
     if (currentSource) {
@@ -432,16 +445,17 @@ function createAudioEngine(deps) {
       }
       currentSource = null;
     }
-    playing = false;
     deps.onLevel && deps.onLevel(0);
   }
 
   async function playSentences(sentences) {
+    if (disposed) return;
+    interrupt();
+    const batch = playGeneration;
     if (!Array.isArray(sentences) || !sentences.length) {
       setPhase(running ? 'listening' : 'idle');
       return;
     }
-    interrupt();
     // Entries are either plain sentences or `{ text, voiceId, rate }` triples, so the
     // host can give every sentence its own voice and speed without the engine
     // knowing about characters.
@@ -451,7 +465,6 @@ function createAudioEngine(deps) {
         : { text: entry.text, voiceId: entry.voiceId, rate: entry.rate, index },
     );
     prefetch(playQueue.slice(0, 2));
-    playing = true;
     setPhase('speaking');
     while (playQueue.length) {
       const item = playQueue.shift();
@@ -461,8 +474,8 @@ function createAudioEngine(deps) {
       } catch (error) {
         payload = { error };
       }
+      if (batch !== playGeneration) return;
       prefetched.delete(item.index);
-      if (!playing) return;
       if (!payload || payload.error || !payload.audioBase64) {
         // keep the conversation flowing: skip this sentence, surface nothing
         continue;
@@ -470,31 +483,32 @@ function createAudioEngine(deps) {
       // Prefetch the next two while this one plays, never re-fetching a played index.
       prefetch(playQueue.slice(0, 2));
       try {
-        await playOne(base64ToBytes(payload.audioBase64), item.rate);
+        await playOne(base64ToBytes(payload.audioBase64), item.rate, batch);
       } catch (_error) {
         /* decode failure: skip */
       }
-      if (running) deps.onLevel && deps.onLevel(0);
+      if (batch !== playGeneration) return;
     }
-    playing = false;
-    if (!disposed) setPhase(running ? 'listening' : 'idle');
+    finishPlayback();
+  }
+
+  function finishPlayback() {
+    bargeFrames = [];
+    setPhase(running ? 'listening' : 'idle');
   }
 
   /** Play one already-synthesised clip right away (latency filler). */
   async function playClip(payload) {
     if (!payload || !payload.audioBase64 || !audioContext || !running) return;
     interrupt();
-    playing = true;
+    const batch = playGeneration;
     setPhase('speaking');
     try {
-      await playOne(base64ToBytes(payload.audioBase64));
+      await playOne(base64ToBytes(payload.audioBase64), undefined, batch);
     } catch (_error) {
       /* skip a broken clip */
     }
-    if (!disposed && playing) {
-      playing = false;
-      setPhase(running ? 'listening' : 'idle');
-    }
+    if (batch === playGeneration) finishPlayback();
   }
 
   // ------------------------------------------------------------- lifecycle
@@ -503,16 +517,24 @@ function createAudioEngine(deps) {
     // barge-in: talking over the companion stops playback
     const level = rms(frame);
     if (state.phase === 'speaking') {
-      bargeMs = level >= Math.max(0.02, vad.threshold * 1.6) ? bargeMs + FRAME_MS : 0;
+      if (level >= Math.max(0.02, vad.threshold * 1.6)) bargeFrames.push(frame.slice());
+      else bargeFrames = [];
       deps.onLevel && deps.onLevel(Math.min(1, level * 1.6));
-      if (bargeMs >= 220) {
-        bargeMs = 0;
+      if (bargeFrames.length >= BARGE_FRAMES) {
+        const replay = bargeFrames;
         interrupt();
-        vad.reset();
+        // These frames already passed the stronger barge-in threshold. A fresh
+        // calibration would absorb the short utterance as background noise.
+        vad.reset({ calibrated: true });
         setPhase('listening');
+        for (const recent of replay) pushVad(recent);
       }
       return;
     }
+    pushVad(frame);
+  }
+
+  function pushVad(frame) {
     const outcome = vad.push(frame);
     state.level = Math.min(1, outcome.level * 1.8);
     if (outcome.started) setPhase('listening');
@@ -542,6 +564,7 @@ function createAudioEngine(deps) {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (error) {
+      if (token !== startToken || disposed) return;
       const info = microphoneErrorInfo(error);
       setPhase('error', { error: info.message, mic: info });
       return;
@@ -553,15 +576,35 @@ function createAudioEngine(deps) {
       return;
     }
     media = stream;
-    media.getAudioTracks().forEach((track) => {
-      track.addEventListener('ended', () => {
-        if (running) stop();
-      });
-    });
+    const audioTracks = stream.getAudioTracks();
+    const onEnded = () => {
+      if (token !== startToken || media !== stream) return;
+      const info = {
+        state: 'missing',
+        code: 'disconnected',
+        message: '麦克风已断开 · Microphone disconnected\n重新连接麦克风后，点「开始通话」重试 / reconnect the microphone and start a new call.',
+      };
+      stop(info);
+      deps.onDeviceLost && deps.onDeviceLost(info);
+    };
+    audioTracks.forEach((track) => track.addEventListener('ended', onEnded));
+    removeTrackListeners = () => audioTracks.forEach((track) => track.removeEventListener?.('ended', onEnded));
+    if (audioTracks.some((track) => track.readyState === 'ended')) {
+      onEnded();
+      return;
+    }
     if (!audioContext) {
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
     }
-    if (audioContext.state === 'suspended') await audioContext.resume();
+    if (audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch (error) {
+        if (token !== startToken || disposed) return;
+        stop(microphoneErrorInfo(error));
+        return;
+      }
+    }
     if (token !== startToken || disposed) {
       // stop() closed the context and stopped the stream while resume() was in
       // flight; the graph below must not be rebuilt.
@@ -575,6 +618,7 @@ function createAudioEngine(deps) {
     frameFill = 0;
     leftover = new Float32Array(0);
     processor.onaudioprocess = (event) => {
+      if (token !== startToken) return;
       const input = event.inputBuffer.getChannelData(0);
       let offset = 0;
       if (leftover.length) {
@@ -608,10 +652,15 @@ function createAudioEngine(deps) {
     setPhase('listening');
   }
 
-  function stop() {
+  function stop(mic = { state: 'idle', code: '', message: '' }) {
     running = false;
     // Invalidate any start() still waiting on getUserMedia()/resume().
     startToken += 1;
+    generation += 1;
+    inFlight = false;
+    lastCallAt = 0;
+    lastPartial = '';
+    state.partial = '';
     interrupt();
     if (processor) {
       try {
@@ -638,6 +687,10 @@ function createAudioEngine(deps) {
       }
       sink = null;
     }
+    if (removeTrackListeners) {
+      removeTrackListeners();
+      removeTrackListeners = null;
+    }
     if (media) {
       media.getTracks().forEach((track) => track.stop());
       media = null;
@@ -647,7 +700,7 @@ function createAudioEngine(deps) {
       audioContext = null;
     }
     vad = null;
-    setPhase('idle');
+    setPhase('idle', { mic, error: '' });
   }
 
   function dispose() {

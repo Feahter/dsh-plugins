@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
+import { EventEmitter, once } from 'node:events'
+import { createServer, request } from 'node:http'
 import { test } from 'node:test'
 
 import { ROUTE_PREFIX, apply, parseApiKey } from '../index.js'
@@ -27,7 +28,7 @@ function makeRequest({ method = 'GET', url = '/', headers = {}, body } = {}) {
 function makeResponse() {
   /** @type {Buffer[]} */
   const chunks = []
-  const response = {
+  const response = Object.assign(new EventEmitter(), {
     status: 0,
     headers: {},
     body: '',
@@ -46,7 +47,7 @@ function makeResponse() {
       this.onEnd?.()
       return this
     },
-  }
+  })
   return response
 }
 
@@ -260,7 +261,7 @@ test('GET /version exposes the version-check payload', async () => {
   const versionChecker = {
     check: async ({ refresh }) => ({
       plugin: 'dsh-voice-companion',
-      current: '0.5.0',
+      current: '0.6.0',
       latest: '0.4.3',
       updateAvailable: true,
       homepage: 'https://example.test/voice-companion',
@@ -286,7 +287,7 @@ test('GET /health exposes providers, voices, key state and tracked tasks', async
   })
   assert.equal(response.status, 200)
   assert.equal(response.json.ok, true)
-  assert.equal(response.json.version, '0.5.0')
+  assert.equal(response.json.version, '0.6.0')
   assert.deepEqual(response.json.tts.voices, ['stella', 'tide'])
   assert.equal(response.json.tts.apiKeyConfigured, true)
   assert.deepEqual(response.json.asr.providers, ['sensevoice', 'parakeet'])
@@ -363,6 +364,109 @@ test('POST /turn dispatches a task through sessionController.prompt', async () =
   assert.equal(typeof prompt.requestId, 'string')
   assert.deepEqual(prompt.content, [{ type: 'text', text: '查一下 Node 26 的新特性' }])
 })
+
+for (const stage of ['normal', 'model', 'create', 'permission', 'reasoning', 'prompt', 'dispatch']) {
+  test(`HTTP disconnect boundary: ${stage}`, { timeout: 5000 }, async () => {
+    const entered = Promise.withResolvers()
+    const release = Promise.withResolvers()
+    const responseClosed = Promise.withResolvers()
+    const handled = Promise.withResolvers()
+    const steps = []
+    let modelSignal
+    let promptSignal
+    let bodyClosed = false
+    async function step(name) {
+      steps.push(name)
+      if (stage === name || (stage === 'dispatch' && name === 'create')) {
+        entered.resolve()
+        await release.promise
+      }
+    }
+    const controller = {
+      async create() { await step('create'); return { sessionId: 'new' } },
+      async prompt(_payload, signal) { promptSignal = signal; await step('prompt'); return { accepted: true } },
+    }
+    const { ctx, routes } = createContext({ controller })
+    const get = ctx.get
+    const services = {
+      sessions: { get: () => ({ id: 'new' }) },
+      permissionPresets: { names: ['danger-full-access'], set: () => step('permission') },
+      agents: { get: () => ({ model: {
+        current: () => ({ provider: 'p', model: 'm' }),
+        select: () => step('select'),
+      } }) },
+      llm: { resolveModelInfo: () => step('reasoning') },
+    }
+    ctx.get = (name) => services[name] ?? get(name)
+    apply(ctx, {
+      getApiKey: () => 'test-key',
+      async fetchImpl(_url, init) {
+        modelSignal = init.signal
+        await step('model')
+        return jsonResponse({ choices: [{ message: { content: '{"say":"好。","task":{"title":"测试","text":"记录结果"}}' } }] })
+      },
+    })
+    const server = createServer((req, res) => {
+      req.once('close', () => { bodyClosed = req.complete })
+      res.once('close', () => responseClosed.resolve())
+      routes.get(req.url)(req, res).then(handled.resolve, handled.reject)
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    try {
+      const suffix = stage === 'dispatch' ? '/dispatch' : '/turn'
+      const payload = JSON.stringify({ utterance: '帮我记录结果', text: '记录结果' })
+      const req = request({
+        hostname: '127.0.0.1', port: server.address().port, method: 'POST',
+        path: ROUTE_PREFIX + suffix, headers: { 'content-length': Buffer.byteLength(payload) },
+      })
+      const received = new Promise((resolve, reject) => {
+        req.on('error', reject)
+        req.on('response', async (res) => {
+          try {
+            const chunks = []
+            for await (const chunk of res) chunks.push(chunk)
+            resolve({ status: res.statusCode, json: JSON.parse(Buffer.concat(chunks).toString()) })
+          } catch (error) { reject(error) }
+        })
+      })
+      if (stage !== 'normal') void received.catch(() => {})
+      req.end(payload)
+      if (stage === 'normal') {
+        const { status, json } = await received
+        assert.equal(status, 200)
+        assert.equal(json.task.sessionId, 'new')
+        assert.ok(json.task.taskId)
+        assert.equal(await handled.promise, undefined)
+        assert.equal(modelSignal.aborted, false)
+      } else {
+        await Promise.race([entered.promise, received])
+        assert.equal(bodyClosed, true)
+        req.destroy()
+        await responseClosed.promise
+        if (stage !== 'dispatch') assert.equal(modelSignal.aborted, true)
+        if (stage === 'prompt') assert.equal(promptSignal.aborted, false)
+        release.resolve()
+        await handled.promise
+      }
+      const all = ['model', 'create', 'permission', 'reasoning', 'select', 'prompt']
+      assert.deepEqual(steps, stage === 'normal' ? all : stage === 'dispatch' ? all.slice(1) : all.slice(0, all.indexOf(stage) + 1))
+      const health = await call(routes.get(ROUTE_PREFIX + '/health'))
+      const committed = ['normal', 'prompt', 'dispatch'].includes(stage)
+      assert.equal(health.json.tasks.tracked, committed ? 1 : 0)
+      if (stage === 'prompt') {
+        ctx.emit('agent/status', { agent: { id: 'new' }, status: 'idle' })
+        await new Promise(setImmediate)
+        const events = await call(routes.get(ROUTE_PREFIX + '/events'))
+        assert.equal(events.json.events[0]?.type, 'task-done')
+      }
+    } finally {
+      release.resolve()
+      server.closeAllConnections()
+      await new Promise((resolve) => server.close(resolve))
+    }
+  })
+}
 
 test('POST /dispatch rejects empty text with 400', async () => {
   const app = setup()

@@ -234,22 +234,24 @@ export function createBrain({
   }
 
   /**
-   * One chat-completions round trip. `decide()` calls it with no options, so the
-   * defaults below are the contract two tests pin (`max_tokens: 300`,
+   * One chat-completions round trip. `decide()` uses the default model settings,
+   * pinned below (`max_tokens: 300`,
    * `temperature: 0.6`); the theme designer calls it with a longer output
    * budget, a tighter temperature and its own timeout.
    * @param {Array<{ role: string, content: string }>} messages
-   * @param {{ maxTokens?: number, temperature?: number, timeoutMs?: number }} [options]
+   * @param {{ maxTokens?: number, temperature?: number, timeoutMs?: number, signal?: AbortSignal }} [options]
    * @returns {Promise<{ text: string, model: string, usage: { promptTokens: number, completionTokens: number } }>}
    */
-  async function request(messages, { maxTokens = 300, temperature = 0.6, timeoutMs = 30_000 } = {}) {
+  async function request(messages, { maxTokens = 300, temperature = 0.6, timeoutMs = 30_000, signal } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) {
       throw brainError(400, 'invalid', 'messages 必须是非空数组')
     }
     const key = await readKey()
+    signal?.throwIfAborted()
     if (key === '') throw brainError(503, 'service-missing', '没有配置 DeepSeek API key')
 
     const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
+    const timeout = AbortSignal.timeout(timeoutMs)
     let response
     try {
       response = await fetchImpl(url, {
@@ -265,7 +267,7 @@ export function createBrain({
           temperature,
           max_tokens: maxTokens,
         }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -319,13 +321,13 @@ export function createBrain({
   return {
     request,
     /**
-     * @param {{ utterance?: unknown, history?: unknown, sessionTitles?: unknown }} [input]
+     * @param {{ utterance?: unknown, history?: unknown, sessionTitles?: unknown, signal?: AbortSignal }} [input]
      * @returns {Promise<{ say: string, task: { title: string, text: string } | null }>}
      */
-    async decide({ utterance, history, sessionTitles } = {}) {
+    async decide({ utterance, history, sessionTitles, signal } = {}) {
       const text = asTrimmedString(utterance)
       if (text === '') throw brainError(400, 'invalid', 'utterance 不能为空')
-      const reply = await request(buildMessages({ utterance: text, history, sessionTitles }))
+      const reply = await request(buildMessages({ utterance: text, history, sessionTitles }), { signal })
       return parseDecision(reply.text)
     },
   }

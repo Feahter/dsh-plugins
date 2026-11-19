@@ -7,10 +7,10 @@
 
 const TAU = Math.PI * 2;
 const FALLBACK = {
-  idle: ['#dfe9ff', '#8fb4ff', '#6b85ff'],
+  idle: ['#e2fcff', '#63d8ef', '#2878ad'],
   listening: ['#d8ffe9', '#7fe3a8', '#2fbf86'],
-  thinking: ['#e2ecff', '#9db4ff', '#6b85ff'],
-  speaking: ['#eef4ff', '#a9c0ff', '#7d95ff'],
+  thinking: ['#efe7ff', '#bba0fa', '#6d52d1'],
+  speaking: ['#f0f7ff', '#8cbaff', '#5266eb'],
   error: ['#ffd9d9', '#ff7676', '#7a2020'],
 };
 const KIND = { webgl2: 'webgl2', webgl1: 'webgl', canvas2d: '2d' };
@@ -27,7 +27,7 @@ export function pickCoreBackend(env) {
 }
 
 export const CORE_STATE_STYLE = {
-  idle: { spin: 1.0, ring: 1.0, glow: 0.55, jitter: 0, desat: 0, pulse: 0.10 },
+  idle: { spin: 0.65, ring: 1.0, glow: 0.45, jitter: 0, desat: 0, pulse: 0.10 },
   listening: { spin: 1.4, ring: 1.35, glow: 0.70, jitter: 0, desat: 0, pulse: 0.18 },
   thinking: { spin: 2.6, ring: 1.15, glow: 0.62, jitter: 0, desat: 0, pulse: 0.22 },
   speaking: { spin: 1.8, ring: 1.10, glow: 0.85, jitter: 0, desat: 0, pulse: 0.40 },

@@ -33,7 +33,7 @@ import { DEFAULT_CHARACTER, listCharacters, resolveCharacter } from './src/clien
 
 export const name = 'voice-companion'
 export const ROUTE_PREFIX = '/api/voice-companion'
-export const VERSION = '0.5.0'
+export const VERSION = '0.6.0'
 
 const CONFIG_PATH = join(homedir(), '.deepseek', 'config.toml')
 const CONFIG_TTL_MS = 60_000
@@ -200,8 +200,8 @@ export function apply(ctx, options = {}) {
     })
   }
 
-  /** @param {any} payload */
-  async function handleTurn(payload) {
+  /** @param {any} payload @param {any} _request @param {AbortSignal} [signal] */
+  async function handleTurn(payload, _request, signal) {
     const utterance = typeof payload.utterance === 'string' ? payload.utterance.trim() : ''
     if (utterance === '') throw httpError(400, 'invalid', 'utterance 不能为空')
     if (
@@ -214,8 +214,10 @@ export function apply(ctx, options = {}) {
     const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : undefined
     const history = Array.isArray(payload.history) ? payload.history : []
     const sessionTitles = await listTitles()
+    signal?.throwIfAborted()
 
-    const decision = await brain.decide({ utterance, history, sessionTitles })
+    const decision = await brain.decide({ utterance, history, sessionTitles, signal })
+    signal?.throwIfAborted()
     const sentences = splitSentences(decision.say)
     const say = sentences.length > 0 ? sentences : [decision.say || '嗯，我在。']
 
@@ -226,6 +228,7 @@ export function apply(ctx, options = {}) {
         text: decision.task.text,
         sessionId,
         title: decision.task.title,
+        signal,
       })
       task = {
         taskId: dispatched.taskId,
@@ -449,7 +452,7 @@ export function apply(ctx, options = {}) {
         checker: versionChecker,
         getConnection: () => (typeof ctx.get === 'function' ? ctx.get('connection') : undefined),
       }))
-      register('/turn', jsonRoute({ handle: handleTurn, getOrigin: origin }))
+      register('/turn', jsonRoute({ handle: handleTurn, getOrigin: origin, cancelOnDisconnect: true }))
       register('/speak', jsonRoute({ handle: handleSpeak, getOrigin: origin }))
       register('/dispatch', jsonRoute({ handle: handleDispatch, getOrigin: origin }))
       register('/events', getRoute(handleEvents))
