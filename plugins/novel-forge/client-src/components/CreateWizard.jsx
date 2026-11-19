@@ -1,7 +1,7 @@
 // 新建长篇：一屏向导。左边是参数，右边是服务端按当前参数返回的预估。
 import React from 'react'
 import { Button, Field, Switch, formatNumber, formatTokens } from './bits.jsx'
-import { CADENCES, CHANNELS, GENRES, LONGFORM_FIELDS, POVS } from '../strings.js'
+import { CADENCES, CHANNELS, GENRES, LONGFORM_FIELDS, MARKET_MODES, MARKET_YEARS, POVS } from '../strings.js'
 import { randomIdea } from '../ideas.js'
 import * as api from '../api.js'
 
@@ -11,6 +11,8 @@ const DEFAULT = {
   genre: '悬疑',
   channel: '通用',
   platform: '未定',
+  marketMode: 'off',
+  marketYear: 0,
   tags: '',
   sellingPoint: '',
   chapters: 100,
@@ -100,14 +102,19 @@ function SegmentField({ label, hint, value, options, onChange }) {
       'aria-label': label,
       style: { display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' },
     },
-    options.map(option => React.createElement('button', {
-      key: option,
-      type: 'button',
-      className: 'nf-btn nf-btn-sm nf-btn-quiet',
-      onClick: () => onChange(option),
-      'aria-pressed': value === option,
-      style: value === option ? { borderColor: 'var(--nf-ink)', color: 'var(--nf-ink)' } : undefined,
-    }, option))),
+    options.map(option => {
+      const { value: optionValue, label: optionLabel } = typeof option === 'string'
+        ? { value: option, label: option }
+        : option
+      return React.createElement('button', {
+        key: optionValue,
+        type: 'button',
+        className: 'nf-btn nf-btn-sm nf-btn-quiet',
+        onClick: () => onChange(optionValue),
+        'aria-pressed': value === optionValue,
+        style: value === optionValue ? { borderColor: 'var(--nf-ink)', color: 'var(--nf-ink)' } : undefined,
+      }, optionLabel)
+    })),
   )
 }
 
@@ -217,6 +224,8 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
           genre: form.genre,
           channel: form.channel,
           platform: form.platform,
+          marketMode: form.marketMode,
+          marketYear: Number(form.marketYear) || 0,
           tags: [...new Set(form.tags.split(/[,，、]/).map(tag => tag.trim()).filter(Boolean))].join(','),
           sellingPoint: form.sellingPoint.trim(),
           audience: form.audience,
@@ -333,6 +342,24 @@ export function CreateWizard({ onCreated, onCancel, notify }) {
             value: form.platform, options: ['起点', '番茄', '晋江', '七猫', '未定'],
             onChange: value => set('platform', value),
           }),
+
+          React.createElement(SegmentField, {
+            label: LONGFORM_FIELDS.market,
+            hint: '按年份：取该年榜单风向注入商业定位；按标签：按已填标签匹配头部作品。只借机制，不抄桥段。',
+            value: form.marketMode, options: MARKET_MODES,
+            onChange: value => set('marketMode', value),
+          }),
+
+          form.marketMode !== 'off' ? React.createElement(Field, { label: '榜单年份' },
+            React.createElement('select', {
+              className: 'nf-select', value: form.marketYear,
+              onChange: event => set('marketYear', Number(event.target.value)),
+              'aria-label': '榜单年份',
+            },
+              React.createElement('option', { value: 0 }, '不指定'),
+              MARKET_YEARS.map(year => React.createElement('option', { key: year, value: year }, year)),
+            ),
+          ) : null,
 
           React.createElement('div', { className: 'nf-row' },
             React.createElement(Field, { label: LONGFORM_FIELDS.tags, hint: '3–6 个，逗号分隔 · 可空，留空由 AI 起' },

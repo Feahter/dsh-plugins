@@ -33,8 +33,18 @@ export const POVS = ['第三人称限知', '第三人称全知', '第一人称']
 // 网文长篇定位：频道决定读者契约，更新节奏决定卷末钩子与存稿建议。
 export const CHANNELS = ['男频', '女频', '通用']
 export const CADENCES = ['日更', '周更', '不定期']
+
+// 市场坐标：把「今年榜单在写什么」变成开书时可选的输入。
+export const MARKET_MODES = [
+  { value: 'off', label: '关闭' },
+  { value: 'year', label: '按年份' },
+  { value: 'tags', label: '按标签' },
+]
+export const MARKET_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+
 export const LONGFORM_FIELDS = {
   channel: '频道',
+  market: '市场坐标',
   tags: '标签',
   sellingPoint: '一句话卖点',
   chaptersPerVolume: '每卷章数',
