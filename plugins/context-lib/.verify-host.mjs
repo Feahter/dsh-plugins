@@ -520,8 +520,13 @@ async function run() {
     await fs.rename(linked.path, saved)
     try {
       const reveal = await request(routes, 'POST', `${PREFIX}/items/${linked.id}/reveal`)
-      assert.equal(reveal.res.status, 404)
-      assert.match(reveal.json.error.message, /原文件已不在/)
+      if (process.platform === 'darwin') {
+        assert.equal(reveal.res.status, 404)
+        assert.match(reveal.json.error.message, /原文件已不在/)
+      } else {
+        assert.equal(reveal.res.status, 501)
+        assert.equal(reveal.json.error.code, 'unsupported-platform')
+      }
     } finally {
       await fs.rename(saved, linked.path)
     }
@@ -536,7 +541,7 @@ async function run() {
     assert.equal(patched.json.data.item.collection, 'http2')
   })
 
-  await checkAsync('GET /items/:id/preview：html 转纯文本，不支持的缩略图返回 415', async () => {
+  await checkAsync('HTML 文本预览剥离脚本，缩略图遵循平台能力', async () => {
     await fs.writeFile(
       path.join(sampleDir, 'page.html'),
       '<h1>页面标题</h1><p>正文 hello <b>world</b></p><script>var x = 1</script>',
@@ -552,8 +557,12 @@ async function run() {
     assert.match(pv.json.data.text, /正文 hello world/)
     assert.ok(!/var x = 1/.test(pv.json.data.text), '脚本内容应被剥掉')
     const thumb = await request(routes, 'GET', `${PREFIX}/items/${entry.id}/thumb`)
-    assert.equal(thumb.res.status, 200)
-    assert.equal(thumb.res.headers['content-type'], 'image/png')
+    if (process.platform === 'darwin') {
+      assert.equal(thumb.res.status, 200)
+      assert.equal(thumb.res.headers['content-type'], 'image/png')
+    } else {
+      assert.equal(thumb.res.status, 415)
+    }
   })
 
   await checkAsync('GET /trash 与 POST /scan、GET /sources', async () => {

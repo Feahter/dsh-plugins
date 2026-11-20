@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The verifier compares the candidate against the default branch.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -20,7 +23,27 @@ jobs:
       - name: Check version-check copies
         run: node scripts/sync-version-check.mjs --check
 
+      - name: Install plugin test dependencies
+        run: |
+          npm ci --prefix plugins/mind-canvas --include=dev --ignore-scripts
+          npm ci --prefix plugins/novel-forge --include=dev --ignore-scripts
+
       # 一条命令跑完：每个插件的 npm test、无测试插件的语法门、清单/索引一致性、文档校验。
       # 本地等价命令：bash scripts/test-all.sh
       - name: Run all plugin checks
+        id: verify
         run: bash scripts/test-all.sh
+
+      - name: Show failed verification logs
+        if: ${{ failure() && steps.verify.outcome == 'failure' }}
+        run: |
+          for report in .git/dsh-verify/runs/*/report.json; do
+            [[ -f "$report" ]] || continue
+            jq -r '.steps[] | select(.status == "FAIL" or .status == "BLOCKED") | .stdout, .stderr | strings' "$report" |
+              while IFS= read -r log; do
+                if [[ -s "$log" ]]; then
+                  printf '\n--- %s ---\n' "$log"
+                  tail -n 120 "$log"
+                fi
+              done
+          done
