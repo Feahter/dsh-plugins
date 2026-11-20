@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,7 +19,7 @@ import * as hostModule from '../index.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
-const APP = '/Applications/DeepSeek Harness.app/Contents/Resources/app-update.yml'
+const MANIFEST_FILE = { darwin: 'latest-mac.yml', win32: 'latest.yml' }[process.platform] ?? 'latest-linux.yml'
 
 const results = []
 async function check(name, body) {
@@ -58,8 +58,12 @@ await check('compareVersions follows semver precedence', () => {
 
 // ------------------------------------------------------------- 2. feed parsing
 
-await check('app-update.yml parses and resolves the electron-updater manifest URL', async () => {
-  const text = await readFile(APP, 'utf8')
+await check('app-update.yml parses and resolves the electron-updater manifest URL', () => {
+  const text = [
+    'provider: generic',
+    'channel: nightly',
+    'url: https://download.deepseek.com/dsh-desk/feeds/mac-x64/',
+  ].join('\n')
   const feed = hostModule.parseAppUpdateYml(text)
   assert.equal(feed.provider, 'generic')
   assert.equal(feed.channel, 'nightly')
@@ -94,23 +98,36 @@ await check('parseManifest reads yml and json manifests and resolves download UR
 })
 
 await check('readInstalledVersion reports the app bundle version (plist and asar fallback)', async () => {
-  const executable = '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness'
-  const version = await hostModule.readInstalledVersion({ execPath: executable })
-  assert.equal(typeof version, 'string')
-  assert.notEqual(hostModule.parseVersion(version), null, `not a version: ${version}`)
-  const plist = await readFile('/Applications/DeepSeek Harness.app/Contents/Info.plist', 'utf8')
-  assert.equal(version, hostModule.parsePlistVersion(plist))
+  const fixture = await mkdtemp(join(tmpdir(), 'dsh-update-bundle-'))
+  try {
+    const contents = join(fixture, 'Fake.app', 'Contents')
+    const resources = join(contents, 'Resources')
+    const executable = join(contents, 'MacOS', 'Fake')
+    const version = '0.2.1-rc.4'
+    await mkdir(resources, { recursive: true })
+    await writeFile(join(contents, 'Info.plist'),
+      `<plist><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`)
+    assert.equal(await hostModule.readInstalledVersion({ execPath: executable, env: {} }), version)
+    assert.equal(await hostModule.readInstalledVersion({ env: { DSH_CLIENT_VERSION: '9.9.9' } }), '9.9.9')
+    assert.equal(await hostModule.readInstalledVersion({ env: { DSH_CLIENT_VERSION: 'not-a-version' }, execPath: executable }), version)
 
-  // Production path: the Desktop main process injects the version into the Host env.
-  assert.equal(await hostModule.readInstalledVersion({ env: { DSH_CLIENT_VERSION: '9.9.9' } }), '9.9.9')
-  assert.equal(await hostModule.readInstalledVersion({ env: { DSH_CLIENT_VERSION: 'not-a-version' }, execPath: executable }), version)
-
-  // Fallback path: no plist in the bundle layout, so the packaged Host manifest is parsed.
-  const fallback = await hostModule.readInstalledVersion({
-    execPath: '/nonexistent/Contents/MacOS/DeepSeek Harness',
-    resources: '/Applications/DeepSeek Harness.app/Contents/Resources',
-  })
-  assert.equal(fallback, version)
+    const body = Buffer.from(JSON.stringify({ release: { version } }))
+    const index = Buffer.from(JSON.stringify({ files: { dsh: { files: {
+      'desktop-runtime.json': { size: body.length, offset: '0' },
+    } } } }))
+    const paddedLength = Math.ceil(index.length / 4) * 4
+    const header = Buffer.alloc(16 + paddedLength)
+    header.writeUInt32LE(4, 0)
+    header.writeUInt32LE(8 + paddedLength, 4)
+    header.writeUInt32LE(4 + paddedLength, 8)
+    header.writeUInt32LE(index.length, 12)
+    index.copy(header, 16)
+    await writeFile(join(resources, 'app.asar'), Buffer.concat([header, body]))
+    await rm(join(contents, 'Info.plist'))
+    assert.equal(await hostModule.readInstalledVersion({ execPath: executable, env: {} }), version)
+  } finally {
+    await rm(fixture, { recursive: true, force: true })
+  }
 })
 
 // ------------------------------------------------- 3. authenticated Host route
@@ -140,7 +157,7 @@ await check('host: configured feed keeps its path and rejects unusable urls', as
     fetchText: async (url) => { seen.push(url); return 'version: 0.2.1-rc.4\nfiles:\n  - url: a.zip\n' },
   })
   const okStatus = await good.status()
-  assert.equal(seen[0], 'http://127.0.0.1:9/feeds/latest-mac.yml')
+  assert.equal(seen[0], `http://127.0.0.1:9/feeds/${MANIFEST_FILE}`)
   assert.equal(okStatus.error, null)
 
   const bad = hostModule.createHost({ feedUrl: 'not a url' }, { readInstalledVersion: async () => '0.2.1-rc.4' })
@@ -269,7 +286,7 @@ await check('route: reports available / up-to-date / unreachable against a local
     assert.equal(first.latest.version, '0.2.2-rc.1')
     assert.equal(first.updateAvailable, true)
     assert.equal(first.feed.source, 'config')
-    assert.equal(first.feed.manifestUrl, `http://127.0.0.1:${feedPort}/feeds/latest-mac.yml`)
+    assert.equal(first.feed.manifestUrl, `http://127.0.0.1:${feedPort}/feeds/${MANIFEST_FILE}`)
     assert.equal(first.latest.downloadUrl, `http://127.0.0.1:${feedPort}/feeds/Harness-mac.zip`)
 
     // Cached: a new feed version is not visible until refresh, and POST /check forces it.

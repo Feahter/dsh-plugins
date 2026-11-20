@@ -9,6 +9,10 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
+import fs, { readFile } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { classifyError } from '../host/http.js'
@@ -330,15 +334,22 @@ test('GET on a POST route answers 405', async () => {
   assert.equal(result.status, 405)
 })
 
-test('speak returns playable wav bytes and repairs the size fields', async () => {
-  const originalFetch = globalThis.fetch
+test('speak returns playable wav bytes and repairs the size fields', async (t) => {
+  const originalReadFile = readFile
+  const configPath = join(homedir(), '.deepseek', 'config.toml')
+  const config = t.mock.method(fs, 'readFile', (path, ...args) =>
+    path === configPath ? Promise.resolve('api_key = "fixture-token"') : originalReadFile(path, ...args))
+  syncBuiltinESMExports()
   const payload = Buffer.alloc(48_000, 7)
   const header = Buffer.alloc(44)
   header.write('RIFF', 0, 'ascii')
   header.write('WAVE', 8, 'ascii')
   header.write('data', 36, 'ascii')
   const wav = Buffer.concat([header, payload])
-  globalThis.fetch = async () => new Response(wav, { status: 200, headers: { 'content-type': 'audio/wav' } })
+  const fetch = t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    assert.equal(options.headers.authorization, 'Bearer fixture-token')
+    return new Response(wav, { status: 200, headers: { 'content-type': 'audio/wav' } })
+  })
   try {
     const { routes } = makeContext()
     const result = await call(routeFor(routes, 'speak'), { method: 'POST', body: { text: '好的，马上办。' } })
@@ -347,8 +358,10 @@ test('speak returns playable wav bytes and repairs the size fields', async () =>
     assert.ok(result.json.durationMs > 0)
     const decoded = Buffer.from(result.json.audioBase64, 'base64')
     assert.equal(decoded.readUInt32LE(40), 48_000)
+    assert.equal(fetch.mock.callCount(), 1)
   } finally {
-    globalThis.fetch = originalFetch
+    config.mock.restore()
+    syncBuiltinESMExports()
   }
 })
 
