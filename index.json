@@ -686,17 +686,17 @@
           "dictation"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795186227
         }
       },
       "versions": [
         {
           "version": "0.4.0",
-          "publishTimestamp": 1795014753,
+          "publishTimestamp": 1795186227,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "e8553f058cb5308cbceea108563da868317b9712",
+            "commit": "7f040f4d5dea66afb5a545e25d5369748896df3f",
             "path": "plugins/mind-canvas"
           },
           "engines": {
@@ -896,17 +896,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795186227
         }
       },
       "versions": [
         {
           "version": "0.2.0",
-          "publishTimestamp": 1795014753,
+          "publishTimestamp": 1795186227,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "e8553f058cb5308cbceea108563da868317b9712",
+            "commit": "7f040f4d5dea66afb5a545e25d5369748896df3f",
             "path": "plugins/update-check"
           },
           "engines": {
@@ -989,10 +989,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795186227
         }
       },
       "versions": [
+        {
+          "version": "0.6.0",
+          "publishTimestamp": 1795186227,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "d1a0b07d87ecbb76790280c5d7f6474e2057a19a",
+            "path": "plugins/novel-forge"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.5.0",
           "publishTimestamp": 1795014753,
@@ -1112,10 +1126,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795186227
         }
       },
       "versions": [
+        {
+          "version": "0.3.1",
+          "publishTimestamp": 1795186227,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "358b2c821784ae2852917e2284e8540d88a717ad",
+            "path": "plugins/context-lib"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.3.0",
           "publishTimestamp": 1795014753,
@@ -1220,17 +1248,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795014753
+          "updated": 1795186227
         }
       },
       "versions": [
         {
           "version": "0.2.0",
-          "publishTimestamp": 1795014753,
+          "publishTimestamp": 1795186227,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "e8553f058cb5308cbceea108563da868317b9712",
+            "commit": "7f040f4d5dea66afb5a545e25d5369748896df3f",
             "path": "plugins/voice-control"
           },
           "engines": {
