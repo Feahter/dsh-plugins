@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The verifier compares the candidate against the default branch.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -36,7 +39,7 @@ jobs:
         run: |
           for report in .git/dsh-verify/runs/*/report.json; do
             [[ -f "$report" ]] || continue
-            jq -r '.steps[] | select(.status == "FAIL") | .stdout, .stderr | strings' "$report" |
+            jq -r '.steps[] | select(.status == "FAIL" or .status == "BLOCKED") | .stdout, .stderr | strings' "$report" |
               while IFS= read -r log; do
                 if [[ -s "$log" ]]; then
                   printf '\n--- %s ---\n' "$log"
