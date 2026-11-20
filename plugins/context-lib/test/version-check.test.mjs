@@ -1,6 +1,7 @@
 // version-check.js 的纯逻辑与缓存测试：不联网，fetch 全部由假实现提供。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   parseSemver,
@@ -10,13 +11,18 @@ import {
   createVersionChecker,
 } from '../version-check.js'
 
+// 已装版本从 package.json 读，索引里造一个更高的版本，这样升版不用改测试断言。
+const CURRENT = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+const [MAJOR, MINOR, PATCH] = CURRENT.split('.').map(Number)
+const NEXT = `${MAJOR}.${MINOR}.${PATCH + 1}`
+
 const INDEX = {
   format: 1,
   plugins: [
     {
       name: 'dsh-context-lib',
       homepage: 'https://github.com/Feahter/dsh-plugins/tree/main/plugins/context-lib',
-      versions: [{ version: '0.3.0' }, { version: '0.3.1' }, { version: '0.3.0-rc.1' }],
+      versions: [{ version: '0.1.0' }, { version: NEXT }, { version: '0.3.0-rc.1' }],
     },
     { name: 'dsh-other', versions: [{ version: '9.9.9' }] },
   ],
@@ -59,7 +65,7 @@ test('isNewer：无法解析一律 false，本地领先不报更新', () => {
 
 test('pickIndexEntry 取最高版本而不是数组首项', () => {
   const entry = pickIndexEntry(INDEX, 'dsh-context-lib')
-  assert.equal(entry.latest, '0.3.1')
+  assert.equal(entry.latest, NEXT)
   assert.match(entry.homepage, /plugins\/context-lib$/)
   assert.equal(pickIndexEntry(INDEX, 'dsh-missing'), null)
 })
@@ -69,8 +75,8 @@ test('checker 比较已装版本与索引版本', async () => {
   const checker = createVersionChecker({ pluginName: 'dsh-context-lib', fetchImpl, now: () => 1000 })
   const result = await checker.check()
   assert.equal(result.plugin, 'dsh-context-lib')
-  assert.equal(result.current, '0.3.0')
-  assert.equal(result.latest, '0.3.1')
+  assert.equal(result.current, CURRENT)
+  assert.equal(result.latest, NEXT)
   assert.equal(result.updateAvailable, true)
   assert.equal(result.failed, false)
   assert.equal(result.checkedAt, 1000)
@@ -93,7 +99,7 @@ test('checker 网络失败标记 failed 且不抛错，缓存期内不再重试'
   assert.equal(first.failed, true)
   assert.equal(first.latest, null)
   assert.equal(first.updateAvailable, null)
-  assert.equal(first.current, '0.3.0')
+  assert.equal(first.current, CURRENT)
   clock += 60_000
   await checker.check()
   assert.equal(calls.length, 2, '两个 index 源各试一次，缓存期内不再请求')
