@@ -2,7 +2,7 @@
 
 本文件记录墨炉的可见变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号沿用 `package.json`。
 
-## Unreleased
+## [0.6.0] - 2026-11-20
 
 ### Added
 
