@@ -695,7 +695,8 @@ export class Library {
     if (sources.changed) await this._saveSources()
     const loaded = await this._loadIndex()
     this.index = loaded.index
-    if (loaded.repaired && loaded.existed) await this._saveIndex()
+    // Normalization is kept in memory. Only dropped entries require a startup write.
+    if (loaded.existed && loaded.dropped.length) await this._saveIndex()
     this._diskStamps.index = await this._stampOf(this.indexPath)
     this._diskStamps.sources = await this._stampOf(this.sourcesPath)
     this._initialized = true
@@ -711,18 +712,15 @@ export class Library {
     const entries = {}
     const dropped = []
     const kept = []
-    let repaired = false
     for (const [id, raw] of Object.entries(parsed.entries)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        repaired = true
         dropped.push({ id, reason: '条目结构不是对象' })
         continue
       }
       const normalized = normalizeEntry(id, raw)
       if (!isSafeEntryId(id) || !isSafeEntryId(normalized.id)) {
         // Never expose an entry whose id would resolve outside notes/ or blobs/
-        // (or collide with a path separator) — drop it, flag a repair.
-        repaired = true
+        // (or collide with a path separator).
         dropped.push({ id, reason: 'id 不在安全字符集内' })
         continue
       }
@@ -731,7 +729,6 @@ export class Library {
         // 所以键与 id 不一致不构成越界风险。真实库里确实有这类历史条目
         // （同一文件分两批扫描过，键与 id 各自都是合法 id）：保留它，按原键收录，
         // 否则下一次加载会连同索引项与手工标签一起丢掉。
-        repaired = true
         kept.push({ id, entryId: normalized.id })
       }
       if (normalized.storage === 'linked') {
@@ -740,12 +737,10 @@ export class Library {
         // on the machine. 扫描产出的 linked 路径天然落在其来源目录内。
         const reason = this.linkedPathReason(normalized.path)
         if (reason) {
-          repaired = true
           dropped.push({ id, reason })
           continue
         }
       }
-      if (JSON.stringify(normalized) !== JSON.stringify(raw)) repaired = true
       entries[id] = normalized
     }
     if (dropped.length) {
@@ -761,7 +756,6 @@ export class Library {
     }
     return {
       index: { version: INDEX_VERSION, updatedAt: parsed.updatedAt ?? null, entries },
-      repaired,
       dropped,
       kept,
     }
@@ -802,16 +796,16 @@ export class Library {
         try {
           const backup = this._parseIndex(await fs.readFile(this.backupPath, 'utf8'))
           console.warn(`[context-lib] index.json 损坏，已从 .bak 恢复：${error.message}`)
-          return { ...backup, repaired: true, existed: false }
+          return { ...backup, existed: false }
         } catch {
           const aside = `${this.indexPath}.corrupt-${Date.now()}`
           await fs.rename(this.indexPath, aside).catch(() => {})
           console.warn(`[context-lib] index.json 无法解析，已移到 ${aside}，从空索引起步。`)
-          return { index: fresh, repaired: false, existed: false }
+          return { index: fresh, dropped: [], existed: false }
         }
       }
     }
-    return { index: fresh, repaired: false, existed }
+    return { index: fresh, dropped: [], existed }
   }
 
   async _loadSources() {

@@ -885,5 +885,75 @@ test('索引键与条目 id 不一致时保留条目，不当作坏数据丢弃'
   assert.ok(kept, '键与 id 不一致的条目必须保留（否则丢索引与手工标签）')
   assert.equal(kept.id, 'cl_00000000cafe', '条目自身的 id 不变，磁盘路径仍按它解析')
   const onDisk = JSON.parse(await fs.readFile(indexPath, 'utf8'))
-  assert.ok(onDisk.entries[legacyId], '回写后条目仍在索引里')
+  assert.ok(onDisk.entries[legacyId], '重新加载后条目仍在磁盘索引里')
+})
+
+test('init 保留缺少默认字段的键与 id 不一致条目，索引逐字节不变', async (t) => {
+  const { root } = await makeSandbox(t)
+  const legacyKey = 'cl_00000000beef'
+  const entryId = 'cl_00000000cafe'
+  const indexPath = await put(root, 'index.json', JSON.stringify({
+    version: 1,
+    entries: { [legacyKey]: { id: entryId, title: 'legacy', tags: ['manual'] } },
+  }))
+  const before = await fs.readFile(indexPath)
+  const warn = t.mock.method(console, 'warn', () => {})
+
+  const lib = await createLibrary(root)
+  await lib.init()
+
+  assert.deepEqual(await fs.readFile(indexPath), before)
+  await assert.rejects(fs.stat(`${indexPath}.bak`), { code: 'ENOENT' })
+  const entry = await lib.get(legacyKey)
+  assert.ok(entry)
+  assert.equal(entry.id, entryId)
+  assert.deepEqual(entry.tags, ['manual'])
+  assert.ok(Number.isFinite(Date.parse(entry.createdAt)))
+  assert.deepEqual(warn.mock.calls.map(({ arguments: args }) => args), [[
+    '[context-lib] index.json 有 1 条条目的索引键与自身 id 不一致，已按原键保留（不是数据丢失）',
+  ]])
+})
+
+test('init 丢弃不安全 id，写回索引并备份原文件，只告警一次', async (t) => {
+  const { root } = await makeSandbox(t)
+  const key = 'cl_00000000dead'
+  const indexPath = await put(root, 'index.json', JSON.stringify({
+    version: 1,
+    entries: { [key]: { id: '../../etc/passwd' } },
+  }))
+  const before = await fs.readFile(indexPath)
+  const warn = t.mock.method(console, 'warn', () => {})
+
+  const lib = await createLibrary(root)
+  await lib.init()
+
+  assert.equal(await lib.get(key), null)
+  const after = await fs.readFile(indexPath)
+  assert.notDeepEqual(after, before)
+  assert.deepEqual(JSON.parse(after.toString('utf8')).entries, {})
+  assert.deepEqual(await fs.readFile(`${indexPath}.bak`), before)
+  assert.deepEqual(warn.mock.calls.map(({ arguments: args }) => args), [[
+    `[context-lib] index.json 加载时丢弃了 1 条不符合规则的条目：${key}（id 不在安全字符集内）`,
+  ]])
+})
+
+test('同一索引缺少默认字段时，两次独立 init 均不写回', async (t) => {
+  const { root } = await makeSandbox(t)
+  const id = 'cl_000000000001'
+  const indexPath = await put(root, 'index.json', JSON.stringify({
+    version: 1,
+    entries: { [id]: { id, title: 'legacy' } },
+  }))
+  await put(root, 'sources.json', JSON.stringify({ version: 1, sources: [] }))
+  const before = await fs.readFile(indexPath)
+
+  for (let i = 0; i < 2; i++) {
+    // 每次新建实例，确保第二次走实际加载路径，而非复用 _initPromise。
+    const lib = await createLibrary(root)
+    const saveIndex = t.mock.method(lib, '_saveIndex')
+    await lib.init()
+    assert.deepEqual((await lib.get(id)).tags, [])
+    assert.equal(saveIndex.mock.callCount(), 0)
+  }
+  assert.deepEqual(await fs.readFile(indexPath), before)
 })
