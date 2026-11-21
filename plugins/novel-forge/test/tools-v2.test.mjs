@@ -421,13 +421,16 @@ test('novel_context：目标章所在卷未展开 → 先展开卷纲并落盘 o
 })
 
 test('novel_context：300 章骨架 + 空草稿 → chapter:"5" 解析成 ch005，只展开第一卷', async () => {
-  const llm = fakeLlm(spec => ({
-    text: JSON.stringify(
-      String(spec.system).includes('卷纲展开')
-        ? { chapters: rowsFor(30, '长卷') }
-        : beatsPayload,
-    ),
-  }))
+  const ranges = []
+  const llm = fakeLlm(spec => {
+    if (!String(spec.system).includes('卷纲展开')) return { text: JSON.stringify(beatsPayload) }
+    const range = spec.user.match(/【本批章号】第 (\d+)–(\d+) 章/)
+    assert.ok(range, '卷纲 prompt 包含实际请求区间')
+    const [start, end] = range.slice(1).map(Number)
+    ranges.push([start, end])
+    const chapters = rowsFor(end - start + 1).map((row, i) => ({ ...row, title: `长卷${start + i}` }))
+    return { text: JSON.stringify({ chapters }) }
+  })
   const { engine, files } = makeHarness({
     outline: skeletonOutline({ chapters: 300, per: 30 }),
     llm,
@@ -437,8 +440,11 @@ test('novel_context：300 章骨架 + 空草稿 → chapter:"5" 解析成 ch005�
 
   assert.equal(value.chapter.id, 'ch005')
   assert.equal(value.chapter.index, 5)
-  assert.equal(llm.calls.length, 2)
-  assert.equal(value.calls, 2)
+  const expectedCalls = Math.ceil(30 / 12) + 1
+  assert.equal(llm.calls.length, expectedCalls)
+  assert.equal(value.calls, expectedCalls)
+  assert.equal(ranges.length, expectedCalls - 1)
+  assert.ok(ranges.every(([start, end]) => end >= start && end - start + 1 <= 12))
   assert.equal(value.persisted.expandedVolumes, 1)
   assert.equal(value.persisted.volume, 'v01')
 
@@ -446,8 +452,9 @@ test('novel_context：300 章骨架 + 空草稿 → chapter:"5" 解析成 ch005�
   assert.equal(saved.chapters.length, 30)
   assert.equal(saved.volumes.filter(volume => volume.planned).length, 1)
   assert.equal(saved.volumes[0].planned, true)
-  assert.equal(saved.chapters[0].id, 'ch001')
-  assert.equal(saved.chapters.at(-1).id, 'ch030')
+  const numbers = Array.from({ length: 30 }, (_, i) => i + 1)
+  assert.deepEqual(saved.chapters.map(chapter => chapter.id), numbers.map(n => `ch${String(n).padStart(3, '0')}`))
+  assert.deepEqual(saved.chapters.map(chapter => chapter.title), numbers.map(n => `长卷${n}`))
   assert.ok(saved.volumes.slice(1).every(volume => volume.planned === false))
   assert.ok(files.has('beats/ch005'))
 })

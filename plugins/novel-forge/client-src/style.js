@@ -524,6 +524,23 @@ body[data-ds-dark-theme] .nf-root{
 .nf-banner .nf-grow{ flex: 1; }
 .nf-banner-mark{ flex: none; width: 20px; height: 20px; border: 1px solid var(--nf-cinnabar); color: var(--nf-cinnabar); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--nf-serif); font-size: 11px; }
 
+/* 书稿快照：路径一行给足信息，动作靠右，说明压到一行 */
+.nf-book{
+  display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; padding: 11px 14px;
+  background: var(--nf-card); border: 1px solid var(--nf-line); border-left: 2px solid var(--nf-cinnabar);
+  border-radius: 3px;
+}
+.nf-book-top{ display: flex; align-items: center; gap: 7px; color: var(--nf-ink-3); font-size: 11px; }
+.nf-book-top .nf-grow{ flex: 1; }
+.nf-book-title{ font-family: var(--nf-serif); font-size: 12.5px; color: var(--nf-ink); letter-spacing: .04em; }
+.nf-book-tag{ font-size: 10px; letter-spacing: .03em; color: var(--nf-ink-3); border: 1px solid var(--nf-line); border-radius: 2px; padding: 1px 5px; }
+.nf-book-path{
+  display: block; padding: 6px 8px; font-size: 11px; color: var(--nf-ink-2);
+  background: var(--nf-card-2); border: 1px solid var(--nf-line); border-radius: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nf-book-hint{ font-size: 10.5px; line-height: 1.65; color: var(--nf-ink-3); }
+
 /* 运行抽屉 */
 .nf-drawer{
   min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--nf-line);

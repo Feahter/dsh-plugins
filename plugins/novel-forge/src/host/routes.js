@@ -1,8 +1,11 @@
 // REST 路由：纯函数 handle() + 适配 DSH webServer 的 makeHandler()。
 // handle() 不碰 req/res，测试可以直接喂 {method,path,query,body}。
 
+import { lstat } from 'node:fs/promises'
 import { readBody, sendJson, statusForError, httpError } from './json.js'
 import { runAssist, validateAssistInput } from './assist.js'
+import { bookDirectory } from '../forge/bookrepo.js'
+import { openDirectory as systemOpen } from './open.js'
 
 export const ROUTE_PREFIX = '/novel-forge'
 
@@ -92,6 +95,19 @@ function assertExportFormat(engine, format) {
   }
 }
 
+/** 书稿目录只在小说项目存在：路径由宿主算，客户端永远不传路径。 */
+async function bookState(engine, project) {
+  if (project.recipe !== 'novel' || !engine.store) return { path: undefined, ready: false }
+  let path
+  try {
+    path = bookDirectory(engine.store, project.id)
+  } catch {
+    return { path: undefined, ready: false }
+  }
+  const info = await lstat(path).catch(() => null)
+  return { path, ready: Boolean(info?.isDirectory()) }
+}
+
 /** 路径段解码：百分号转义坏掉时 decodeURIComponent 会抛 URIError（→ 500 INTERNAL），折成 400。 */
 function decodePart(raw, label) {
   try {
@@ -101,7 +117,7 @@ function decodePart(raw, label) {
   }
 }
 
-export async function handle({ engine, modelInfo, activation, versionChecker }, request) {
+export async function handle({ engine, modelInfo, activation, versionChecker, openDirectory }, request) {
   const method = (request.method ?? 'GET').toUpperCase()
   const path = request.path ?? '/'
   const query = request.query ?? {}
@@ -204,7 +220,9 @@ export async function handle({ engine, modelInfo, activation, versionChecker }, 
       const project = await engine.getProject(id)
       const run = await getRunForProject(engine, project, 0)
       const runs = await engine.listRuns(project.id)
-      return { status: 200, body: { project, run, runs } }
+      // 书稿目录只是附加信息：拿不到 store（测试替身、异常引擎）就不给，不能让详情页 500。
+      const book = await bookState(engine, project)
+      return { status: 200, body: { project, run, runs, bookPath: book.path, bookReady: book.ready } }
     }
     if (method === 'PATCH') {
       const project = await engine.updateProject(id, {
@@ -301,6 +319,17 @@ export async function handle({ engine, modelInfo, activation, versionChecker }, 
     return { status: 200, body: { estimate: await engine.estimate(project.id) } }
   }
 
+  // 打开书稿目录：路径完全由宿主推导，客户端只能指定「哪本书」。
+  if (rest[0] === 'open' && method === 'POST') {
+    const project = await engine.getProject(id)
+    const book = await bookState(engine, project)
+    if (!book.path) throw httpError(400, 'BAD_PARAMS', '这本书没有书稿目录')
+    if (!book.ready) throw httpError(404, 'BOOK_MISSING', '书稿目录还没生成：先跑一次写作，或用回填脚本补建')
+    const open = openDirectory ?? systemOpen
+    await open(book.path)
+    return { status: 200, body: { opened: true, path: book.path } }
+  }
+
   if (rest[0] === 'export' && method === 'POST') {
     const project = await engine.getProject(id)
     const format = typeof body?.format === 'string' ? body.format : 'markdown'
@@ -329,7 +358,7 @@ export async function handle({ engine, modelInfo, activation, versionChecker }, 
  * 适配 DSH webServer 的 handler。
  * guard(req) 返回 falsy 放行，返回数字用该状态码拒绝（默认 403）。
  */
-export function makeHandler({ engine, modelInfo, guard, activation, versionChecker }) {
+export function makeHandler({ engine, modelInfo, guard, activation, versionChecker, openDirectory }) {
   const info = modelInfo ?? (() => ({ available: false, message: '未对接模型服务' }))
   return async function novelForgeHandler(req, res) {
     try {
@@ -350,7 +379,7 @@ export function makeHandler({ engine, modelInfo, guard, activation, versionCheck
       const method = (req.method ?? 'GET').toUpperCase()
       const body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readBody(req) : null
       const result = await handle(
-        { engine, modelInfo: info, activation, versionChecker },
+        { engine, modelInfo: info, activation, versionChecker, openDirectory },
         { method, path, query: Object.fromEntries(url.searchParams), body },
       )
       sendJson(res, result.status, result.body)

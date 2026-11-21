@@ -743,6 +743,46 @@ function normalizeVolumeRows(rows, volume) {
   return out
 }
 
+/** 只取章表数组开头连续闭合的对象，不补括号，不把嵌套对象当成章。 */
+function closedChapterRows(value) {
+  const source = String(value ?? '').trimStart().replace(/^```(?:json)?\s*/i, '')
+  const chapters = /"chapters"\s*:/.exec(source)
+  const arrayStart = source.startsWith('[') ? 0 : source.indexOf('[', chapters ? chapters.index + chapters[0].length : 0)
+  if (arrayStart < 0) return []
+  const rows = []
+  let cursor = arrayStart + 1
+  while (/\s/.test(source.charAt(cursor))) cursor += 1
+  while (source[cursor] === '{') {
+    const start = cursor++
+    const closers = ['}']
+    let quoted = false
+    let escaped = false
+    for (; cursor < source.length && closers.length; cursor += 1) {
+      const ch = source[cursor]
+      if (quoted) {
+        if (escaped) escaped = false
+        else if (ch === '\\') escaped = true
+        else if (ch === '"') quoted = false
+      } else if (ch === '"') quoted = true
+      else if (ch === '{') closers.push('}')
+      else if (ch === '[') closers.push(']')
+      else if ((ch === '}' || ch === ']') && closers.pop() !== ch) return rows
+    }
+    if (closers.length) break
+    try {
+      rows.push(JSON.parse(source.slice(start, cursor)))
+    } catch {
+      break
+    }
+    const comma = /^\s*,\s*/.exec(source.slice(cursor))
+    if (!comma) break
+    cursor += comma[0].length
+  }
+  return rows
+}
+
+const VOLUME_BATCH_SIZE = 12
+
 /**
  * 展开下一卷卷纲（§3/§6）。只处理 planned:false 的卷；同卷重复调用不会重复请求模型。
  * @returns {{outline:object, calls:number, created:boolean}}
@@ -776,44 +816,88 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
     ? builders.volumeChapters
     : fallbackVolumePrompt
   const lang = language || params.language || current.language || 'zh'
-  const ctx = { ...volumePromptContext({ outline: current, params, read, volume: target, language: lang }), language: lang }
+  const ctx = volumePromptContext({ outline: current, params, read, volume: target, language: lang })
+  const first = ctx.volume.startChapter
+  const total = Math.floor(Number(target.targetChapters))
+  const normalized = []
+  let calls = 0
+  let continuing = false
 
-  let spec
-  try {
-    spec = await builder(ctx)
-  } catch (error) {
-    throw new ForgeError(
-      'BAD_RECIPE',
-      `卷纲 prompt 构造失败：${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-  if (!spec || typeof spec !== 'object' || !spec.user) {
-    throw new ForgeError('BAD_RECIPE', '卷纲 prompt 必须返回 {system,user}')
-  }
+  while (normalized.length < total) {
+    const start = first + normalized.length
+    const batch = Math.floor(normalized.length / VOLUME_BATCH_SIZE) + 1
+    const end = first + Math.min(total, batch * VOLUME_BATCH_SIZE) - 1
+    const count = end - start + 1
+    const previous = normalized.at(-1)
+    const batchCtx = {
+      ...ctx,
+      volume: { ...ctx.volume, startChapter: start, targetChapters: count },
+      fullVolume: ctx.volume,
+      existingTitles: [clip(normalized.map((row) => row.title).filter(Boolean).join('、'), 600), ctx.existingTitles]
+        .filter(Boolean).join('、'),
+    }
+    let spec
+    try {
+      spec = await builder(batchCtx)
+    } catch (error) {
+      throw new ForgeError(
+        'BAD_RECIPE',
+        `卷纲 prompt 构造失败：${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    if (!spec || typeof spec !== 'object' || !spec.user) {
+      throw new ForgeError('BAD_RECIPE', '卷纲 prompt 必须返回 {system,user}')
+    }
 
-  const result = await llm.generate({
-    system: String(spec.system ?? ''),
-    user: String(spec.user ?? ''),
-    maxTokens: Number.isFinite(spec.maxTokens) ? Math.round(spec.maxTokens) : DEFAULT_PROMPT_MAX_TOKENS,
-    temperature: Number.isFinite(spec.temperature) ? spec.temperature : 0.7,
-    json: true,
-    // 与 index.js 的 callJson 同约定：没显式给 phase 就用阶段名，run 事件里能看到是哪一步调的模型。
-    phase: 'volumeChapters',
-  })
+    const request = `【本批章号】第 ${start}–${end} 章，只返回这 ${count} 章。`
+    const resume = continuing ? `\n从第 ${start} 章继续，不要重复已有章。` : ''
+    const bridge = previous ? `\n上一章《${previous.title}》的章末钩子：${clip(previous.hook, 300)}` : ''
+    calls += 1
+    let result
+    try {
+      result = await llm.generate({
+        system: String(spec.system ?? ''),
+        user: `${spec.user}\n\n${request}${resume}${bridge}`,
+        maxTokens: Number.isFinite(spec.maxTokens) ? Math.round(spec.maxTokens) : DEFAULT_PROMPT_MAX_TOKENS,
+        temperature: Number.isFinite(spec.temperature) ? spec.temperature : 0.7,
+        json: true,
+        phase: 'volumeChapters',
+      })
+    } catch (error) {
+      if (error?.code !== 'LLM_TRUNCATED') throw error
+      const accepted = []
+      for (const row of closedChapterRows(error.detail?.text).slice(0, count)) {
+        const [chapter] = normalizeVolumeRows([row], target)
+        if (!chapter) break
+        accepted.push(chapter)
+      }
+      if (!accepted.length) {
+        throw new ForgeError(
+          'LLM_TRUNCATED',
+          `第 ${target.id} 卷（${first}–${first + total - 1} 章）第 ${batch} 批（${start}–${end} 章）：${error.message}`,
+          error.detail,
+        )
+      }
+      normalized.push(...accepted)
+      continuing = accepted.length < count
+      continue
+    }
+    continuing = false
 
-  const payload = payloadOf(result)
-  const rows = Array.isArray(payload) ? payload : payload?.chapters
-  if (!Array.isArray(rows) || rows.length === 0) {
-    throw new ForgeError('LLM_PARSE', `第 ${target.id} 卷卷纲：模型没有返回章节数组`, {
-      text: clip(llmText(result), 800),
-    })
-  }
-
-  const normalized = normalizeVolumeRows(rows, target).slice(0, Math.max(1, target.targetChapters))
-  if (!normalized.length) {
-    throw new ForgeError('LLM_PARSE', `第 ${target.id} 卷卷纲：章节都没有标题或目标`, {
-      text: clip(llmText(result), 800),
-    })
+    const payload = payloadOf(result)
+    const rows = Array.isArray(payload) ? payload : payload?.chapters
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new ForgeError('LLM_PARSE', `第 ${target.id} 卷卷纲：模型没有返回章节数组`, {
+        text: clip(llmText(result), 800),
+      })
+    }
+    const accepted = normalizeVolumeRows(rows, target).slice(0, count)
+    if (!accepted.length) {
+      throw new ForgeError('LLM_PARSE', `第 ${target.id} 卷卷纲：章节都没有标题或目标`, {
+        text: clip(llmText(result), 800),
+      })
+    }
+    normalized.push(...accepted)
   }
 
   const next = mergeVolumeChapters(current, target.id, normalized)
@@ -821,7 +905,7 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
   if (!expanded || !expanded.planned) {
     throw new ForgeError('LLM_PARSE', `第 ${target.id} 卷卷纲合并后为空`)
   }
-  return { outline: next, calls: 1, created: true }
+  return { outline: next, calls, created: true }
 }
 
 // ---------------------------------------------------------------- 细纲 + 材料包
@@ -856,6 +940,26 @@ function beatsPromptContext({ outline, params, read, chapter, volume, language }
     openerChapter: openerChapterOf(read, chapter),
     language,
     ...promptIO(read),
+  }
+}
+
+/** 追加 JSON 补救指令，并把重试预算限制在网关上限内。 */
+export async function retryCutJson(ask, maxTokens, text, originalError) {
+  const raw = String(text ?? '')
+  const tail = raw.replace(/\s+/g, ' ').trim().slice(-120)
+  const extra = [
+    `【上一次输出没能解析成 JSON（${raw.length} 字，结尾是「${tail}」），像是写到一半就断了】`,
+    '这次务必先保证 JSON 完整闭合：',
+    '- 只输出一个 JSON 对象，前后不要任何说明，不要 markdown 围栏；',
+    '- 条目数与字段长度宁可取小值，也要让每个括号先配对完；',
+    '- 写到最后一个字段就立刻收尾，不要补充解释。',
+  ].join('\n')
+  const budget = Math.min(16000, Math.max(Math.ceil(maxTokens * 1.6), originalError?.detail?.maxTokens ?? 0))
+  try {
+    return await ask({ extra, maxTokens: budget })
+  } catch (error) {
+    if (originalError && error?.code === 'LLM_TRUNCATED') throw originalError
+    throw error
   }
 }
 
@@ -934,15 +1038,28 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
     if (!spec || typeof spec !== 'object' || !spec.user) {
       throw new ForgeError('BAD_RECIPE', '细纲 prompt 必须返回 {system,user}')
     }
-    const result = await llm.generate({
+    const request = {
       system: String(spec.system ?? ''),
       user: String(spec.user ?? ''),
       maxTokens: Number.isFinite(spec.maxTokens) ? Math.round(spec.maxTokens) : DEFAULT_PROMPT_MAX_TOKENS,
       temperature: Number.isFinite(spec.temperature) ? spec.temperature : 0.8,
       json: true,
       phase: 'beats',
-    })
+    }
     calls += 1
+    let result
+    try {
+      result = await llm.generate(request)
+    } catch (error) {
+      if (error?.code !== 'LLM_TRUNCATED') throw error
+      calls += 1
+      result = await retryCutJson(
+        ({ extra, maxTokens }) => llm.generate({ ...request, user: `${request.user}\n\n${extra}`, maxTokens }),
+        request.maxTokens,
+        error.detail?.text,
+        error,
+      )
+    }
     beats = normalizeBeats(payloadOf(result), chapter)
   }
 

@@ -159,6 +159,18 @@ const paramsSchema = {
 const soft = z.string().catch('')
 const softList = z.array(z.string()).catch([])
 
+// 短标签字段（X4 四件套这类）：超长就截断，不整段作废。
+// 它们只是给后文 prompt 引用的提示，多写十几个字不是错误，模型也几乎不会正好卡在字数线上；
+// 以前 `.max(30)` 硬拒会把整本书堵在 characters 阶段（2026-11-21 真实事故：wound 超长 → LLM_PARSE）。
+const shortLabel = (limit = 30) =>
+  z
+    .string()
+    .nullish()
+    .transform((value) => {
+      if (typeof value !== 'string') return undefined
+      return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
+    })
+
 const briefSchema = z.object({
   title: soft,
   logline: z.string().min(1),
@@ -233,11 +245,11 @@ const castSchema = z.object({
   voice: soft,
   arc: soft,
   // X4 四件套（wound → lie → want/need，exit 是退场条件）。全部可选：
-  // 老项目/弱模型没写也照常过，写了才进档案供后文引用。各上限 30 字，超长即不合契约。
-  need: z.string().max(30).optional(),
-  wound: z.string().max(30).optional(),
-  lie: z.string().max(30).optional(),
-  exit: z.string().max(30).optional(),
+  // 老项目/弱模型没写也照常过，写了才进档案供后文引用。各 30 字上限，超长截断而不是整份作废。
+  need: shortLabel(30),
+  wound: shortLabel(30),
+  lie: shortLabel(30),
+  exit: shortLabel(30),
   // v0.3：金手指的压力面。模型愿意写就留着，让 draft 提示词能引用；
   // 缺省不报错（老项目/弱模型没有这一层，正文靠卷纲里的代价兜）。
   power: soft,
@@ -641,17 +653,6 @@ function promptSpec(ctx, promptFn, stage) {
   }
 }
 
-/** 截断重试时追加的说明：只要求「先把 JSON 写完整」，不改别的要求。 */
-function cutRetryNote(chars, tail) {
-  return [
-    `【上一次输出没能解析成 JSON（${chars} 字，结尾是「${tail}」），像是写到一半就断了】`,
-    '这次务必先保证 JSON 完整闭合：',
-    '- 只输出一个 JSON 对象，前后不要任何说明，不要 markdown 围栏；',
-    '- 条目数与字段长度宁可取小值，也要让每个括号先配对完；',
-    '- 写到最后一个字段就立刻收尾，不要补充解释。',
-  ].join('\n')
-}
-
 async function askJson(ctx, stage, spec, { extra, maxTokens } = {}) {
   const result = await ctx.llm.generate({
     system: spec.system,
@@ -670,27 +671,70 @@ async function askJson(ctx, stage, spec, { extra, maxTokens } = {}) {
 
 async function callJson(ctx, stage, promptFn, schema, { phase, retryCut = true } = {}) {
   const spec = { ...promptSpec(ctx, promptFn, stage), phase: phase ?? stage }
-  let { data, text } = await askJson(ctx, stage, spec)
-  if (data === undefined && retryCut && looksCutJson(text)) {
-    // 截断（撞输出上限／流被掐）几乎必然发生在 JSON 中途：抬一次预算重来，
-    // 比整章失败、用户手动重跑整条流水线便宜得多。只在「像被截断」时重试，避免为脏格式双付费。
-    const budget = Math.min(16000, Math.max(1200, Math.round(spec.maxTokens * 1.6)))
-    ;({ data, text } = await askJson(ctx, stage, spec, {
-      extra: cutRetryNote(String(text).length, tailOf(text)),
-      maxTokens: budget,
-    }))
+  let data
+  let text
+  let truncated
+  try {
+    ;({ data, text } = await askJson(ctx, stage, spec))
+  } catch (error) {
+    if (!retryCut || error?.code !== 'LLM_TRUNCATED') throw error
+    truncated = error
+    text = String(error.detail?.text ?? '')
+  }
+  if (data === undefined && retryCut && (looksCutJson(text) || truncated)) {
+    ;({ data, text } = await requireChapter().retryCutJson(
+      (options) => askJson(ctx, stage, spec, options), spec.maxTokens, text, truncated,
+    ))
   }
   if (data === undefined) {
+    if (truncated && looksCutJson(text)) throw truncated
     throw parseError(stage, parseFailureMessage(text, looksCutJson(text)), text, 12000)
   }
   const parsed = schema.safeParse(data)
   if (!parsed.success) {
-    const error = parseError(stage, `JSON 字段不合契约（${formatZod(parsed.error)}）`, data)
+    const issues = formatZod(parsed.error)
+    // 字段级不合契约（超长、类型不对、枚举越界）以前直接判死整段，一本书可能因此作废。
+    // 小载荷补一枪「只改这几个字段」比重跑整条流水线便宜得多；载荷大就别赌预算，直接报错。
+    const repaired = await retryOnSchemaMismatch(ctx, stage, spec, schema, data, issues)
+    if (repaired) return repaired
+    const error = parseError(stage, `JSON 字段不合契约（${issues}）`, data)
     // detail.raw 会被 clip 截断；把原始对象挂在 detail.data 上，供降级路径抢救可用字段。
     if (error.detail && typeof error.detail === 'object') error.detail.data = data
     throw error
   }
   return parsed.data
+}
+
+/** 字段级契约失败后的一次补枪上限：超过这个体量，重发整份 JSON 的代价高于让用户手动重跑。 */
+const SCHEMA_REPAIR_MAX_CHARS = 4000
+
+function schemaRepairNote(issues) {
+  return [
+    '',
+    '【上一枪输出的 JSON 形状不合契约，只需修正下列位置】',
+    `- ${issues}`,
+    '- 其余字段原样保留，重新输出**完整**的 JSON 对象；',
+    '- 不要输出解释、不要用 markdown 代码围栏。',
+  ].join('\n')
+}
+
+async function retryOnSchemaMismatch(ctx, stage, spec, schema, data, issues) {
+  let size = 0
+  try {
+    size = JSON.stringify(data).length
+  } catch {
+    return null
+  }
+  if (size > SCHEMA_REPAIR_MAX_CHARS) return null
+  try {
+    const again = await askJson(ctx, stage, spec, { extra: schemaRepairNote(issues) })
+    if (again.data === undefined) return null
+    const check = schema.safeParse(again.data)
+    return check.success ? check.data : null
+  } catch {
+    // 补枪本身失败（网络/预算/脚本化测试没排这一枪）时保留原始错误，别让二次失败盖掉真因。
+    return null
+  }
 }
 
 async function callText(ctx, stage, promptFn, { phase, maxTokens, temperature } = {}) {

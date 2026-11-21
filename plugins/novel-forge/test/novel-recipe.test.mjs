@@ -841,6 +841,60 @@ test('人物档案缺性别时留一条 warn，不阻断', async () => {
   )
 })
 
+test('人物档案：X4 四件套超长时截断落盘，不让整本书堵在 characters 阶段', async () => {
+  // 2026-11-21 真实事故：wound 写了 40 多字，旧 schema 的 .max(30) 直接把整段判成 LLM_PARSE。
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const cast = sampleCharacters()
+  const longWound = '十岁那年没能拉住母亲的手，这件事让他此后不再相信任何人的承诺'
+  cast.cast[0].wound = longWound
+  cast.cast[0].lie = '只要不靠近，就不会再失去'
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(cast)],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  const hero = out.artifacts.characters.content.cast[0]
+  assert.ok(hero, '超长字段不该阻断人物档案')
+  assert.ok(hero.wound.length <= 30, `wound 应被截断到 30 字内，实际 ${hero.wound.length}：${hero.wound}`)
+  assert.ok(hero.wound.startsWith('十岁那年没能拉住母亲的手'), '截断要保留原意开头')
+  assert.equal(hero.lie, '只要不靠近，就不会再失去', '未超长的字段原样保留')
+  assert.equal(ctx.calls.length, 1, '截断属于本地规范化，不该多花一次模型调用')
+})
+
+test('字段不合契约时补一枪：只改错处，第二次通过就照常落盘', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const broken = { cast: sampleCharacters().cast, note: '多余字段' }
+  broken.cast[0].name = '' // 必填为空 → 不合契约
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(broken), jsonOut(sampleCharacters())],
+  })
+  const out = await stageOf(recipe, 'characters').run(ctx)
+  assert.ok(out.artifacts.characters, '补枪成功后要落盘')
+  assert.equal(ctx.calls.length, 2, '只补一枪')
+  assert.match(ctx.calls[1].user, /不合契约/, '第二枪要带着错处重发')
+  assert.match(ctx.calls[1].user, /cast\.0\.name/, '要指出具体字段路径')
+})
+
+test('补枪仍不合契约时报原始 LLM_PARSE，不掩盖真因', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const broken = { cast: [{ ...sampleCharacters().cast[0], name: '' }] }
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS },
+    artifacts: { brief: { kind: 'json', content: sampleBrief() } },
+    outputs: [jsonOut(broken), jsonOut(broken)],
+  })
+  await assert.rejects(
+    () => stageOf(recipe, 'characters').run(ctx),
+    (err) => err.code === 'LLM_PARSE' && /不合契约/.test(err.message),
+  )
+})
+
 test('人物档案：模型写「主人公」时归一化成「主角」，主角保护与代词检查才认得出', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })

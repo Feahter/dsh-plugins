@@ -1,7 +1,7 @@
 // 工作台：左阶段轨 / 中产物 / 右运行抽屉，外加审稿门与章节页。
 import React from 'react'
 import {
-  getProject, getArtifact, getRun, startRun, cancelRun, continueReview, exportProject,
+  getProject, getArtifact, getRun, startRun, cancelRun, continueReview, exportProject, openBook,
 } from '../api.js'
 import { STAGES, STAGE_BY_ID, STATUS_LABEL, STAGE_ARTIFACT } from '../strings.js'
 import { chapterMeta } from '../outline.js'
@@ -276,6 +276,9 @@ function ExportMenu({ onExport, busy }) {
 // ------------------------------------------------------------------ 主组件
 export function Workbench({ projectId, onBack, notify }) {
   const [project, setProject] = React.useState(null)
+  const [bookPath, setBookPath] = React.useState('')
+  const [bookReady, setBookReady] = React.useState(false)
+  const [opening, setOpening] = React.useState(false)
   const [artifacts, setArtifacts] = React.useState({})
   const [brief, setBrief] = React.useState(null)
   const [outline, setOutline] = React.useState(null)
@@ -314,9 +317,25 @@ export function Workbench({ projectId, onBack, notify }) {
   }, [])
   const flushChapterRef = React.useRef(null)
 
+  // 打开书稿目录：服务端只负责按项目 id 推导路径并唤起系统文件管理器。
+  const onOpenBook = React.useCallback(async () => {
+    if (!bookReady) return
+    setOpening(true)
+    try {
+      await openBook(projectId)
+      notify('已在文件管理器中打开书稿目录', 'ok')
+    } catch (error) {
+      notify(error?.message || '打开目录失败', 'error')
+    } finally {
+      setOpening(false)
+    }
+  }, [bookReady, notify, projectId])
+
   const loadProject = React.useCallback(async () => {
     const data = await getProject(projectId)
     setProject(data.project)
+    setBookPath(data.bookPath ?? '')
+    setBookReady(data.bookReady === true)
     // GET /projects/:id 返回 { project, run, runs }，产物清单在 project.artifacts 里。
     const artifactMap = data.project?.artifacts ?? data.artifacts ?? {}
     setArtifacts(artifactMap)
@@ -635,6 +654,26 @@ export function Workbench({ projectId, onBack, notify }) {
           React.createElement(ExportMenu, { onExport, busy: exporting }),
         ),
 
+        bookPath && !chapter ? React.createElement('div', { className: 'nf-book' },
+          React.createElement('div', { className: 'nf-book-top' },
+            React.createElement(Icon.book, { width: 13, height: 13 }),
+            React.createElement('span', { className: 'nf-book-title' }, '书稿快照'),
+            React.createElement('span', { className: 'nf-book-tag' },
+              bookReady ? 'Markdown · 本地 Git' : '首次落盘后生成'),
+            React.createElement('span', { className: 'nf-grow' }),
+            React.createElement(Button, {
+              size: 'sm', variant: 'accent', busy: opening,
+              disabled: !bookReady,
+              title: bookReady ? '在访达 / 资源管理器中打开' : '先跑完一次写作，或用回填脚本补建书稿',
+              onClick: onOpenBook,
+            }, bookReady ? '打开目录' : '还没生成'),
+          ),
+          React.createElement('code', { className: 'nf-book-path', title: bookPath }, bookPath),
+          React.createElement('div', { className: 'nf-book-hint' },
+            bookReady
+              ? '在 VSCode / Cursor 里从 README.md 进入章节；每次落盘自动提交，git log 看中文历史。'
+              : '已有项目可运行 node dev/backfill-book.mjs <项目 id> 补建书稿目录。'),
+        ) : null,
         gate && !gateHidden && !chapter && run?.status !== 'running'
           ? React.createElement('div', { className: 'nf-banner' },
             React.createElement('div', null,

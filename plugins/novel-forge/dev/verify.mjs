@@ -371,6 +371,7 @@ const demoRun = {
   stats: { calls: 38 },
 }
 
+const openedDirs = []
 const state = {
   projects: new Map([['demo', demo]]),
   runs: new Map([['demo', [demoRun]]]),
@@ -511,6 +512,10 @@ async function api(req, res, url) {
   if (req.method === 'GET' && pathname === '/recipes') {
     return sendJSON(res, 200, { recipes: [{ id: 'novel', name: '小说流水线', version: '1.0.0' }] })
   }
+  // 真宿主有版本自查；假宿主也要给，否则客户端拉 /version 吃 404，控制台永远多一条错误。
+  if (req.method === 'GET' && pathname === '/version') {
+    return sendJSON(res, 200, { ok: true, data: { current: '0.0.0', latest: '0.0.0', updateAvailable: false } })
+  }
   if (req.method === 'GET' && pathname === '/model') {
     return sendJSON(res, 200, { available: true, provider: 'fake', model: 'deepseek-chat' })
   }
@@ -595,7 +600,15 @@ async function api(req, res, url) {
       project: summaryOf(project),
       artifacts: project.artifacts,
       runs: state.runs.get(project.id) ?? [],
+      // 真宿主按项目推导书稿目录；假宿主给一个稳定的假路径，用来覆盖「打开目录」那一条。
+      bookPath: `/Users/fake/novel-forge/projects/${project.id}/book`,
+      bookReady: true,
     })
+  }
+
+  if (parts.length === 3 && parts[2] === 'open' && req.method === 'POST') {
+    openedDirs.push(`/Users/fake/novel-forge/projects/${project.id}/book`)
+    return sendJSON(res, 200, { opened: true })
   }
 
   if (parts.length === 2 && req.method === 'PATCH') {
@@ -739,6 +752,8 @@ const server = http.createServer(async (req, res) => {
 const failures = []
 const consoleErrors = []
 const pageErrors = []
+// 控制台只说「Failed to load resource」，不带 URL；单独记响应才能定位是哪个资源 404。
+const failedResponses = []
 
 const check = (name, ok, detail = '') => {
   if (ok) {
@@ -777,6 +792,9 @@ async function main() {
     if (message.type() === 'error') consoleErrors.push(message.text())
   })
   page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('response', response => {
+    if (response.status() >= 400) failedResponses.push(`${response.status()} ${response.url()}`)
+  })
 
   try {
     await page.goto(`${base}/dev/page.html`, { waitUntil: 'load' })
@@ -864,6 +882,19 @@ async function main() {
     const benchText = await page.locator('.nf-workbench').innerText()
     check('工作台显示审稿门 banner', benchText.includes('草稿已就绪，继续？'))
     check('工作台显示阶段轨与总览', benchText.includes('流水线') && benchText.includes('全书进度'))
+    const bookCard = page.locator('.nf-book')
+    check('工作台显示书稿目录卡片', await bookCard.isVisible())
+    check('书稿目录卡片带打开按钮', await bookCard.getByRole('button', { name: '打开目录' }).isVisible())
+    await bookCard.getByRole('button', { name: '打开目录' }).click()
+    // 上一条 toast 可能还没消失：等文案换成打开目录的提示再断言。
+    await page.waitForFunction(
+      () => (document.querySelector('.nf-toast')?.innerText ?? '').includes('文件管理器'),
+      null,
+      { timeout: 5000 },
+    ).catch(() => {})
+    const toastText = await page.locator('.nf-toast').innerText()
+    check('打开目录有可见反馈', toastText.includes('文件管理器'), toastText.replace(/\n/g, ' '))
+    check('打开目录请求到达宿主', openedDirs.length === 1 && openedDirs[0].endsWith('/book'), openedDirs.join(','))
     check('工作台显示运行事件流', benchText.includes('事件流'))
     check('工作台显示已写字数', benchText.includes('5980 字') || benchText.includes('5,980 字'), benchText.slice(0, 200))
     console.log('  · 截图 test/screens/workbench.png')
@@ -930,6 +961,8 @@ async function main() {
 
   console.log(`\nconsole error：${consoleErrors.length} 条`)
   for (const message of consoleErrors) console.log(`  ! ${message}`)
+  console.log(`失败响应：${failedResponses.length} 条`)
+  for (const line of failedResponses) console.log(`  ! ${line}`)
   console.log(`page error：${pageErrors.length} 条`)
   for (const message of pageErrors) console.log(`  ! ${message}`)
 

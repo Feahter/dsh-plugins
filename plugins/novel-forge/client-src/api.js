@@ -67,6 +67,9 @@ export const patchProject = (projectId, patch) =>
   request(`/projects/${id(projectId)}`, { method: 'PATCH', body: patch }).then(data => data.project)
 
 export const deleteProject = projectId => request(`/projects/${id(projectId)}`, { method: 'DELETE' })
+// 打开书稿目录：路径由宿主推导，客户端不传路径；目录未生成时抛 404 BOOK_MISSING。
+export const openBook = projectId =>
+  request(`/projects/${id(projectId)}/open`, { method: 'POST' }).then(data => data ?? {})
 
 export const estimateProject = projectId => request(`/projects/${id(projectId)}/estimate`).then(data => data.estimate)
 

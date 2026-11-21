@@ -106,11 +106,16 @@ async function main() {
     enable: () => {},
     enableLatest: () => ({ ok: true }),
   }
+  const openedDirs = []
   const api = makeHandler({
     engine,
     modelInfo: () => ({ provider: 'fake', model: 'fake' }),
     guard: () => null,
     activation,
+    // 真宿主一定有版本自查；不给的话客户端拉 /version 会吃 503，浏览器控制台多一条错误。
+    versionChecker: { check: async () => ({ current: '0.0.0', latest: '0.0.0', updateAvailable: false }) },
+    // 真机会在访达里弹窗；端到端只记录路径，不真的调起系统文件管理器。
+    openDirectory: async (directory) => { openedDirs.push(directory) },
   })
   const harnessJs = await bundleHarness()
 
@@ -226,22 +231,58 @@ async function main() {
     // 4. 放行假 LLM，等待完成
     llm.release()
     released = true
-    let final = null
-    const deadline = Date.now() + 90000
-    while (Date.now() < deadline) {
-      final = await engine.getRun(runId)
-      if (final && final.status !== 'running') break
-      await sleep(100)
+
+    // 审稿门是默认行为：run 会在大纲、草稿后各停一次，必须点「继续」才往下走。
+    // 早先这里直接等 done，门一上线 e2e 就永远停在 paused。
+    const waitStatus = async (id, statuses, label, timeout = 90000) => {
+      const deadline = Date.now() + timeout
+      let current = null
+      while (Date.now() < deadline) {
+        current = await engine.getRun(id)
+        if (current && statuses.includes(current.status)) return current
+        await sleep(100)
+      }
+      assert(`${label}（超时）`, false, `status=${current?.status ?? 'missing'}`)
+      return current
     }
+
+    const gateStages = []
+    let final = null
+    for (let round = 0; round < 6; round += 1) {
+      final = await waitStatus(runId, ['paused', 'done', 'failed', 'cancelled'], 'run 到达可观察状态')
+      if (final.status !== 'paused') break
+      const gated = await engine.getProject(projectId)
+      gateStages.push(gated.pendingReview?.stage ?? 'unknown')
+      const banner = page.locator('.nf-banner')
+      await banner.waitFor({ state: 'visible', timeout: 20000 })
+      await banner.getByRole('button', { name: '继续', exact: true }).click()
+      // 继续会新建一个 run：后续轮询与事件都得换到这个 run 上。
+      const deadline = Date.now() + 20000
+      while (Date.now() < deadline) {
+        const project = await engine.getProject(projectId)
+        if (project.activeRunId && project.activeRunId !== runId) {
+          runId = project.activeRunId
+          break
+        }
+        await sleep(50)
+      }
+    }
+    assert('审稿门依次停在大纲、草稿、审校、修订', gateStages.join(',') === 'outline,draft,review,revise', `gates=${gateStages.join(',') || '无'}`)
     assert('引擎 run 最终 done', final?.status === 'done', `status=${final?.status}${final?.error ? ` error=${final.error}` : ''}`)
     const finishedProject = await engine.getProject(projectId)
     const doneStages = Object.values(finishedProject.stages ?? {}).filter(stage => stage.status === 'done').length
     // 阶段数以 strings.js 的 STAGES 为准（曾硬编码 10，多算了一个已合并的阶段）。
     assert('运行覆盖全部阶段', doneStages === STAGES.length, `doneStages=${doneStages}/${STAGES.length}`)
 
-    const { events } = await engine.getRunEvents(runId, 0)
-    const runEnd = events.find(event => event.type === 'run-end')
-    assert('事件流有 run-end(done)', runEnd?.data?.status === 'done', `run-end=${runEnd?.data?.status ?? 'missing'}`)
+    // 事件跨多个 run：审稿门前后的产物分别在各自的 run 里，汇总后再断言。
+    const runSummaries = await engine.listRuns(projectId)
+    const events = []
+    for (const summary of runSummaries) {
+      const { events: chunk } = await engine.getRunEvents(summary.id, 0)
+      events.push(...chunk)
+    }
+    const runEnd = events.find(event => event.type === 'run-end' && event.data?.status === 'done')
+    assert('事件流有 run-end(done)', Boolean(runEnd), `run-ends=${events.filter(event => event.type === 'run-end').map(event => event.data?.status).join(',') || '无'}`)
     // revise 会二次写 draft/*（同一 key，版本 +1），所以按「唯一 key」数，而不是事件条数。
     const draftKeys = new Set(
       events
@@ -260,14 +301,14 @@ async function main() {
     )
     const doneDrawer = await page.locator('.nf-drawer').innerText()
     assert('UI 进度不是 NaN', !doneDrawer.includes('NaN'), doneDrawer.split('\n').find(line => line.includes('/')) ?? '')
-    const expectedTotal = Object.values(finishedProject.stages ?? {}).reduce(
-      (sum, stage) => sum + Math.max(1, Object.keys(stage.items ?? {}).length),
-      0,
-    )
+    // 审稿门把全书切成多个 run，抽屉显示的是当前这一轮：只要本轮 done === total 就是跑完了。
+    const expectedDone = final?.progress?.done
+    const expectedTotal = final?.progress?.total
     assert(
       'UI 进度全部完成',
-      new RegExp(`${expectedTotal}\\s*/\\s*${expectedTotal}`).test(doneDrawer),
-      `${doneDrawer.split('\n').find(line => line.includes('/')) ?? ''}（期望 ${expectedTotal}/${expectedTotal}）`,
+      Number.isFinite(expectedDone) && expectedDone === expectedTotal &&
+        new RegExp(`${expectedDone}\\s*/\\s*${expectedTotal}`).test(doneDrawer),
+      `${doneDrawer.split('\n').find(line => line.includes('/')) ?? ''}（期望 ${expectedDone}/${expectedTotal}）`,
     )
 
     // 6. 卷章大纲：真数据经 API 进入 UI
@@ -313,6 +354,18 @@ async function main() {
     const overviewText = (await page.locator('.nf-main').innerText()).replace(/\s+/g, ' ')
     assert('总览已写章节为 6/6', /6\s*\/\s*6\s*章/.test(overviewText), overviewText.slice(0, 160))
     assert('总览正文字数非 0', !/正文\s*0\s*字/.test(overviewText), overviewText.slice(0, 160))
+    // 8.5 书稿目录：卡片出现、点「打开目录」真的打到宿主
+    const bookCard = page.locator('.nf-book')
+    await bookCard.waitFor({ state: 'visible', timeout: 15000 })
+    const bookCardText = (await bookCard.innerText()).replace(/\s+/g, ' ')
+    ok('工作台显示书稿目录卡片', bookCardText.includes('书稿快照') && bookCardText.includes('/book'), bookCardText.slice(0, 80))
+    await bookCard.getByRole('button', { name: '打开目录' }).click()
+    await page.waitForFunction(
+      () => (document.querySelector('.nf-toast')?.innerText ?? '').includes('文件管理器'),
+      null,
+      { timeout: 10000 },
+    )
+    assert('点「打开目录」请求到达宿主', openedDirs.length === 1 && openedDirs[0].endsWith('/book'), openedDirs.join(',') || '未调用')
     assert('UI 事件流显示 run-end/完成', drawerText.includes('收炉 · 全部完成'))
     assert('重开后 UI 进度没有 NaN', !drawerText.includes('NaN'), drawerText.split('\n').find(line => line.includes('/')) ?? '')
     assert('引擎进度也不是 NaN', Number.isFinite(final?.progress?.done) && Number.isFinite(final?.progress?.total), `${final?.progress?.done}/${final?.progress?.total}`)

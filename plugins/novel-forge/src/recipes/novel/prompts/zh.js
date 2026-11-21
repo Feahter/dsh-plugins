@@ -213,7 +213,7 @@ const ADDENDA = {
 
   volumeChapters: `【本阶段：卷纲展开】
 你在给"这一卷"排章表，不是写小说。每章只回答四件事：谁想要什么（goal）、什么挡着（conflict）、局面怎么变（turn）、留下什么钩子（hook）。
-- 条数必须精确等于本卷目标章数，一次给全；不许合并、跳过、拖到下一卷，也不要只给开头几章。
+- 条数必须精确等于本批请求的章数，只写指定章号区间，不许合并、跳过或扩展到区间之外。
 - turn 必须改变至少一项：力量对比、信息占有、关系温度、时间压力。"气氛更紧"不算 turn。
 - hook 必须具体：一个动作、一句话、一个物件、一场即将发生的约会／死亡／揭穿。不要"他陷入沉思""暴风雨即将来临"。
 - 每章至少推进一条主线或一条人物弧；删掉所有"过渡章""铺垫章"。
@@ -1622,12 +1622,12 @@ function openerChapterOf(ctx, n) {
 }
 
 /**
- * volumeChapters：一次只展开一卷。章数、章号段由脚本给，模型只填每章内容。
- * 条数必须等于 volume.targetChapters。
+ * volumeChapters：一次展开一卷中的指定章号区间，模型只填每章内容。
  */
 function volumeChaptersPrompt(ctx) {
   const p = paramsOf(ctx)
   const volume = currentVolume(ctx)
+  const fullVolume = ctx?.fullVolume ?? volume
   const range = chapterRange(volume, num(p.chaptersPerVolume, 30))
   const { prev, next } = neighbourVolumes(ctx, range.index)
   const digest = str(ctx && ctx.previousDigest)
@@ -1635,7 +1635,7 @@ function volumeChaptersPrompt(ctx) {
   const openerRank = range.start <= 3 ? renderOpenerChapters(ctx, 600) : ''
   const fixed = [
     '【写作纪律】',
-    `1. 本卷共 ${range.target} 章，请一次给全 ${range.target} 章：chapters 必须恰好 ${range.target} 条，第 1 条是第 ${range.start} 章，最后一条是第 ${range.end} 章。`,
+    `1. 本批请给 ${range.target} 章：chapters 必须恰好 ${range.target} 条，第 1 条是第 ${range.start} 章，最后一条是第 ${range.end} 章。`,
     '2. 不要写正文，不要写对白；每章只给目标、冲突、转折、钩子。',
     '3. 不要复述前面章节已经写过的内容；上一章的 hook 只用来接住开场压力。',
     '4. 钩子必须留悬念：本章不许把自己的问题解决掉，解决要留到后面。',
@@ -1645,7 +1645,7 @@ function volumeChaptersPrompt(ctx) {
     '6. 节奏：每 3–5 章至少一次 small｜medium 爽点；hookStrength 不得连续 3 章 ≤2；本卷最后一章 hookStrength 必须是 5。',
     '7. threadDue 只能原样引用【待回收线索】清单里的文本，每条 ≤16 字；清单为空就写 []，不要自己造线索。',
     '8. track 是 unit／main／both；unitArc 是单元剧目标（≤30 字），纯主线章可以不填。',
-    openerRank ? '9. 有【开篇前三章（已定）】时，前三条 chapters 的 title 与 hookType 必须沿用，不许换。' : '',
+    openerRank ? '9. 有【开篇前三章（已定）】时，本批与第 1–3 章重叠的条目必须按章号沿用 title 与 hookType。' : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -1654,7 +1654,7 @@ function volumeChaptersPrompt(ctx) {
     [
       {
         text: [
-          volumeCard(ctx, volume),
+          volumeCard(ctx, fullVolume),
           prev ? `上一卷：${volumeLines(prev)}` : '',
           next ? `下一卷：${volumeLines(next)}` : '',
         ]

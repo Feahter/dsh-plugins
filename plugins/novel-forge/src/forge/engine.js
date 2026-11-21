@@ -20,6 +20,8 @@ import {
 } from './recipe.js'
 import { estimateTokens, fit, safeKey } from './text.js'
 import { newProjectId, newRunId } from './ids.js'
+import { bookDirectory, updateBookRepository } from './bookrepo.js'
+import { isBookSnapshotStage, renderBook } from '../recipes/novel/bookmirror.js'
 
 const EVENT_LIMIT = 500
 // 高频事件（log/progress/llm）合并落盘：每个事件都全量重写 run.json 会让长跑变成 O(n²) 磁盘写。
@@ -759,6 +761,7 @@ export class ForgeEngine {
         if (unit.id) await this.#emit(live, EVENT.ITEM_DONE, { stage: stage.id, item: unit.id })
         run.progress.done += 1
         await this.#emit(live, EVENT.PROGRESS, { done: run.progress.done, total: run.progress.total })
+        if (unit.id) await this.#snapshotBook(live, stage.id, unit.id)
       } catch (err) {
         if (this.#aborted(live) || isAbort(err)) {
           if (unit.id) state.items[unit.id] = 'pending'
@@ -822,6 +825,7 @@ export class ForgeEngine {
     project.updatedAt = this.#now()
     await this.store.saveProject(project)
     await this.#emit(live, EVENT.STAGE_END, { stage: stage.id, status: state.status })
+    if (!stage.each && stageStatus === 'done') await this.#snapshotBook(live, stage.id)
 
     const wantsReview = typeof stage.review === 'function' ? await stage.review(deepFreeze(clone(project))) : stage.review === true
     if (wantsReview && run.options.autoApprove !== true && run.options.dryRun !== true) {
@@ -831,6 +835,16 @@ export class ForgeEngine {
       return 'paused'
     }
     return 'done'
+  }
+
+  async #snapshotBook(live, stage, itemId) {
+    const { project, run, cache } = live
+    if (project.recipe !== 'novel' || run.options.dryRun || !isBookSnapshotStage(stage, itemId)) return
+    await updateBookRepository({
+      directory: bookDirectory(this.store, project.id),
+      render: () => renderBook(project, cache, { stage, itemId }),
+      warn: (message) => this.#log(live, message, 'warn'),
+    })
   }
 
   async #resolveItemList(live, stage) {
