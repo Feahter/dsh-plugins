@@ -140,9 +140,9 @@ A sidebar GitHub panel and a family of `github_*` agent tools: browse repositori
 
 Two layers over the Harness's own session history.
 
-- **Archive curation.** `archive_*` tools add what the Harness lacks — sync, tag, note, read, trash, delete over `~/.dsh/sessions`. The Harness's own archive/pin state is mirrored read-only rather than forked, and original session files are never modified, moved or deleted.
-- **PDCA over the corpus.** `rsi_*` tools compute tool-error rate, correction rate, the edit-then-no-verification gap, context pressure and tool-catalog cost, turn the outliers into findings carrying `sessionId + seq` evidence, and emit context patches (prompt lessons, `AGENTS.md` rules, skill candidates).
-- **Adopt, then measure again.** A patch can be adopted and later re-evaluated against the sessions created after adoption. That measured loop — observe, patch the context, measure again — is tool-layer recursive self-improvement.
+- **Archive curation.** One `session_archive` tool (`action`: sync, list, read, update, autotag, delete) adds what the Harness lacks — tags, notes, search, trash — over `~/.dsh/sessions`. The Harness's own archive/pin state is mirrored read-only rather than forked, and original session files are never modified, moved or deleted.
+- **PDCA over the corpus.** `rsi` (`action`: plan, run, status) computes tool-error rate, correction rate, the edit-then-no-verification gap, context pressure and tool-catalog cost and turns the outliers into findings carrying `sessionId + seq` evidence; `rsi_apply` (`action`: act, adopt) emits context patches (prompt lessons, `AGENTS.md` rules, skill candidates) and applies or reverts one. Observations that cannot become an adoptable patch stay findings instead of unadoptable proposals.
+- **Adopt, then measure again.** A patch can be adopted and later re-evaluated against the sessions on both sides of the adoption. The boot-time run now does that re-measurement itself (`autoEvaluate`), so the loop — observe, patch the context, measure again — closes without anyone remembering to ask. That is tool-layer recursive self-improvement.
 
 *Requirements:* DSH ≥ 0.2.1-rc.4 and Node ≥ 22.15 (session logs are concatenated-zstd containers decoded through `node:zlib`). Data lives in `~/.dsh/archive-rsi/`. All computation is local and calls no LLM.
 

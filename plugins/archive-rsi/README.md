@@ -18,7 +18,7 @@
 本插件的差别只有三点：
 
 - **有证据**：每条提案都带 `sessionId + seq`，能回到原始事件。
-- **可回滚**：采纳前写备份，`rsi_adopt --revert` 精确还原。
+- **可回滚**：采纳前写备份，`rsi_apply` 的 `action:"adopt", revert:true` 精确还原。
 - **可证伪**：采纳时间点把语料切成前后两段，用同一套指标对比，`improved / regressed / inconclusive` 三态，样本不足就直说 `inconclusive`。
 
 ---
@@ -51,42 +51,42 @@ pnpm add link:/Users/fuzhuo/Documents/deepseek-harness/default-workspace/archive
 
 ## 工具面
 
-### 归档 CRUD
+### 归档策展（`session_archive`，`action` 选操作）
 
-| 工具 | 作用 |
+| action | 作用 |
 |---|---|
-| `archive_sync` | 扫描会话目录，导入/刷新归档（幂等：内容没变就跳过；损坏文件记入 `failed` 不中断） |
-| `archive_list` | 按全文/标签/状态/工作区/**Harness 归档标记**筛选，返回每条的标题、时间、工作区、`harnessArchived` 与头部指标 |
-| `archive_get` | 单条详情：元数据 + 事实（轮次、每工具调用/错误、上下文压力、编辑-验证缺口、重复调用），可选渲染后的 Markdown 记录 |
-| `archive_update` | 改标题 / 标签 / 备注 / 状态（`archived` / `pinned` / `trash`） |
-| `archive_delete` | 移出归档（进回收站）或 `purge` 连派生文件一起删；**原始会话文件永远不动** |
-| `archive_autotag` | 按规则重算自动标签（单条或全库），`dryRun` 只算不写 |
+| `sync` | 扫描会话目录，导入/刷新归档（幂等：内容没变就跳过；损坏文件记入 `failed` 不中断） |
+| `list` | 按全文/标签/状态/工作区/**Harness 归档标记**筛选，返回每条的标题、时间、工作区、`harnessArchived` 与头部指标 |
+| `read` | 单条详情：元数据 + 事实（轮次、每工具调用/错误、上下文压力、编辑-验证缺口、重复调用），可选渲染后的 Markdown 记录 |
+| `update` | 改标题 / 标签 / 备注 / 状态（`archived` / `pinned` / `trash`） |
+| `delete` | 移出归档（进回收站）或 `purge` 连派生文件一起删；**原始会话文件永远不动** |
+| `autotag` | 按规则重算自动标签（单条或全库），`dryRun` 只算不写 |
 
-### PDCA / RSI
+### PDCA / RSI（`rsi` 与 `rsi_apply`）
 
-| 工具 | 阶段 | 作用 |
+| 工具 / action | 阶段 | 作用 |
 |---|---|---|
-| `rsi_plan` | Plan | 固定语料 cohort（默认就是 Harness 里被归档的会话；一个都没有时退回最近窗口并在 `cohort.source` 里写明）与目标指标（默认：工具错误率 ≤5%、纠正率 ≤15%、验证缺口率 ≤30%、P90 上下文占用 ≤60%、工具目录 ≤48KB） |
-| `rsi_run` | Do + Check | 先增量 sync，再算指标，与目标比、与上次 run 比，落盘 |
-| `rsi_act` | Act | 把 findings 变成提案（prompt 教训 / AGENTS.md 规则 / 技能候选 / 只读建议） |
-| `rsi_adopt` | 采纳 | 应用或回滚一条提案（备份 + journal + 撤销） |
-| `rsi_status` | 闭环 | 语料概况、最近 run、待办提案，并对已采纳提案做「采纳前 vs 采纳后」重估 |
+| `rsi` `plan` | Plan | 固定语料 cohort（默认就是 Harness 里被归档的会话；一个都没有时退回最近窗口并在 `cohort.source` 里写明）与目标指标（默认：工具错误率 ≤5%、纠正率 ≤15%、验证缺口率 ≤30%、P90 上下文占用 ≤60%、工具目录 ≤48KB） |
+| `rsi` `run` | Do + Check | 先增量 sync，再算指标，与目标比、与上次 run 比，落盘 |
+| `rsi` `status` | 闭环 | 语料概况、最近 run、待办提案，并对已采纳提案做「采纳前 vs 采纳后」重估 |
+| `rsi_apply` `act` | Act | 把 findings 变成提案（prompt 教训 / AGENTS.md 规则 / 技能候选）。**只读建议不再落成提案**（采纳路径本来就拒收该 kind），仍留在 `run.act.findings` 里，面板照常显示；要旧行为设 `advisoryProposals: true` |
+| `rsi_apply` `adopt` | 采纳 | 应用或回滚一条提案（备份 + journal + 撤销） |
 
----
+> v0.5.0 起工具面从 11 个压到 3 个（工具目录 7352 B → 5231 B，约 −2.1KB / −28.9%），并且每次启动的自动 run 结束后会**自动重估已采纳提案**（`autoEvaluate`），不再依赖人记得去调 `status`。
 
 ## 「持续」是怎么做到的
 
 插件不能给自己排定时器（Harness 的 schedule 服务是会话提醒，插件不该占用一个会话），所以
 连续性锚在**进程生命周期**上：每次 Harness 启动 → 增量 sync → 如果上一次 run 已经超过
 `autoRunEveryDays`（默认 7 天）→ 后台跑一轮 Plan/Do/Check，并按 `autoPropose` 生成提案。
-采纳永远要人或 agent 显式调用 `rsi_adopt`（唯一例外是 `autoAdopt` 开启时的单条 prompt 教训，
+采纳永远要人或 agent 显式调用 `rsi_apply` 的 `action:"adopt"`（唯一例外是 `autoAdopt` 开启时的单条 prompt 教训，
 它只写在插件自己的 `lessons.md` 里，碰不到任何用户文件）。
 
 于是每次启动都在既有语料上重新度量一次，指标序列与 `journal.jsonl` 一起构成可回溯的 RSI 轨迹。
 
 ## 自动标签
 
-每次 sync（以及 `archive_autotag`）都会从 `SessionFacts` 派生一组 `auto:*` 标签。**不调用模型**：
+每次 sync（以及 `session_archive` 的 `autotag`）都会从 `SessionFacts` 派生一组 `auto:*` 标签。**不调用模型**：
 一条标签要么是日志里的事实，要么不写。规则见 [DESIGN §10](./DESIGN.md)：
 
 | 标签 | 触发条件 | 例 |
@@ -258,7 +258,7 @@ node archive-rsi/.verify-client.mjs  # 11 项：模块注册、插槽、locale�
 - `verify-host` 58 pass / 0 fail / 0 skip（含在真实 42 个会话上的端到端：sync → run → act → overview）。
 - `verify-client` 6 pass / 0 fail。
 - **真实 Loader 启动验证**：建一个 headless profile，把本插件按 bundle 方式挂进去（`cordis.patch.yml` insert + `node_modules` 软链 + `rootDir` 指向临时目录），执行 `dsh --profile <name>`。Harness 正常启动到「需要任务」这一步，且插件副作用已出现——`archive.json` 里有 44 条会话、`sessions/*.md` 派生记录、`journal.jsonl`。这证明模块解析、`apply()`、`store.init()`、启动增量 sync 在真实 Cordis 加载器里都跑通了，不只是桩环境。
-- **未验证**：headless CLI 里跑一次真实模型回合。本机远端 provider 走 account 路由，headless 需要重新登录（`ACCOUNT_SIGN_IN_REQUIRED`），所以「模型真的调用 `archive_list` 拿到数据」这一步没有在 CLI 侧复现；桩上下文 + 真实数据覆盖了工具的执行路径，模型侧的调用等价性靠工具 schema 与 `output.render` 的形状保证。
+- **未验证**：headless CLI 里跑一次真实模型回合。本机远端 provider 走 account 路由，headless 需要重新登录（`ACCOUNT_SIGN_IN_REQUIRED`），所以「模型真的调用 `session_archive` 拿到数据」这一步没有在 CLI 侧复现；桩上下文 + 真实数据覆盖了工具的执行路径，模型侧的调用等价性靠工具 schema 与 `output.render` 的形状保证。
 
 `archive.js` 里的 zstd 多帧扫描器移植自
 `@deepseek-ai/dsh-session-persistence-jsonl`（该包未导出它），因为 Node 的

@@ -44,7 +44,7 @@ Therefore this plugin must not fork that store:
    pass. That loop — measure, patch context, re-measure — is the tool-layer RSI.
 
 Everything is deterministic local computation over the event log. No LLM call is
-made by this plugin. (The agent calling `rsi_*` may add its own judgment; the
+made by this plugin. (The agent calling `rsi` / `rsi_apply` may add its own judgment; the
 plugin never invents evidence.)
 
 Non-goals: replaying sessions, forking sessions, mutating DSH session files,
@@ -609,6 +609,15 @@ run is older than `autoRunEveryDays` the plugin runs plan+do+check once in the b
 (unless `autoPropose` is off) writes the proposals. It never adopts anything except, with
 `autoAdopt: true`, one `prompt-section` lesson — text that lives in the plugin's own root.
 Journal actions: `run.auto`, `run.act` (with `auto: true`).
+
+> **0.5.0 revision (2026-11-22).** The tool table below is the frozen 0.4.x
+> contract and is kept for history. In 0.5.0 the eleven tools are registered as
+> three — `session_archive` (action: list|sync|read|update|autotag|delete),
+> `rsi` (action: plan|run|status) and `rsi_apply` (action: act|adopt) — with the
+> same per-action arguments and return shapes listed here, plus `action` as the
+> required discriminator. Advisories are no longer stored as proposals unless
+> `advisoryProposals: true`, and the boot run now re-measures adopted proposals
+> (`autoEvaluate`). See README for the current contract.
 
 Agent tools (11). `execute(args, exec)`; every handler validates args itself and returns
 a plain JSON-serializable object. All tool errors are returned as `{ ok: false, error: { code, message } }`

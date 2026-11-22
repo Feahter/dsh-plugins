@@ -73,6 +73,13 @@ export const DEFAULTS = {
   autoAdopt: false,
   autoRunEveryDays: 7,
   autoPropose: true,
+  // Findings that can only produce an unadoptable "advisory" (a tool failing
+  // too often, the catalog being too big) stay in run.act.findings instead of
+  // becoming proposals nobody can apply. Set true to get the old behavior.
+  advisoryProposals: false,
+  // After the boot run, re-measure adopted proposals so the closing half of
+  // the loop runs without a human remembering to call status.
+  autoEvaluate: true,
   autoTag: true,
   autoTagLimit: DEFAULT_AUTO_TAG_LIMIT,
   editTools: DEFAULT_EDIT_TOOLS,
@@ -121,7 +128,16 @@ export function readConfig(raw) {
     if (typeof raw[key] === 'string') config[key] = expandHome(raw[key]);
     else if (raw[key] !== undefined) warnings.push(`config "${key}" must be a string`);
   }
-  const booleanKeys = ['protocolSection', 'lessonsSection', 'syncOnBoot', 'autoAdopt', 'autoPropose', 'autoTag'];
+  const booleanKeys = [
+    'protocolSection',
+    'lessonsSection',
+    'syncOnBoot',
+    'autoAdopt',
+    'autoPropose',
+    'autoTag',
+    'advisoryProposals',
+    'autoEvaluate',
+  ];
   for (const key of booleanKeys) {
     if (typeof raw[key] === 'boolean') config[key] = raw[key];
     else if (raw[key] !== undefined) warnings.push(`config "${key}" must be a boolean`);
@@ -462,7 +478,7 @@ async function runOnce({ store, config, args, execute, ensureReady }) {
  * @returns {Promise<{run: object, proposals: object[], created: number, reused: number,
  *   skipped: Array<{fingerprint: string, id: string, reason: string}>}>}
  */
-async function actOnRun({ store, run }) {
+async function actOnRun({ store, run, config = DEFAULTS }) {
   const existingIds = Array.isArray(run.act && run.act.proposalIds) ? run.act.proposalIds : [];
   if (existingIds.length) {
     const resolved = [];
@@ -474,11 +490,11 @@ async function actOnRun({ store, run }) {
       run.phase = 'closed';
       run.status = 'closed';
       await store.saveRun(run);
-      return { run, proposals: resolved, created: 0, reused: resolved.length, skipped: [] };
+      return { run, proposals: resolved, created: 0, reused: resolved.length, skipped: [], suppressed: [] };
     }
   }
   const all = await store.listProposals({ limit: 500 });
-  const plan = planProposals(run, { existing: all });
+  const plan = planProposals(run, { existing: all, includeAdvisories: config.advisoryProposals === true });
   for (const proposal of plan.proposals) await store.saveProposal(proposal);
   run.act.proposalIds = plan.reused.map((proposal) => proposal.id).concat(plan.proposals.map((proposal) => proposal.id));
   run.phase = 'closed';
@@ -490,224 +506,238 @@ async function actOnRun({ store, run }) {
     created: plan.proposals.length,
     reused: plan.reused.length,
     skipped: plan.skipped,
+    suppressed: plan.suppressed,
   };
 }
 
 // --------------------------------------------------------------- tools
 
-function buildTools({ store, config, paths, state, ensureReady }) {
+/**
+ * Re-measure adopted proposals against the sessions that came after adoption.
+ *
+ * This is the "closing half" of the loop (DESIGN §6). It used to live only
+ * behind `rsi_status`, which nothing ever called, so no adoption was ever
+ * verified. It is now shared by the status action and the boot-time auto run,
+ * which is what makes "adopt → re-measure" automatic instead of aspirational.
+ *
+ * @param store - initialized ArchiveStore.
+ * @param {{onlyUnevaluated?: boolean}} [options] `false` re-measures every
+ *   adopted proposal even when a verdict already exists (the auto run does this
+ *   so verdicts move as new sessions arrive).
+ * @returns {Promise<{adopted: number, evaluated: object[]}>}
+ */
+export async function evaluateAdoptedProposals(store, options = {}) {
+  const onlyUnevaluated = options.onlyUnevaluated !== false;
+  const proposals = await store.listProposals({ limit: 100 });
+  const adopted = proposals.filter((proposal) => proposal && proposal.status === 'adopted');
+  const targets = onlyUnevaluated ? adopted.filter((proposal) => !proposal.evaluation) : adopted;
+  if (!targets.length) return { adopted: adopted.length, evaluated: [] };
+  const index = await store.index();
+  const entries = Object.values(index.entries || {}).filter((entry) => entry.status !== 'trash');
+  // Both sides of the boundary must be in the sample. Taking only the newest
+  // sessions put every one of them after the adoption, so every verdict came
+  // back "inconclusive" with before.sessions = 0 on the real corpus (the oldest
+  // adoption was 199 sessions ago). Split at the earliest adoption and take the
+  // nearest sessions on each side: that is the same-length window immediately
+  // before and after the change.
+  const adoptedTimes = targets.map((proposal) => Number(proposal.adoptedAt)).filter(Number.isFinite);
+  const boundary = adoptedTimes.length ? Math.min(...adoptedTimes) : Date.now();
+  const half = Math.max(20, Math.floor(MAX_EVAL_SESSIONS / 2));
+  const sorted = entries.slice().sort((a, b) => b.createdAt - a.createdAt);
+  const candidates = sorted
+    .filter((entry) => entry.createdAt >= boundary)
+    .slice(0, half)
+    .concat(sorted.filter((entry) => entry.createdAt < boundary).slice(0, half));
+  const { facts } = await loadFacts(store, candidates);
+  if (!facts.length) return { adopted: adopted.length, evaluated: [] };
+  const evaluated = evaluateAdoptions(targets, facts, { minSessions: 3 });
+  for (const proposal of evaluated) await store.saveProposal(proposal);
+  return { adopted: adopted.length, evaluated };
+}
+
+// --------------------------------------------------------------- archive tools
+
+/**
+ * The two tool families are registered as ONE tool each plus `rsi_apply`.
+ *
+ * v0.5.0 consolidation: 11 tools (6 `archive_*`, 5 `rsi_*`) cost ~7.6KB of the
+ * resident tool catalog and the audit of 2026-11-22 showed the archive CRUD and
+ * the PDCA halves were called rarely-to-never while their schemas were paid on
+ * every step. Names are stable only in the sense that matters: the model sees
+ * three tools whose `action` enum names the operation, and each action keeps the
+ * exact return shape its standalone tool had.
+ */
+
+const ARCHIVE_ACTIONS = ['list', 'sync', 'read', 'update', 'autotag', 'delete'];
+const RSI_ACTIONS = ['plan', 'run', 'status'];
+const RSI_APPLY_ACTIONS = ['act', 'adopt'];
+
+/** Coded rejection for an unknown/missing `action`, so a bad call never throws. */
+function invalidAction(action, allowed) {
+  return {
+    ok: false,
+    error: {
+      code: 'invalid-action',
+      message: `action must be one of ${allowed.join(' | ')}; got ${JSON.stringify(action)}`,
+    },
+  };
+}
+
+export function buildTools({ store, config, paths, state, ensureReady }) {
   const tools = [];
 
-  tools.push(
-    defineTool(
-      'archive_list',
-      'List the session archive (historical DSH sessions imported by archive_sync). Filters: free-text query over title/workspace/tags, a tag, this plugin\'s own status (archived|pinned|trash|all), a workspace substring, and `archived` for the Harness\'s own archive flag. Returns headline metrics plus `harnessArchived`/`harnessPinned` per session.',
-      {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Free-text filter over title, workspace and tags.' },
-          tag: { type: 'string', description: 'Exact tag filter.' },
-          status: { type: 'string', enum: ['archived', 'pinned', 'trash', 'all'], description: 'Lifecycle filter, default all.' },
-          workspace: { type: 'string', description: 'Substring match on the session cwd.' },
-          archived: { type: 'boolean', description: 'true keeps only sessions the Harness itself has archived, false only unarchived ones.' },
-          limit: { type: 'number', description: 'Max entries, default 20.' },
-          offset: { type: 'number', description: 'Pagination offset.' },
-        },
-        additionalProperties: false,
-      },
-      async (args) => {
-        const store1 = await ensureReady();
-        const query = {
-          query: asString(args.query, 200),
-          tag: asString(args.tag, 64),
-          status: ['archived', 'pinned', 'trash'].includes(args.status) ? args.status : 'all',
-          workspace: asString(args.workspace, 400),
-          sort: 'newest',
-        };
-        const offset = Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
-        const limit = asLimit(args.limit, 20, 200);
-        const archiveState = await readHarnessArchive(dshHome());
-        const mode = typeof args.archived === 'boolean' ? args.archived : undefined;
-        let entries;
-        let total;
-        if (mode === undefined) {
-          const listing = await store1.list({ ...query, limit, offset });
-          entries = listing.entries;
-          total = listing.total;
-        } else {
-          // The store paginates, so a Harness-archive filter has to run over the
-          // whole result set before slicing: archived sessions are usually the
-          // oldest ones and would never appear on the first page.
-          const all = await store1.list({ ...query, limit: 2000, offset: 0 });
-          const filtered = filterByHarnessArchive(all.entries, archiveState, mode);
-          entries = filtered.slice(offset, offset + limit);
-          total = filtered.length;
-        }
-        return ok({
-          total,
-          harnessArchive: { sessions: archiveState.archived.size, error: archiveState.error },
-          entries: entries.map((raw) => {
-            const entry = annotate(raw, archiveState);
-            return {
-              id: entry.id,
-              title: entry.title,
-              createdAt: entry.createdAt,
-              workspace: entry.workspace,
-              origin: entry.origin,
-              status: entry.status,
-              harnessArchived: entry.harnessArchived,
-              harnessPinned: entry.harnessPinned,
-              tags: entry.tags,
-              autoTags: entry.autoTags || [],
-              metrics: entry.metrics,
-            };
-          }),
-        });
-      },
-    ),
-  );
+  const createRun = (args, options) => runOnce({ store, config, args, execute: options.execute, ensureReady });
 
   tools.push(
     defineTool(
-      'archive_get',
-      'Read one archived session: curated metadata, the derived facts (turns, per-tool call/error counts, context pressure, edits vs checks, repeated calls) and optionally a page of the rendered transcript.',
+      'session_archive',
+      'Curate the historical session archive; `action` picks the operation. list: filter by query/tag/status/workspace and by the Harness\'s own archive flag, with headline metrics. sync: incremental import from the Harness session directory (idempotent, original session files untouched). read: one session\'s curated metadata, derived facts (turns, per-tool call/error counts, context pressure, edits-vs-checks gaps, repeated calls) and optionally one page of the rendered transcript. update: title/tags/note/lifecycle status. autotag: recompute the deterministic auto:* tags (no model call). delete: trash (recoverable) or purge the derived files; the DSH session file is never touched.',
       {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Session id from archive_list.' },
-          transcript: { type: 'boolean', description: 'Include a slice of the rendered Markdown transcript (paged, see offset).' },
-          maxChars: { type: 'number', description: 'Slice length in characters, default 12000, clamped to [1000, 400000].' },
-          offset: { type: 'number', description: 'Start offset into the transcript, default 0. Page by re-calling with offset = transcriptOffset + transcript.length until transcriptTruncated is false.' },
+          action: {
+            type: 'string',
+            enum: ARCHIVE_ACTIONS,
+            description: 'Operation to run; the other fields are read by the action named in the descriptions.',
+          },
+          id: { type: 'string', description: 'Session id (read | update | delete | autotag-one).' },
+          query: { type: 'string', description: 'list: free-text filter over title, workspace and tags.' },
+          tag: { type: 'string', description: 'list: exact tag filter.' },
+          status: {
+            type: 'string',
+            enum: ['archived', 'pinned', 'trash', 'all'],
+            description: 'list: lifecycle filter (default all). update: replacement status (archived|pinned|trash).',
+          },
+          workspace: { type: 'string', description: 'list: substring match on the session cwd.' },
+          archived: { type: 'boolean', description: 'list: true = only sessions the Harness itself archived, false = only unarchived.' },
+          limit: { type: 'number', description: 'list: max entries (default 20). autotag: max tags per session.' },
+          offset: { type: 'number', description: 'list: pagination offset.' },
+          transcript: { type: 'boolean', description: 'read: include a page of the rendered Markdown transcript.' },
+          maxChars: { type: 'number', description: 'read: transcript page length, default 12000, clamped to [1000, 400000].' },
+          refresh: { type: 'boolean', description: 'sync: re-decode every file even when unchanged.' },
+          title: { type: 'string', description: 'update: replacement title (max 200 chars).' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'update: replacement tag list (max 24).' },
+          note: { type: 'string', description: 'update: replacement note (max 4000 chars).' },
+          dryRun: { type: 'boolean', description: 'autotag: compute and report without writing.' },
+          purge: { type: 'boolean', description: 'delete: also drop the derived facts/transcript (default is a recoverable trash).' },
         },
-        required: ['id'],
+        required: ['action'],
         additionalProperties: false,
       },
       async (args) => {
+        const action = asString(args.action, 32);
+        if (!ARCHIVE_ACTIONS.includes(action)) return invalidAction(args.action, ARCHIVE_ACTIONS);
         const store1 = await ensureReady();
-        const id = requireId(args.id);
-        const record = await store1.get(id);
-        if (!record) return { ok: false, error: { code: 'not-found', message: `no archived session "${id}"` } };
-        const archiveState = await readHarnessArchive(dshHome());
-        const payload = { entry: annotate(record.entry, archiveState), facts: record.facts };
-        if (asBoolean(args.transcript, false)) {
-          const text = await store1.transcript(id);
-          const total = text ? text.length : 0;
-          const maxChars = asMaxChars(args.maxChars, 12_000);
-          const offset = asOffset(args.offset, total);
-          const slice = text ? text.slice(offset, offset + maxChars) : '';
-          payload.transcript = text ? slice : null;
-          payload.transcriptOffset = offset;
-          payload.transcriptTotal = total;
-          payload.transcriptTruncated = offset + slice.length < total;
-        }
-        return ok(payload);
-      },
-    ),
-  );
 
-  tools.push(
-    defineTool(
-      'archive_sync',
-      'Scan the harness session directory and import/refresh archived sessions. Idempotent: unchanged files are skipped. Never modifies the original session files.',
-      {
-        type: 'object',
-        properties: {
-          refresh: { type: 'boolean', description: 'Re-decode every discovered file even when unchanged.' },
-        },
-        additionalProperties: false,
-      },
-      async (args) => {
-        const store1 = await ensureReady();
-        const result = await store1.sync({ refresh: asBoolean(args.refresh, false) });
-        return ok({
-          scanned: result.scanned,
-          imported: result.imported,
-          refreshed: result.refreshed,
-          skipped: result.skipped,
-          failed: result.failed.slice(0, 10),
-          failedCount: result.failed.length,
-        });
-      },
-    ),
-  );
-
-  tools.push(
-    defineTool(
-      'archive_update',
-      'Curate one archived session: title, tags, note, or lifecycle status (archived|pinned|trash). Only the archive metadata changes.',
-      {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'Session id.' },
-          title: { type: 'string', description: 'Replacement title (max 200 chars).' },
-          tags: { type: 'array', items: { type: 'string' }, description: 'Replacement tag list (max 24).' },
-          note: { type: 'string', description: 'Replacement note (max 4000 chars).' },
-          status: { type: 'string', enum: ['archived', 'pinned', 'trash'], description: 'Lifecycle status.' },
-        },
-        required: ['id'],
-        additionalProperties: false,
-      },
-      async (args) => {
-        const store1 = await ensureReady();
-        const id = requireId(args.id);
-        const patch = {
-          title: asString(args.title, 200),
-          note: asString(args.note, 4000),
-          tags: asTags(args.tags),
-          status: ['archived', 'pinned', 'trash'].includes(args.status) ? args.status : undefined,
-        };
-        const entry = await store1.update(id, patch);
-        return ok({ entry });
-      },
-    ),
-  );
-
-  tools.push(
-    defineTool(
-      'archive_autotag',
-      'Recompute the automatic tags (auto:*: preset, origin, error hotspot, verification gap, turn failure, repeat, correction, context pressure, cost outlier, scale, top tools, language) for one archived session or the whole archive. Deterministic — no model call — manual-tag safe, and idempotent. dryRun computes without writing.',
-      {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'Session id; omit to retag the whole archive.' },
-          dryRun: { type: 'boolean', description: 'Compute and report without writing.' },
-          limit: { type: 'number', description: 'Max auto tags per session (default from config).' },
-        },
-        additionalProperties: false,
-      },
-      async (args) => {
-        const store1 = await ensureReady();
-        if (config.autoTag === false) {
-          return {
-            ok: false,
-            error: { code: 'auto-tag-disabled', message: 'autoTag is false in this profile; the archive_autotag tool is read-only' },
+        if (action === 'list') {
+          const query = {
+            query: asString(args.query, 200),
+            tag: asString(args.tag, 64),
+            status: ['archived', 'pinned', 'trash'].includes(args.status) ? args.status : 'all',
+            workspace: asString(args.workspace, 400),
+            sort: 'newest',
           };
+          const offset = Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
+          const limit = asLimit(args.limit, 20, 200);
+          const archiveState = await readHarnessArchive(dshHome());
+          const mode = typeof args.archived === 'boolean' ? args.archived : undefined;
+          let entries;
+          let total;
+          if (mode === undefined) {
+            const listing = await store1.list({ ...query, limit, offset });
+            entries = listing.entries;
+            total = listing.total;
+          } else {
+            // The store paginates, so a Harness-archive filter has to run over the
+            // whole result set before slicing: archived sessions are usually the
+            // oldest ones and would never appear on the first page.
+            const all = await store1.list({ ...query, limit: 2000, offset: 0 });
+            const filtered = filterByHarnessArchive(all.entries, archiveState, mode);
+            entries = filtered.slice(offset, offset + limit);
+            total = filtered.length;
+          }
+          return ok({
+            total,
+            harnessArchive: { sessions: archiveState.archived.size, error: archiveState.error },
+            entries: entries.map((raw) => {
+              const entry = annotate(raw, archiveState);
+              return {
+                id: entry.id,
+                title: entry.title,
+                createdAt: entry.createdAt,
+                workspace: entry.workspace,
+                origin: entry.origin,
+                status: entry.status,
+                harnessArchived: entry.harnessArchived,
+                harnessPinned: entry.harnessPinned,
+                tags: entry.tags,
+                autoTags: entry.autoTags || [],
+                metrics: entry.metrics,
+              };
+            }),
+          });
         }
-        const result = await store1.autotag({
-          id: asId(args.id) || '',
-          dryRun: asBoolean(args.dryRun, false),
-          limit: Number.isFinite(args.limit) ? Math.max(0, Math.floor(args.limit)) : null,
-        });
-        return ok({ prefix: AUTO_TAG_PREFIX, ...result });
-      },
-    ),
-  );
 
-  tools.push(
-    defineTool(
-      'archive_delete',
-      'Remove an archived session from the archive. Without purge it moves to trash (recoverable); with purge it also deletes the derived facts/transcript. The original DSH session file is never touched.',
-      {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'Session id.' },
-          purge: { type: 'boolean', description: 'Permanently drop the archive entry and its derived files.' },
-        },
-        required: ['id'],
-        additionalProperties: false,
-      },
-      async (args) => {
-        const store1 = await ensureReady();
+        if (action === 'sync') {
+          const result = await store1.sync({ refresh: asBoolean(args.refresh, false) });
+          return ok({
+            scanned: result.scanned,
+            imported: result.imported,
+            refreshed: result.refreshed,
+            skipped: result.skipped,
+            failed: result.failed.slice(0, 10),
+            failedCount: result.failed.length,
+          });
+        }
+
+        if (action === 'read') {
+          const id = requireId(args.id);
+          const record = await store1.get(id);
+          if (!record) return { ok: false, error: { code: 'not-found', message: `no archived session "${id}"` } };
+          const archiveState = await readHarnessArchive(dshHome());
+          const payload = { entry: annotate(record.entry, archiveState), facts: record.facts };
+          if (asBoolean(args.transcript, false)) {
+            const text = await store1.transcript(id);
+            const total = text ? text.length : 0;
+            const maxChars = asMaxChars(args.maxChars, 12_000);
+            const offset = asOffset(args.offset, total);
+            const slice = text ? text.slice(offset, offset + maxChars) : '';
+            payload.transcript = text ? slice : null;
+            payload.transcriptOffset = offset;
+            payload.transcriptTotal = total;
+            payload.transcriptTruncated = offset + slice.length < total;
+          }
+          return ok(payload);
+        }
+
+        if (action === 'update') {
+          const id = requireId(args.id);
+          const patch = {
+            title: asString(args.title, 200),
+            note: asString(args.note, 4000),
+            tags: asTags(args.tags),
+            status: ['archived', 'pinned', 'trash'].includes(args.status) ? args.status : undefined,
+          };
+          const entry = await store1.update(id, patch);
+          return ok({ entry });
+        }
+
+        if (action === 'autotag') {
+          if (config.autoTag === false) {
+            return {
+              ok: false,
+              error: { code: 'auto-tag-disabled', message: 'autoTag is false in this profile; autotag is read-only' },
+            };
+          }
+          const result = await store1.autotag({
+            id: asId(args.id) || '',
+            dryRun: asBoolean(args.dryRun, false),
+            limit: Number.isFinite(args.limit) ? Math.max(0, Math.floor(args.limit)) : null,
+          });
+          return ok({ prefix: AUTO_TAG_PREFIX, ...result });
+        }
+
+        // action === 'delete'
         const id = requireId(args.id);
         const result = await store1.remove(id, { purge: asBoolean(args.purge, false) });
         return ok(result);
@@ -717,104 +747,38 @@ function buildTools({ store, config, paths, state, ensureReady }) {
 
   // ------------------------------------------------------------ PDCA loop
 
-  const createRun = (args, options) => runOnce({ store, config, args, execute: options.execute, ensureReady });
-
   tools.push(
     defineTool(
-      'rsi_plan',
-      'PDCA "plan": fix a cohort of archived sessions and the target metrics a run will be judged against. Do not analyze anything.',
+      'rsi',
+      'PDCA over the session archive (deterministic, local, no model call); `action` picks the phase. plan: fix a cohort and the target metrics a run is judged against, analyze nothing. run: Do+Check — fresh sync, compute the cohort metrics, compare with targets and with the previous run, persist the run. status: corpus, latest run, open/adopted proposals, and re-measure already-adopted proposals against the sessions after adoption (the closing half of the loop). The act/adopt half is `rsi_apply`.',
       {
         type: 'object',
         properties: {
-          days: { type: 'number', description: 'Cohort window in days; 0 = all history.' },
-          workspace: { type: 'string', description: 'Restrict to sessions whose cwd contains this.' },
-          tag: { type: 'string', description: 'Restrict to archive tag.' },
-          status: { type: 'string', enum: ['archived', 'pinned', 'trash', 'all'], description: 'Lifecycle filter, default all.' },
-          limit: { type: 'number', description: 'Max sessions in the cohort.' },
+          action: { type: 'string', enum: RSI_ACTIONS, description: 'plan | run | status.' },
+          days: { type: 'number', description: 'plan|run: cohort window in days; 0 = all history.' },
+          workspace: { type: 'string', description: 'plan|run: restrict to sessions whose cwd contains this.' },
+          tag: { type: 'string', description: 'plan|run: restrict to archive tag.' },
+          status: { type: 'string', enum: ['archived', 'pinned', 'trash', 'all'], description: 'plan|run: lifecycle filter.' },
+          limit: { type: 'number', description: 'plan|run: max sessions in the cohort. status: max runs/proposals to list (default 10).' },
           targets: {
             type: 'array',
-            description: 'Override target metrics: [{metric, op, value}].',
+            description: 'plan|run: override target metrics: [{metric, op, value}].',
             items: { type: 'object', properties: { metric: { type: 'string' }, op: { type: 'string' }, value: { type: 'number' } } },
           },
+          runId: { type: 'string', description: 'status: inspect one run instead of the latest.' },
+          evaluate: { type: 'boolean', description: 'status: re-evaluate adopted proposals, default true.' },
         },
-        additionalProperties: false,
-      },
-      async (args) => ok({ run: await createRun(args, { execute: false }) }),
-    ),
-  );
-
-  tools.push(
-    defineTool(
-      'rsi_run',
-      'PDCA "do + check": analyze the cohort (including a fresh sync), compute the metrics, compare them with the target metrics and with the previous run, and persist the run. Returns the run with findings available through rsi_act.',
-      {
-        type: 'object',
-        properties: {
-          days: { type: 'number', description: 'Cohort window in days; 0 = all history.' },
-          workspace: { type: 'string', description: 'Restrict to sessions whose cwd contains this.' },
-          tag: { type: 'string', description: 'Restrict to archive tag.' },
-          status: { type: 'string', enum: ['archived', 'pinned', 'trash', 'all'] },
-          limit: { type: 'number', description: 'Max sessions in the cohort.' },
-          targets: {
-            type: 'array',
-            description: 'Override target metrics: [{metric, op, value}].',
-            items: { type: 'object', properties: { metric: { type: 'string' }, op: { type: 'string' }, value: { type: 'number' } } },
-          },
-        },
-        additionalProperties: false,
-      },
-      async (args) => ok({ run: await createRun(args, { execute: true }) }),
-    ),
-  );
-
-  tools.push(
-    defineTool(
-      'rsi_act',
-      'PDCA "act": derive findings from a completed run and turn them into concrete proposals (prompt lessons, AGENTS.md rules, skill candidates, advisories). Proposals are saved unapplied.',
-      {
-        type: 'object',
-        properties: { runId: { type: 'string', description: 'Run id from rsi_run.' } },
-        required: ['runId'],
+        required: ['action'],
         additionalProperties: false,
       },
       async (args) => {
-        const store1 = await ensureReady();
-        const id = requireId(args.runId);
-        const run = await store1.getRun(id);
-        if (!run) return { ok: false, error: { code: 'not-found', message: `no run "${id}"` } };
-        if (!run.check) return { ok: false, error: { code: 'not-checked', message: 'run has no check phase yet; call rsi_run' } };
-        const findings = run.act && Array.isArray(run.act.findings) ? run.act.findings : null;
-        if (!findings) {
-          return {
-            ok: false,
-            error: { code: 'no-findings', message: 'run.act.findings missing; re-run rsi_run to regenerate this run' },
-          };
-        }
-        const result = await actOnRun({ store: store1, run });
-        await store1.journal('run.act', run.id, {
-          created: result.created,
-          reused: result.reused,
-          skipped: result.skipped.length,
-        });
-        return ok({ run: result.run, proposals: result.proposals, created: result.created, reused: result.reused, skipped: result.skipped });
-      },
-    ),
-  );
+        const action = asString(args.action, 32);
+        if (!RSI_ACTIONS.includes(action)) return invalidAction(args.action, RSI_ACTIONS);
 
-  tools.push(
-    defineTool(
-      'rsi_status',
-      'Report the corpus, the last run, the open/accepted proposals, and re-evaluate already-adopted proposals against the sessions that came after adoption (the closing half of the loop).',
-      {
-        type: 'object',
-        properties: {
-          runId: { type: 'string', description: 'Inspect one run instead of the latest.' },
-          limit: { type: 'number', description: 'Max runs/proposals to list, default 10.' },
-          evaluate: { type: 'boolean', description: 'Re-evaluate adopted proposals, default true.' },
-        },
-        additionalProperties: false,
-      },
-      async (args) => {
+        if (action === 'plan') return ok({ run: await createRun(args, { execute: false }) });
+        if (action === 'run') return ok({ run: await createRun(args, { execute: true }) });
+
+        // action === 'status'
         const store1 = await ensureReady();
         const limit = asLimit(args.limit, 10, 100);
         const index = await store1.index();
@@ -824,26 +788,8 @@ function buildTools({ store, config, paths, state, ensureReady }) {
         const adopted = proposals.filter((proposal) => proposal.status === 'adopted');
         let evaluated = [];
         if (asBoolean(args.evaluate, true) && adopted.length) {
-          const candidates = entries
-            .filter((entry) => entry.status !== 'trash')
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .slice(0, MAX_EVAL_SESSIONS);
-          const { facts } = await loadFacts(store1, candidates);
-          if (facts.length) {
-            const cohort = await selectCohort(
-              store1,
-              { days: 0, limit: MAX_EVAL_SESSIONS, status: undefined, onlyArchived: false },
-              Date.now(),
-            );
-            const limited = new Set(cohort.entries.map((entry) => entry.id));
-            const scoped = facts.filter((item) => limited.has(item.sessionId));
-            evaluated = evaluateAdoptions(
-              adopted.filter((proposal) => !proposal.evaluation),
-              scoped,
-              { minSessions: 3 },
-            );
-            for (const proposal of evaluated) await store1.saveProposal(proposal);
-          }
+          const result = await evaluateAdoptedProposals(store1, { onlyUnevaluated: true });
+          evaluated = result.evaluated;
         }
         const archiveState = await readHarnessArchive(dshHome());
         const corpus = {
@@ -878,6 +824,8 @@ function buildTools({ store, config, paths, state, ensureReady }) {
               everyDays: statusEveryDays,
               dueAt: statusAutoDueAt,
               due: statusAutoDue,
+              evaluate: config.autoEvaluate,
+              advisoryProposals: config.advisoryProposals,
             },
           },
           proposals: {
@@ -896,20 +844,55 @@ function buildTools({ store, config, paths, state, ensureReady }) {
 
   tools.push(
     defineTool(
-      'rsi_adopt',
-      'Apply or revert one proposal. Adoption is reversible: a backup is written first and the change is recorded in the journal. Advisory proposals cannot be adopted.',
+      'rsi_apply',
+      'Act on a finished PDCA run; `action` picks the operation. act: turn the run\'s findings into stored proposals (prompt lessons, AGENTS.md rules, skill candidates). Unadoptable "advisory" findings are NOT written as proposals (only recorded in run.act.findings) unless the profile sets advisoryProposals:true. adopt: apply or revert ONE proposal — reversible, a backup is written first and the change is journaled.',
       {
         type: 'object',
         properties: {
-          proposalId: { type: 'string', description: 'Proposal id from rsi_act.' },
-          revert: { type: 'boolean', description: 'Revert a previously adopted proposal.' },
-          dryRun: { type: 'boolean', description: 'Validate without writing.' },
+          action: { type: 'string', enum: RSI_APPLY_ACTIONS, description: 'act | adopt.' },
+          runId: { type: 'string', description: 'act: run id from rsi action:"run".' },
+          proposalId: { type: 'string', description: 'adopt: proposal id from rsi_apply action:"act".' },
+          revert: { type: 'boolean', description: 'adopt: revert a previously adopted proposal.' },
+          dryRun: { type: 'boolean', description: 'adopt: validate without writing.' },
         },
-        required: ['proposalId'],
+        required: ['action'],
         additionalProperties: false,
       },
       async (args) => {
+        const action = asString(args.action, 32);
+        if (!RSI_APPLY_ACTIONS.includes(action)) return invalidAction(args.action, RSI_APPLY_ACTIONS);
         const store1 = await ensureReady();
+
+        if (action === 'act') {
+          const id = requireId(args.runId);
+          const run = await store1.getRun(id);
+          if (!run) return { ok: false, error: { code: 'not-found', message: `no run "${id}"` } };
+          if (!run.check) return { ok: false, error: { code: 'not-checked', message: 'run has no check phase yet; call rsi with action:"run"' } };
+          const findings = run.act && Array.isArray(run.act.findings) ? run.act.findings : null;
+          if (!findings) {
+            return {
+              ok: false,
+              error: { code: 'no-findings', message: 'run.act.findings missing; re-run rsi with action:"run" to regenerate this run' },
+            };
+          }
+          const result = await actOnRun({ store: store1, run, config });
+          await store1.journal('run.act', run.id, {
+            created: result.created,
+            reused: result.reused,
+            skipped: result.skipped.length,
+            suppressed: result.suppressed.length,
+          });
+          return ok({
+            run: result.run,
+            proposals: result.proposals,
+            created: result.created,
+            reused: result.reused,
+            skipped: result.skipped,
+            suppressed: result.suppressed.length,
+          });
+        }
+
+        // action === 'adopt'
         const id = requireId(args.proposalId);
         const proposal = await store1.getProposal(id);
         if (!proposal) return { ok: false, error: { code: 'not-found', message: `no proposal "${id}"` } };
@@ -939,6 +922,7 @@ function buildTools({ store, config, paths, state, ensureReady }) {
 
   return tools;
 }
+
 
 // --------------------------------------------------------------- routes
 
@@ -1184,7 +1168,7 @@ async function route({ store, paths, config, url, segments, method, body, ensure
     if (!run.check) {
       return { status: 409, payload: { ok: false, error: { code: 'not-checked', message: 'run has no check phase' } } };
     }
-    const result = await actOnRun({ store, run });
+    const result = await actOnRun({ store, run, config });
     await store.journal('run.act', run.id, {
       created: result.created,
       reused: result.reused,
@@ -1298,7 +1282,9 @@ export function apply(ctx, rawConfig) {
    * and the last run is older than `autoRunEveryDays`, the PDCA loop runs once in
    * the background. It writes a run and (unless `autoPropose` is off) proposals,
    * never an adoption — `autoAdopt` only ever applies one `prompt-section`
-   * lesson, which is in-plugin text and cannot touch a user file.
+   * lesson, which is in-plugin text and cannot touch a user file. It also
+   * re-measures already-adopted proposals (`autoEvaluate`), so the closing half
+   * of the loop no longer depends on someone calling status by hand.
    */
   const autoRun = async () => {
     try {
@@ -1311,7 +1297,7 @@ export function apply(ctx, rawConfig) {
       const run = await runOnce({ store, config, args: {}, execute: true, ensureReady: async () => store });
       let proposals = [];
       if (config.autoPropose) {
-        const result = await actOnRun({ store, run });
+        const result = await actOnRun({ store, run, config });
         proposals = result.proposals;
         run.phase = 'closed';
         run.status = 'closed';
@@ -1319,6 +1305,7 @@ export function apply(ctx, rawConfig) {
           created: result.created,
           reused: result.reused,
           skipped: result.skipped.length,
+          suppressed: result.suppressed.length,
           auto: true,
         });
       } else {
@@ -1341,7 +1328,29 @@ export function apply(ctx, rawConfig) {
           state.lessons = await store.lessonsText();
         }
       }
-      await store.journal('run.auto', run.id, { proposals: proposals.length, autoAdopt: config.autoAdopt });
+      if (config.autoEvaluate) {
+        // Adopt → re-measure is the whole point of the loop; leaving it to a
+        // manual status call meant no adoption was ever verified (audit 2026-11-22:
+        // 3 adopted, 0 evaluations on disk).
+        const evaluation = await evaluateAdoptedProposals(store, { onlyUnevaluated: false });
+        if (evaluation.evaluated.length) {
+          await store.journal('proposal.evaluate', 'adopted', {
+            evaluated: evaluation.evaluated.length,
+            adopted: evaluation.adopted,
+            verdicts: evaluation.evaluated.map((proposal) => ({
+              id: proposal.id,
+              metric: proposal.evaluation ? proposal.evaluation.metric : null,
+              verdict: proposal.evaluation ? proposal.evaluation.verdict : null,
+            })),
+            auto: true,
+          });
+        }
+      }
+      await store.journal('run.auto', run.id, {
+        proposals: proposals.length,
+        autoAdopt: config.autoAdopt,
+        autoEvaluate: config.autoEvaluate,
+      });
     } catch (error) {
       state.lastError = error;
     }

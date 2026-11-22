@@ -134,6 +134,36 @@ await check('planProposals: a run with no findings creates nothing', () => {
   assert.deepEqual(plan.proposals, []);
 });
 
+await check('planProposals: advisory findings are suppressed unless includeAdvisories is set', () => {
+  const run = {
+    id: 'run-adv',
+    act: {
+      findings: [
+        {
+          id: 'f-R1-1',
+          rule: 'R1',
+          severity: 'high',
+          title: 'Tool "edit" fails 26.6% of calls',
+          detail: '107 of 402 calls to edit failed.',
+          metric: 'toolErrorRate',
+          evidence: [],
+          tool: 'edit',
+          count: 107,
+          advice: 'Rewrite the tool description.',
+        },
+      ],
+    },
+  };
+  const byDefault = planProposals(run, { existing: [] });
+  assert.deepEqual(byDefault.proposals, []);
+  assert.equal(byDefault.suppressed.length, 1);
+  assert.equal(byDefault.suppressed[0].reason, 'advisory-not-adoptable');
+  const legacy = planProposals(run, { existing: [], includeAdvisories: true });
+  assert.equal(legacy.proposals.length, 1);
+  assert.equal(legacy.proposals[0].kind, 'advisory');
+  assert.deepEqual(legacy.suppressed, []);
+});
+
 await check('sync: idempotent (second pass is skipped)', async () => {
   const { store } = await makeStore();
   const first = await store.sync();

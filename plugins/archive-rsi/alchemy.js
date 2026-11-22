@@ -1542,11 +1542,19 @@ export function proposalFingerprint(proposal) {
  * new evidence.
  *
  * @param {object} run PdcaRun
- * @param {{existing?: object[], now?: number}} [options]
- * @returns {{proposals: object[], reused: object[], skipped: Array<{fingerprint: string, id: string, reason: string}>}}
+ * @param {{existing?: object[], now?: number, includeAdvisories?: boolean}} [options]
+ *   `includeAdvisories` (default false) keeps the pre-0.5.0 behavior of storing
+ *   an `advisory` proposal per observation; the default suppresses them into
+ *   `suppressed` because their kind cannot be adopted.
+ * @returns {{proposals: object[], reused: object[], skipped: Array<{fingerprint: string, id: string, reason: string}>, suppressed: Array<{fingerprint: string, findingId: string, title: string, reason: string}>}}
  */
 export function planProposals(run, options = {}) {
   const source = asObject(run);
+  // Advisories are not actionable through `rsi_apply adopt` (the apply path
+  // refuses the kind outright), so by default they are NOT turned into stored
+  // proposals: they stay in `run.act.findings`, which the panel already renders.
+  // Profiles that want the old proposal-per-advisory list set this to true.
+  const includeAdvisories = asObject(options).includeAdvisories === true;
   const now = resolveNow(options, source);
   const runId = typeof source.id === 'string' ? source.id : '';
   const targets = {
@@ -1570,6 +1578,7 @@ export function planProposals(run, options = {}) {
   const proposals = [];
   const reused = [];
   const skipped = [];
+  const suppressed = [];
   const seen = new Set();
   for (const finding of findings) {
     for (const entry of proposalDrafts(finding, targets)) {
@@ -1579,6 +1588,15 @@ export function planProposals(run, options = {}) {
         expectedMetric: entry.expectedMetric,
         title: entry.title || finding.title,
       });
+      if (entry.kind === 'advisory' && !includeAdvisories) {
+        suppressed.push({
+          fingerprint: entry.kind + '|' + entry.expectedMetric + '|' + String(entry.title || finding.title),
+          findingId: String(finding.id || ''),
+          title: entry.title || finding.title,
+          reason: 'advisory-not-adoptable',
+        });
+        continue;
+      }
       if (!fingerprint || seen.has(fingerprint)) continue;
       seen.add(fingerprint);
       const match = known.get(fingerprint);
@@ -1619,7 +1637,7 @@ export function planProposals(run, options = {}) {
       });
     }
   }
-  return { proposals, reused, skipped };
+  return { proposals, reused, skipped, suppressed };
 }
 
 /** Proposals this run would create, ignoring what is already stored. */

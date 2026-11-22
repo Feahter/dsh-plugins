@@ -36,7 +36,7 @@ const archiveModule = await import(pathToFileURL(path.join(HERE, 'archive.js')).
 const alchemyModule = await import(pathToFileURL(path.join(HERE, 'alchemy.js')).href);
 const workspaceArchiveModule = await import(pathToFileURL(path.join(HERE, 'workspace-archive.js')).href);
 
-const { readConfig, finishCheck } = indexModule;
+const { readConfig, finishCheck, evaluateAdoptedProposals } = indexModule;
 const {
   ArchiveStore,
   scanZstdFrames,
@@ -374,10 +374,13 @@ async function applyPlugin(options) {
 }
 
 async function callTool(stub, name, args = {}, agentId = 'session-verify') {
-  const definition = stub.state.tools.get(name);
-  if (!definition) throw new Error(`tool ${name} is not registered`);
+  const legacy = LEGACY_TOOL_NAMES[name];
+  const toolName = legacy ? legacy[0] : name;
+  const payload = legacy ? { action: legacy[1], ...args } : args;
+  const definition = stub.state.tools.get(toolName);
+  if (!definition) throw new Error(`tool ${toolName} is not registered`);
   const exec = agentId ? { agent: { id: agentId } } : {};
-  return definition.execute(args, exec);
+  return definition.execute(payload, exec);
 }
 
 // ============================================================== http fixtures
@@ -678,41 +681,55 @@ async function expectCodedError(fn, codePattern, what) {
 }
 
 const REQUIRED_ARGS = {
-  archive_get: ['id'],
-  archive_update: ['id'],
-  archive_delete: ['id'],
-  rsi_act: ['runId'],
-  rsi_adopt: ['proposalId'],
+  session_archive: ['action'],
+  rsi: ['action'],
+  rsi_apply: ['action'],
 };
 
-const TOOL_NAMES = [
-  'archive_list',
-  'archive_get',
-  'archive_sync',
-  'archive_update',
-  'archive_autotag',
-  'archive_delete',
-  'rsi_plan',
-  'rsi_run',
-  'rsi_act',
-  'rsi_status',
-  'rsi_adopt',
-];
+// 0.5.0 merged the eleven tools into three (`action` switches the operation).
+// The behavioral checks below are still written against the old names; this map
+// is the only place that translation lives, so a check body keeps asserting the
+// same thing about the same action.
+const LEGACY_TOOL_NAMES = {
+  archive_list: ['session_archive', 'list'],
+  archive_sync: ['session_archive', 'sync'],
+  archive_get: ['session_archive', 'read'],
+  archive_update: ['session_archive', 'update'],
+  archive_autotag: ['session_archive', 'autotag'],
+  archive_delete: ['session_archive', 'delete'],
+  rsi_plan: ['rsi', 'plan'],
+  rsi_run: ['rsi', 'run'],
+  rsi_status: ['rsi', 'status'],
+  rsi_act: ['rsi_apply', 'act'],
+  rsi_adopt: ['rsi_apply', 'adopt'],
+};
 
+const TOOL_NAMES = ['session_archive', 'rsi', 'rsi_apply'];
+
+// One wrong-typed fixture per tool: every declared field present with the wrong
+// JSON type, plus a valid `action` so the dispatch is reached.
 const BAD_ARGS = {
-  archive_list: { query: [], tag: 5, status: 7, workspace: {}, limit: 'many', offset: 'x', archived: 'yes' },
-  archive_get: { id: 42, transcript: 'yes', maxChars: 'wide' },
-  archive_sync: { refresh: 'yes' },
-  archive_update: { id: {}, title: 5, tags: 'release', status: 9, note: [] },
-  // `no-such-session` keeps the wrong-typed execution read-only: unknown ids are
-  // rejected before the dry-run flag matters.
-  archive_autotag: { id: 'no-such-session', dryRun: 'yes', limit: 'many' },
-  archive_delete: { id: [], purge: 'yes' },
-  rsi_plan: { days: 'x', workspace: [], tag: {}, limit: 'x', targets: 'nope' },
-  rsi_run: { runId: 5, days: 'x', workspace: [], limit: {}, targets: 5 },
-  rsi_act: { runId: 5 },
-  rsi_status: { runId: [], limit: 'x' },
-  rsi_adopt: { proposalId: {}, revert: 'yes', dryRun: 'y' },
+  session_archive: {
+    action: 7,
+    id: 42,
+    query: [],
+    tag: 5,
+    status: 7,
+    workspace: {},
+    archived: 'yes',
+    limit: 'many',
+    offset: 'x',
+    transcript: 'yes',
+    maxChars: 'wide',
+    refresh: 'yes',
+    title: 5,
+    tags: 'release',
+    note: [],
+    dryRun: 'yes',
+    purge: 'yes',
+  },
+  rsi: { action: 'plan', days: 'x', workspace: [], tag: {}, status: 9, limit: {}, targets: 'nope', runId: [], evaluate: 'y' },
+  rsi_apply: { action: 'adopt', runId: 5, proposalId: {}, revert: 'yes', dryRun: 'y' },
 };
 
 // ======================================================================= phases
@@ -736,6 +753,8 @@ async function phaseConfig() {
     // "contract revision" note printed in the header.
     autoRunEveryDays: 7,
     autoPropose: true,
+    advisoryProposals: false,
+    autoEvaluate: true,
   };
 
   try {
@@ -1831,7 +1850,7 @@ async function phasePdca() {
       },
     };
     const mismatches = [];
-    const first = planProposals(run, { now: 2000, agentsFile: '/tmp/agents.md', skillsRoot: '/tmp/skills' });
+    const first = planProposals(run, { now: 2000, agentsFile: '/tmp/agents.md', skillsRoot: '/tmp/skills', includeAdvisories: true });
     if (first.proposals.length !== 1) mismatches.push(`two same-tool findings must collapse to one proposal, got ${first.proposals.length}`);
     const fp = first.proposals[0] && first.proposals[0].fingerprint;
     if (!fp) mismatches.push('the proposal carries no fingerprint');
@@ -1842,15 +1861,15 @@ async function phasePdca() {
     });
     if (other !== fp) mismatches.push(`fingerprint drifted with the count: ${JSON.stringify({ fp, other })}`);
 
-    const reused = planProposals(run, { now: 3000, existing: first.proposals });
+    const reused = planProposals(run, { now: 3000, existing: first.proposals, includeAdvisories: true });
     if (reused.proposals.length !== 0 || reused.reused.length !== 1) {
       mismatches.push(`an open duplicate must be reused (created ${reused.proposals.length}, reused ${reused.reused.length})`);
     }
-    const adopted = planProposals(run, { now: 3000, existing: [{ ...first.proposals[0], status: 'adopted' }] });
+    const adopted = planProposals(run, { now: 3000, existing: [{ ...first.proposals[0], status: 'adopted' }], includeAdvisories: true });
     if (adopted.proposals.length !== 0 || adopted.skipped.length !== 1) {
       mismatches.push(`an adopted proposal must not be re-proposed (created ${adopted.proposals.length}, skipped ${adopted.skipped.length})`);
     }
-    const rejected = planProposals(run, { now: 3000, existing: [{ ...first.proposals[0], status: 'rejected' }] });
+    const rejected = planProposals(run, { now: 3000, existing: [{ ...first.proposals[0], status: 'rejected' }], includeAdvisories: true });
     if (rejected.proposals.length !== 1) {
       mismatches.push(`a rejected proposal may be proposed again, got ${rejected.proposals.length}`);
     }
@@ -1858,6 +1877,66 @@ async function phasePdca() {
     return `1 proposal for 2 same-tool findings; reuse/adopted/rejected semantics hold (${fp.slice(0, 40)}…)`;
   });
 }
+
+  await check('PDC.6', 'evaluateAdoptedProposals persists a verdict for an adopted proposal (the boot-run closing step)', async () => {
+    assert(typeof evaluateAdoptedProposals === 'function', 'evaluateAdoptedProposals is not exported');
+    const fact = (id, createdAt, errors) => {
+      const row = makeFacts({ sessionId: id, createdAt });
+      row.counters.toolCalls = 10;
+      row.counters.toolErrors = errors;
+      return row;
+    };
+    const facts = [
+      fact('before-1', 1_000, 1),
+      fact('before-2', 2_000, 1),
+      fact('before-3', 3_000, 1),
+      fact('after-1', 6_000, 5),
+      fact('after-2', 7_000, 5),
+      fact('after-3', 8_000, 5),
+    ];
+    const saved = [];
+    const proposal = {
+      id: 'prop-20260101-000000-eval',
+      kind: 'prompt-section',
+      target: '/tmp/lessons.md',
+      status: 'adopted',
+      createdAt: 500,
+      adoptedAt: 5_000,
+      expectedMetric: 'toolErrorRate',
+      expectedEffect: 'decrease',
+      evaluation: null,
+    };
+    const fakeStore = {
+      async listProposals() { return [proposal]; },
+      async saveProposal(next) { saved.push(next); return next; },
+      async index() {
+        return { entries: Object.fromEntries(facts.map((item) => [item.sessionId, { id: item.sessionId, status: 'archived', createdAt: item.createdAt }])) };
+      },
+      async list() {
+        return { entries: facts.map((item) => ({ id: item.sessionId, status: 'archived', createdAt: item.createdAt, tags: [] })), total: facts.length };
+      },
+      async get(id) {
+        const item = facts.find((row) => row.sessionId === id);
+        return item ? { entry: { id }, facts: item } : null;
+      },
+    };
+    const result = await evaluateAdoptedProposals(fakeStore, { onlyUnevaluated: false });
+    const mismatches = [];
+    if (result.evaluated.length !== 1) mismatches.push(`evaluated: expected 1, got ${result.evaluated.length}`);
+    if (saved.length !== 1) mismatches.push(`saveProposal calls: expected 1, got ${saved.length}`);
+    const evaluation = saved[0] && saved[0].evaluation;
+    if (!evaluation) mismatches.push('the saved proposal carries no evaluation');
+    else {
+      if (evaluation.verdict !== 'regressed') mismatches.push(`verdict: expected regressed (0.1 -> 0.5 with expectedEffect decrease), got ${JSON.stringify(evaluation.verdict)}`);
+      if (evaluation.metric !== 'toolErrorRate') mismatches.push(`metric: expected toolErrorRate, got ${JSON.stringify(evaluation.metric)}`);
+      if (!(evaluation.before.sessions === 3 && evaluation.after.sessions === 3)) mismatches.push(`sessions: expected 3/3, got ${evaluation.before.sessions}/${evaluation.after.sessions}`);
+    }
+    // A second pass with onlyUnevaluated keeps the existing verdict and writes nothing.
+    const again = await evaluateAdoptedProposals({ ...fakeStore, async listProposals() { return saved; } }, { onlyUnevaluated: true });
+    if (again.evaluated.length !== 0) mismatches.push(`second pass re-evaluated ${again.evaluated.length} proposal(s)`);
+    if (mismatches.length) throw new Error(mismatches.join('; '));
+    return `verdict ${evaluation.verdict} (before ${evaluation.before.sessions} / after ${evaluation.after.sessions}), second pass idle`;
+  });
 
 async function phaseAdoption() {
   console.log('\n# 8. proposal adoption (DESIGN §6.1)');
@@ -2035,14 +2114,19 @@ async function phaseWiring() {
   const root = path.join(base, 'root');
   const stub = await applyPlugin({ config: { rootDir: root } });
 
-  await check('WIR.1', 'apply() registers exactly the 11 §7.3 tools with valid definitions', () => {
+  await check('WIR.1', 'apply() registers exactly the 3 consolidated tools with valid definitions', () => {
     const names = [...stub.state.tools.keys()];
     const mismatches = [];
-    if (names.length !== 11) mismatches.push(`tool count: expected 11, got ${names.length} (${names.join(', ')})`);
+    if (names.length !== 3) mismatches.push(`tool count: expected 3, got ${names.length} (${names.join(', ')})`);
     if (new Set(names).size !== names.length) mismatches.push('tool names are not unique');
     for (const expected of TOOL_NAMES) if (!names.includes(expected)) mismatches.push(`missing tool ${expected}`);
     for (const extra of names.filter((name) => !TOOL_NAMES.includes(name))) mismatches.push(`unexpected tool ${extra}`);
-    if (!names.includes('archive_autotag')) mismatches.push('§7.3 tool archive_autotag is not registered');
+    for (const name of names) {
+      const schema = stub.state.tools.get(name).parameters;
+      if (!Array.isArray(schema.required) || !schema.required.includes('action')) mismatches.push(`${name}: \`action\` is not a required parameter`);
+      const action = schema.properties && schema.properties.action;
+      if (!action || !Array.isArray(action.enum) || action.enum.length < 2) mismatches.push(`${name}: action enum is missing or too small`);
+    }
     for (const [name, definition] of stub.state.tools) {
       if (typeof definition.description !== 'string' || definition.description.length < 20) mismatches.push(`${name}: description too short`);
       if (!definition.parameters || definition.parameters.type !== 'object') mismatches.push(`${name}: parameters are not an object schema`);
@@ -2050,7 +2134,7 @@ async function phaseWiring() {
       if (!definition.output || typeof definition.output.render !== 'function') mismatches.push(`${name}: output.render() missing`);
     }
     if (mismatches.length) throw new Error(mismatches.join('; '));
-    return `11 tools: ${names.join(', ')}`;
+    return `3 tools: ${names.join(', ')}`;
   });
 
   await check('WIR.2', 'exactly one prompt section named tool:archive-rsi with a finite numeric order', () => {
@@ -2102,6 +2186,18 @@ async function phaseWiring() {
     }
     if (problems.length) throw new Error(problems.join('; '));
     return `${stub.state.tools.size} tools`;
+  });
+
+  await check('WIR.6', 'the three tool schemas stay under the 6KB catalog budget (0.5.0 consolidation)', () => {
+    let total = 0;
+    const parts = [];
+    for (const [name, definition] of stub.state.tools) {
+      const bytes = Buffer.byteLength(JSON.stringify({ name, description: definition.description, parameters: definition.parameters }));
+      total += bytes;
+      parts.push(`${name}=${bytes}`);
+    }
+    if (total > 6144) throw new Error(`tool catalog is ${total} bytes (> 6144): ${parts.join(', ')}`);
+    return `${total} bytes: ${parts.join(', ')}`;
   });
 
   await check('WIR.5', 'with syncOnBoot:false nothing is imported and no run is written before the first tool call', async () => {
@@ -2232,6 +2328,33 @@ async function phaseBadArgs() {
     }
     if (problems.length) throw new Error(problems.join('; '));
     return `${cases.length + 1} unknown-id calls`;
+  });
+  await check('BAD.4', 'a valid action tolerates wrong-typed optional fields instead of throwing', async () => {
+    const lenient = {
+      session_archive: { action: 'list', query: [], tag: 5, status: 7, workspace: {}, archived: 'yes', limit: 'many', offset: 'x' },
+      rsi: { action: 'status', limit: 'x', runId: [], evaluate: 'y' },
+    };
+    const problems = [];
+    for (const [name, args] of Object.entries(lenient)) {
+      let result;
+      try {
+        result = await callTool(stub, name, args);
+      } catch (error) {
+        problems.push(`${name}: threw ${(error && error.message) || error}`);
+        continue;
+      }
+      if (!result || typeof result !== 'object') problems.push(`${name}: returned ${JSON.stringify(result)}`);
+      else if (typeof result.ok !== 'boolean') problems.push(`${name}: ok is ${typeof result.ok}`);
+      else if (result.ok === true) {
+        try {
+          JSON.stringify(result);
+        } catch {
+          problems.push(`${name}: result is not JSON-serializable`);
+        }
+      }
+    }
+    if (problems.length) throw new Error(problems.join('; '));
+    return `${Object.keys(lenient).length} tools coerce junk optional fields`;
   });
 }
 
@@ -2482,10 +2605,10 @@ async function phaseRoutes() {
       },
       act: {
         findings: [{
-          id: 'f-R1-1', rule: 'R1', severity: 'high', title: 'Tool "edit" fails 40.0% of calls',
-          detail: '4 of 10 calls to edit failed (40.0%).',
-          metric: 'toolErrorRate', evidence: [{ sessionId: 'session-route-1', seq: 12 }],
-          tool: 'edit', count: 4, advice: 'Rewrite the edit tool description.',
+          id: 'f-R6-1', rule: 'R6', severity: 'high', title: 'Context peak reached 92.0% of the window (3 sessions)',
+          detail: 'The p90 peak context ratio was 0.92 and 3 sessions went over the alert threshold.',
+          metric: 'peakContextRatioP90', evidence: [{ sessionId: 'session-route-1', seq: 12 }],
+          tool: null, count: 3, advice: 'Summarize long tool output before the next step.',
         }, {
           id: 'f-R4-1', rule: 'R4', severity: 'high', title: 'No verification after the last edit (75.0%)',
           detail: '3 of 4 sessions with edits ran no check command after the final edit.',
@@ -2554,9 +2677,9 @@ async function phaseRoutes() {
       check: { metrics: { sessions: 1 }, perSession: [], verdicts: [], deltas: [] },
       act: {
         findings: [{
-          id: 'f-R1-1', rule: 'R1', severity: 'high', title: 'Tool "edit" fails 40.0% of calls',
-          detail: '4 of 10 calls to edit failed (40.0%).', metric: 'toolErrorRate',
-          evidence: [], tool: 'edit', count: 4, advice: 'Rewrite the edit tool description.',
+          id: 'f-R6-1', rule: 'R6', severity: 'high', title: 'Context peak reached 92.0% of the window (3 sessions)',
+          detail: 'The p90 peak context ratio was 0.92 and 3 sessions went over the alert threshold.', metric: 'peakContextRatioP90',
+          evidence: [], tool: null, count: 3, advice: 'Summarize long tool output before the next step.',
         }],
         proposalIds: [],
       },

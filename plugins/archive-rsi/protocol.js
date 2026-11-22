@@ -20,16 +20,19 @@ export function protocolText() {
   return [
     '## Session archive + PDCA alchemy',
     '',
-    '`~/.dsh/sessions` is append-only history. `archive_*` tools give it curation',
-    'the harness lacks: sync, tag, note, pin, trash, read, delete.',
+    '`~/.dsh/sessions` is append-only history. Three tools curate and mine it:',
+    '- `session_archive` — action: list | sync | read | update | autotag | delete.',
+    '  Curation the harness lacks: tags, notes, pin/trash, transcript pages.',
+    '- `rsi` — action: plan | run | status. `run` syncs, computes the cohort',
+    '  metrics and compares them with targets and the previous run; `status`',
+    '  re-measures adopted proposals against the sessions after adoption.',
+    '- `rsi_apply` — action: act | adopt. `act` turns a run\'s findings into',
+    '  proposals (prompt lessons, AGENTS.md rules, skill candidates); `adopt`',
+    '  applies or reverts one (backup first, reversible).',
     '',
-    '`rsi_*` tools run a PDCA loop over that archive:',
-    '- `rsi_plan` fixes a cohort and target metrics; `rsi_run` does plan+do+check;',
-    '- `rsi_act` turns findings into proposals; `rsi_adopt` applies one (reversible);',
-    '- `rsi_status` re-evaluates adopted proposals against later sessions.',
-    '',
-    'Prefer a run over guessing when asked "why is this session style expensive".',
-    'Never adopt a proposal without reading its evidence. Adopted lessons appear below.',
+    'Prefer a `rsi` run over guessing when asked "why is this session style',
+    'expensive". Never adopt a proposal without reading its evidence. Adopted',
+    'lessons appear below.',
   ].join('\n');
 }
 
