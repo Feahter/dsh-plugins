@@ -353,7 +353,7 @@ async function selectCohort(store, cohort, now) {
  * Run the check phase and guarantee the act-phase input exists.
  *
  * `executeCheck` owns this per the contract, but findings are the one field a
- * caller must not have to guess about: without them `rsi_act` has nothing to
+ * caller must not have to guess about: without them `rsi_apply` action:"act" has nothing to
  * turn into proposals, and a silent empty act phase looks like "no problems".
  */
 export function finishCheck(run, facts, baselineMetrics) {
@@ -404,7 +404,7 @@ function runCohort(args, config) {
 /**
  * plan -> do -> check, persisted.
  *
- * Shared by `rsi_plan` (plan only), `rsi_run` and the boot-time auto run, so the
+ * Shared by `rsi` plan, `rsi` run and the boot-time auto run, so the
  * continuous loop and the on-demand loop can never drift apart.
  */
 async function runOnce({ store, config, args, execute, ensureReady }) {
@@ -471,7 +471,7 @@ async function runOnce({ store, config, args, execute, ensureReady }) {
  *
  * Idempotent twice over: a run that already owns resolvable proposals returns
  * them untouched, and content-identical proposals are reused rather than
- * duplicated across runs. Shared by `rsi_act`, `POST /runs/:id/act` and the
+ * duplicated across runs. Shared by `rsi_apply` action:"act", `POST /runs/:id/act` and the
  * boot-time auto run so the three paths cannot drift.
  *
  * @param {{store: object, run: object}} input
@@ -516,7 +516,7 @@ async function actOnRun({ store, run, config = DEFAULTS }) {
  * Re-measure adopted proposals against the sessions that came after adoption.
  *
  * This is the "closing half" of the loop (DESIGN §6). It used to live only
- * behind `rsi_status`, which nothing ever called, so no adoption was ever
+ * behind `rsi action:"status"`, which nothing ever called, so no adoption was ever
  * verified. It is now shared by the status action and the boot-time auto run,
  * which is what makes "adopt → re-measure" automatic instead of aspirational.
  *
@@ -1150,7 +1150,7 @@ async function route({ store, paths, config, url, segments, method, body, ensure
     }
     if (method === 'POST') {
       // Reuse the shared `runOnce` pipeline so the panel-triggered run writes
-      // the journal and behaves exactly like `rsi_run` / the auto run.
+      // the journal and behaves exactly like `rsi` action:"run" / the auto run.
       const run = await runOnce({ store, config, args: body, execute: true, ensureReady });
       return { payload: { ok: true, run } };
     }
