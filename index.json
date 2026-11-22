@@ -400,8 +400,8 @@
         "zh": "归档会话与 PDCA 炼金"
       },
       "description": {
-        "zh": "0.4.1 修转写阅读窗分页：加载更多不再把过期页拼进当前转写，切换会话不再残留上一份的加载状态；服务端分页真正按 maxChars 截断（不再预留字节），maxChars 传 0 回退默认值。归档会话（标签/备注/检索/回收站，只读镜像 Harness 的归档开关、不改原始会话文件）与 PDCA 炼金（本地算指标、生成上下文补丁、采纳可回滚）不变，数据在 ~/.dsh/archive-rsi/。",
-        "en": "0.4.1 fixes transcript paging in the reading pane: load-more no longer appends a page that belongs to a session you already left, switching sessions no longer keeps the previous loading state, the server spends the whole maxChars budget per page, and maxChars=0 falls back to the default. Session curation (tags, notes, search, trash — a read-only mirror of the Harness archive flag, never touching original session files) and the PDCA loop (local metrics, context patches, reversible adoption) are unchanged; data lives in ~/.dsh/archive-rsi/."
+        "zh": "0.5.0 把常驻工具面从 11 个压到 3 个（session_archive 归档；rsi 计划/运行/状态；rsi_apply 采纳/回滚），工具 schema 7352B → 5231B，省掉的目录开销是你每一步都要付的；每次启动的自动 run 结束后会自己重估已采纳提案（采纳点两侧各取一半会话，判决写进提案），「改完上下文 → 再度量」不再靠人记得去查；不可采纳的只读建议不再落成提案，只留在发现里。数据仍在 ~/.dsh/archive-rsi/，只读镜像 Harness 的归档开关、不改原始会话文件。",
+        "en": "0.5.0 compresses the resident tool surface from eleven tools to three (session_archive for curation, rsi for plan/run/status, rsi_apply for act/adopt); the tool catalog shrinks from 7352 B to 5231 B, which is context you pay for every step. The boot-time run now re-measures adopted patches on its own, sampling sessions on both sides of each adoption and recording the verdict; unadoptable advisories stay findings instead of becoming proposals. Data lives in ~/.dsh/archive-rsi/ — a read-only mirror of the Harness archive flag that never modifies original session files."
       },
       "icon": "plugins/archive-rsi/icon.svg",
       "author": "Feahter",
@@ -428,10 +428,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795091455
+          "updated": 1795347964
         }
       },
       "versions": [
+        {
+          "version": "0.5.0",
+          "publishTimestamp": 1795347964,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "85a08cf0ae8d1af0c7cefbb50300b84c445e80d3",
+            "path": "plugins/archive-rsi"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.4.1",
           "publishTimestamp": 1795091455,
