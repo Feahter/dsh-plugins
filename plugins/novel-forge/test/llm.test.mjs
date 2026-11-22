@@ -184,7 +184,7 @@ test('escalate:false：长章正文不整篇重生成，直接把半截稿交给
   assert.equal(service.calls.length, 1, '不该再抬预算重跑一次')
 })
 
-test('截断且一个字都没吐：推理烧光预算时加倍再试（7000→14000→16000），不认 escalate:false', async () => {
+test('截断且一个字都没吐：先关思考（预算不变），仍空才加倍（7000→7000→14000），不认 escalate:false', async () => {
   const service = fakeService(() => textStream([], { finish: { kind: 'max_tokens' } }))
   const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
   await assert.rejects(
@@ -195,13 +195,19 @@ test('截断且一个字都没吐：推理烧光预算时加倍再试（7000→1
       return true
     },
   )
+  // 第二枪关思考但不加预算；第三枪才加倍。300 章的项目里，多花一枪输入远比「加倍 + 关思考」
+  // 一起上便宜，而且多数情况下第二枪就成。
   assert.deepEqual(
     service.calls.map((call) => call.args.maxTokens),
-    [7000, 14000, 16000],
+    [7000, 7000, 14000],
+  )
+  assert.deepEqual(
+    service.calls.map((call) => call.config.reasoningEffort),
+    [undefined, 'off', 'off'],
   )
 })
 
-test('截断且空文本：预算加倍后就写出了正文', async () => {
+test('截断且空文本：关思考之后写出了正文（预算不变）', async () => {
   const service = fakeService((index) =>
     index === 0
       ? textStream([], { finish: { kind: 'max_tokens' } })
@@ -211,7 +217,8 @@ test('截断且空文本：预算加倍后就写出了正文', async () => {
   const result = await gw.generate({ user: '写一章', maxTokens: 7000, escalate: false })
   assert.match(result.text, /写出来了/)
   assert.equal(service.calls.length, 2)
-  assert.equal(service.calls[1].args.maxTokens, 14000)
+  assert.equal(service.calls[1].args.maxTokens, 7000)
+  assert.equal(service.calls[1].config.reasoningEffort, 'off')
 })
 
 test('截断后抬预算成功：返回正文，并记下尝试次数', async () => {
@@ -309,4 +316,74 @@ test('JSON 抢救：推理前的碎片、尾逗号、注释都不该让整段调
   assert.deepEqual(extractJson('{"a":1 // 说明\n,"b":2}'), { a: 1, b: 2 })
   // 字符串里的 ,} 是正文，不能被修复逻辑改坏
   assert.deepEqual(extractJson('{"text":"他说,}","list":[1,2],}'), { text: '他说,}', list: [1, 2] })
+})
+
+// ---- 2026-11-22 真实事故回归：推理吃掉输出预算，正文 0 字撞上限 ----
+// 那次只做了「加倍预算」：8800 → 16000 两枪都 0 字，整炉失败。
+// 修法：空正文截断先关思考（不动预算），关不掉才谈加倍。
+
+function thinkingStream(pieces, { finish = { kind: 'max_tokens' } } = {}) {
+  return (async function* () {
+    for (const piece of pieces) yield { type: 'reasoning-delta', text: piece }
+    yield { type: 'finish', reason: finish }
+  })()
+}
+
+test('空正文截断：先关思考重试（预算不变），第二枪写出正文', async () => {
+  const service = fakeService((index) =>
+    index === 0
+      ? thinkingStream(['先分析一下这一章该怎么写。'.repeat(20)])
+      : textStream(['雨声灌了进来，他推开门。'], { finish: { kind: 'stop' } }),
+  )
+  const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
+  const result = await gw.generate({ user: '写第一章', maxTokens: 7000, escalate: false })
+  assert.match(result.text, /雨声灌了进来/)
+  assert.equal(service.calls.length, 2)
+  // 第一枪沿用宿主档位；第二枪必须明确关思考
+  assert.equal(service.calls[0].config.reasoningEffort, undefined)
+  assert.equal(service.calls[1].config.reasoningEffort, 'off')
+  // 关思考不靠预算，maxTokens 不该变
+  assert.equal(service.calls[1].args.maxTokens, 7000)
+})
+
+test('思考增量不进正文，只用来解释空正文截断', async () => {
+  const service = fakeService(() => thinkingStream(['想一想。', '再想一想。']))
+  const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
+  await assert.rejects(
+    () => gw.generate({ user: '写一章', maxTokens: 8000, escalate: false }),
+    (err) => {
+      assert.equal(err.code, 'LLM_TRUNCATED')
+      assert.equal(err.detail.chars, 0)
+      assert.equal(err.detail.empty, true)
+      assert.equal(err.detail.reasoningChars, 9)
+      // 提示要指向真因（思考），而不是「章太长」
+      assert.match(err.message, /思考/)
+      return true
+    },
+  )
+})
+
+test('宿主不支持 reasoningEffort：去掉档位再准备一次，正文照写', async () => {
+  const calls = []
+  const service = {
+    async prepareCall(config) {
+      if (config.reasoningEffort === 'off') {
+        const err = new Error('llm: host does not support reasoning effort "off"')
+        err.code = 'UNSUPPORTED_REASONING_EFFORT'
+        throw err
+      }
+      return {
+        config,
+        async stream(args) {
+          calls.push({ config, args })
+          return textStream(['正文照写。'])
+        },
+      }
+    },
+  }
+  const gw = createLlmGateway({ service, resolveModel: MODEL, ...fast })
+  const result = await gw.generate({ user: '写一章', maxTokens: 4000, reasoningEffort: 'off' })
+  assert.equal(result.text, '正文照写。')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].config.reasoningEffort, undefined)
 })

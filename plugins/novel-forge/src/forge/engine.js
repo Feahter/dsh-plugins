@@ -122,7 +122,15 @@ export class ForgeEngine {
 
   /** 项目是否被一次 run 或一次「续写本章」占着。 */
   #busy(projectId) {
-    return this.live.has(projectId) || this.continuing.has(projectId)
+    if (this.continuing.has(projectId)) return true
+    const live = this.live.get(projectId)
+    if (!live) return false
+    // 已经收敛到终态（done/error/cancelled）的 run 不再算「占着项目」。
+    // 收尾顺序是「先 saveProject、再把 run.status 改成终态、再落盘 run」，
+    // live 要等 promise.finally 才摘掉；中间这段窗口里 getRun 已经看到 done，
+    // 调用方（测试、UI 的「接着改」）随后立刻写产物就会吃到假的 RUN_ACTIVE。
+    // 2026-11-22 修：以前这里只看 live 有没有键，集成测试在整库并发下稳定复现。
+    return live.run.status === 'running' || live.run.status === 'paused'
   }
 
   #recipe(recipeId) {

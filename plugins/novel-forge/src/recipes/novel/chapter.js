@@ -1054,7 +1054,13 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
       if (error?.code !== 'LLM_TRUNCATED') throw error
       calls += 1
       result = await retryCutJson(
-        ({ extra, maxTokens }) => llm.generate({ ...request, user: `${request.user}\n\n${extra}`, maxTokens }),
+        // 截断的一枪多半是「思考 + JSON」一起吃预算：补枪关思考，把预算还给 JSON 本身。
+        ({ extra, maxTokens }) => llm.generate({
+          ...request,
+          user: `${request.user}\n\n${extra}`,
+          maxTokens,
+          reasoningEffort: 'off',
+        }),
         request.maxTokens,
         error.detail?.text,
         error,

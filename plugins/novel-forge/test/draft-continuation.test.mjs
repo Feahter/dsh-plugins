@@ -184,3 +184,57 @@ test('draft 阶段：一枪连正文都没吐（推理烧光预算）时，换�
   assert.equal(proseCalls.length, 2)
   assert.match(String(proseCalls[1].user), /直接写正文第一句/)
 })
+
+// ---- 2026-11-22 事故回归：正文调用必须关思考，否则 4500 字的章还没开写就撞输出上限 ----
+
+test('draft 阶段：正文调用带 reasoningEffort=off，续写也带', async () => {
+  const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })
+  const outline = sampleOutlineV2({ chapters: 3 })
+  const chapter = outline.chapters[0]
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS, wordsPerChapter: 1600 },
+    item: chapter,
+    artifacts: {
+      outline: { kind: 'json', content: outline },
+      [`beats/${chapter.id}`]: { kind: 'json', content: sampleBeats(chapter.id) },
+    },
+    outputs: [
+      () => {
+        throw truncated('他推开门，雨声灌了进来。')
+      },
+      {
+        text: '门里有人叫他的名字。\n<<<SUMMARY>>>\n沈砚回到殡仪馆，听见死者叫出他父亲的名字。\n<<<CANON>>>\n{"facts":[],"threads":[]}',
+      },
+    ],
+  })
+  const stage = recipe.stages.find((item) => item.id === 'draft')
+  await stage.run(ctx)
+  const proseCalls = ctx.calls.filter((call) => call.label === 'draft')
+  assert.equal(proseCalls.length, 2)
+  for (const call of proseCalls) assert.equal(call.reasoningEffort, 'off')
+})
+
+test('draft 阶段：空正文截断后的「直接开写」那一枪同样关思考', async () => {
+  const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })
+  const outline = sampleOutlineV2({ chapters: 3 })
+  const chapter = outline.chapters[0]
+  const ctx = createFakeCtx({
+    params: { ...SAMPLE_PARAMS, wordsPerChapter: 3000 },
+    item: chapter,
+    artifacts: {
+      outline: { kind: 'json', content: outline },
+      [`beats/${chapter.id}`]: { kind: 'json', content: sampleBeats(chapter.id) },
+    },
+    outputs: [
+      () => {
+        throw truncated('')
+      },
+      { text: '第二枪终于有正文了。\n<<<SUMMARY>>>\n沈砚查清父亲的名字。\n<<<CANON>>>\n{"facts":[],"threads":[]}' },
+    ],
+  })
+  const stage = recipe.stages.find((item) => item.id === 'draft')
+  await stage.run(ctx)
+  const proseCalls = ctx.calls.filter((call) => call.label === 'draft')
+  assert.equal(proseCalls.length, 2)
+  for (const call of proseCalls) assert.equal(call.reasoningEffort, 'off')
+})

@@ -1244,5 +1244,28 @@ export function audit({ chapters = null, canon = null, outline = null, params = 
   return sortFindings(dedupeFindings(findings))
 }
 
+export function normalizeQuoteText(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+}
+
+export function validateFindingQuotes(text, findings, { downgrade = false } = {}) {
+  const list = Array.isArray(findings) ? findings : []
+  const body = normalizeQuoteText(text)
+  return list.map((finding) => {
+    const quote = normalizeQuoteText(finding.quote)
+    const length = [...quote].length
+    const quoted = length >= 8 && length <= 120 && body.includes(quote)
+    if (quoted || downgrade !== true) return { ...finding, quoted }
+
+    const severity = finding.severity === 'block' ? 'warn' : finding.severity === 'warn' ? 'note' : finding.severity
+    return { ...finding, quoted, severity, issue: `（引文未命中正文）${finding.issue}` }
+  })
+}
+
+export function countUnquotedFindings(findings) {
+  const list = Array.isArray(findings) ? findings : []
+  return list.filter((finding) => finding.quoted === false).length
+}
+
 export const defaultConsistency = { checkChapter, audit }
 export default defaultConsistency

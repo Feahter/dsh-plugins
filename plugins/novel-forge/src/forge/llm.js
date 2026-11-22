@@ -37,6 +37,31 @@ const MAX_OUTPUT_TOKENS = 16000
 const TRUNCATED_KINDS = new Set(['length', 'max_tokens', 'max-tokens', 'max_output_tokens', 'truncated'])
 const TRUNCATE_HINT =
   '（输出撞到了上限。可以调小每章目标字数，或换一个输出上限更高的模型；被截断的稿子不会当成完成品继续用下去）'
+// 推理模型把 max_tokens 同时算「思考 + 正文」：思考一长，正文可能一个字都没写出来就撞顶。
+// 2026-11-22 真实事故：草稿第 1 章连续两枪 0 字（8800 / 16000 上限），整炉失败。
+// 所以「空正文截断」要单独识别，并优先「关思考」重试一次，而不是只加倍预算。
+const REASONING_OFF = 'off'
+const REASONING_UNSUPPORTED =
+  /UNSUPPORTED_REASONING_EFFORT|does not support reasoning effort|不支持.*(推理|思考)/i
+const EMPTY_TRUNCATE_HINT =
+  '（模型把输出预算花在了“思考”上，正文 0 字——这不是章太长，而是这一枪根本没开始写正文。' +
+  '墨炉已自动关掉思考再试；仍然失败时请在 设置 → 模型 里把思考档位调低，或换一个输出上限更高的模型）'
+
+function isReasoningUnsupported(err) {
+  const code = String(err?.code ?? err?.failure?.code ?? '')
+  const message = String(err?.message ?? '')
+  return code === 'UNSUPPORTED_REASONING_EFFORT' || REASONING_UNSUPPORTED.test(message)
+}
+
+/** 思考增量：不同宿主的 chunk 形状不一，只数「思考了多少字」，不进正文。 */
+function reasoningCharsOf(chunk) {
+  const type = typeof chunk?.type === 'string' ? chunk.type : ''
+  if (!/reasoning|thinking/.test(type)) return 0
+  const piece = chunk.text ?? chunk.delta ?? chunk.content
+  if (typeof piece === 'string') return piece.length
+  if (typeof piece?.text === 'string') return piece.text.length
+  return 0
+}
 
 function finishKindOf(finish) {
   const reason = finish?.reason
@@ -189,10 +214,27 @@ export function createLlmGateway(config = {}) {
     const { provider, model } = selection
     lastModel = selection
 
-    const call = await svc.prepareCall(
-      { provider, model, maxTokens: opts.maxTokens ?? 4096, temperature: opts.temperature },
-      chosenSignal,
-    )
+    const requestedEffort =
+      typeof opts.reasoningEffort === 'string' && opts.reasoningEffort ? opts.reasoningEffort : undefined
+    const baseConfig = {
+      provider,
+      model,
+      maxTokens: opts.maxTokens ?? 4096,
+      temperature: opts.temperature,
+      ...(requestedEffort === undefined ? {} : { reasoningEffort: requestedEffort }),
+    }
+    let call
+    try {
+      call = await svc.prepareCall(baseConfig, chosenSignal)
+    } catch (err) {
+      // 宿主/模型不认识这个思考档位（老版本、非推理模型）：去掉档位再准备一次，
+      // 正文该写还是要写，不能因为一个可选旋钮让整章失败。
+      if (!requestedEffort || !isReasoningUnsupported(err)) throw err
+      call = await svc.prepareCall(
+        { provider, model, maxTokens: opts.maxTokens ?? 4096, temperature: opts.temperature },
+        chosenSignal,
+      )
+    }
     if (!call || typeof call.stream !== 'function') {
       throw new ForgeError('LLM_ERROR', '模型接口不可用（缺少 stream）')
     }
@@ -218,6 +260,7 @@ export function createLlmGateway(config = {}) {
     if (!iterable) throw new ForgeError('LLM_ERROR', '模型流不可读')
 
     let text = ''
+    let reasoningChars = 0
     let finish = null
     let usage = null
     const idleTimeout = opts.idleTimeoutMs ?? config.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
@@ -237,6 +280,9 @@ export function createLlmGateway(config = {}) {
         if (chunk.type === 'text-delta' || chunk.type === 'text' || chunk.type === 'delta') {
           const piece = chunk.text ?? chunk.delta ?? chunk.content
           if (typeof piece === 'string') text += piece
+        } else if (reasoningCharsOf(chunk) > 0) {
+          // 思考增量不进正文，但必须计数：正文 0 字撞上限时，这是唯一能解释原因的读数。
+          reasoningChars += reasoningCharsOf(chunk)
         } else if (chunk.type === 'finish' || chunk.type === 'done') {
           finish = chunk
           if (chunk.usage) usage = chunk.usage
@@ -299,10 +345,21 @@ export function createLlmGateway(config = {}) {
         // 截断的正文/JSON 是废稿：静默落盘会让后续审校、修订、摘要全部白花钱。
         // detail.text 带上已经吐出来的半截稿：长章正文可以拿它当锚点接着写
         // （recipes/novel/continuation.js），不必因为一次撞上限就让整章作废重跑。
+        const empty = !text.trim()
+        // 空正文 + 撞上限 = 预算被思考吃光，不是章太长。提示词与重试策略都要按这个区分。
+        const hint = empty ? EMPTY_TRUNCATE_HINT : TRUNCATE_HINT
         throw new ForgeError(
           'LLM_TRUNCATED',
-          `模型输出被截断（达到输出上限 ${opts.maxTokens ?? MAX_OUTPUT_TOKENS} tokens）${TRUNCATE_HINT}`,
-          { maxTokens: opts.maxTokens ?? null, chars: text.length, kind, text: truncate(text, 60000) },
+          `模型输出被截断（达到输出上限 ${opts.maxTokens ?? MAX_OUTPUT_TOKENS} tokens）${hint}`,
+          {
+            maxTokens: opts.maxTokens ?? null,
+            chars: text.length,
+            reasoningChars,
+            empty,
+            reasoningEffort: opts.reasoningEffort ?? null,
+            kind,
+            text: truncate(text, 60000),
+          },
         )
       }
     }
@@ -358,12 +415,16 @@ export function createLlmGateway(config = {}) {
       let doublings = 0
       let attempts = 0
       let failedAttempts = 0
+      // 空正文截断的第一反应应是「关思考」：它不花钱、不动预算，直接把输出预算还给正文。
+      // 2026-11-22 真实事故里只做了「加倍预算」，8800→16000 两枪 0 字，整炉失败。
+      let reasoningEffort = typeof opts.reasoningEffort === 'string' ? opts.reasoningEffort : undefined
+      let reasoningOffTried = reasoningEffort === REASONING_OFF
 
       for (let i = 0; i < totalAttempts; i += 1) {
         if (chosenSignal?.aborted) throw abortedError()
         attempts += 1
         try {
-          const result = await attempt({ ...opts, maxTokens, signal: chosenSignal })
+          const result = await attempt({ ...opts, maxTokens, reasoningEffort, signal: chosenSignal })
           // 重试次数要能回溯：失败那几次的输入 token 是真花掉的，账不能只记成功那次。
           return { ...result, attempts, failedAttempts }
         } catch (err) {
@@ -384,6 +445,13 @@ export function createLlmGateway(config = {}) {
           if (fe.code === 'LLM_TRUNCATED') {
             const empty = !String(fe.detail?.text ?? '').trim()
             const delay = delays[Math.min(i, delays.length - 1)] ?? 1000
+            // 空正文：先关思考（正文不需要推理；宿主不支持会静默降级），再谈加倍预算。
+            if (empty && !reasoningOffTried && i < totalAttempts - 1) {
+              reasoningEffort = REASONING_OFF
+              reasoningOffTried = true
+              await abortableSleep(delay, chosenSignal)
+              continue
+            }
             if (empty && doublings < 2 && maxTokens < MAX_OUTPUT_TOKENS) {
               maxTokens = Math.min(MAX_OUTPUT_TOKENS, maxTokens * 2)
               doublings += 1

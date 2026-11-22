@@ -374,7 +374,8 @@ spine 卷表 40 行、volumeChapters 出现「本卷共 75 章，请一次给全
 
 ### 7.12 review：责任编辑，不是夸奖者
 
-- 输出严格 JSON：`{"findings":[{"severity","kind","where","issue","fix"}],"verdict"}`。
+- 输出严格 JSON：`{"findings":[{"severity","kind","where","quote","issue","fix"}],"verdict"}`。
+- 模型每条 finding 的 `quote` 必填，从【本章正文】逐字复制连续的 8–120 字。服务端折叠空白后做子串校验，在审校产物写入 `quoted` 和 `unquotedFindings`。默认只标记，不降级。
 - user 里增加【正典】（`ctx.canonText`，2200 上限），并把「正典是既成事实，正文与它冲突就是硬错」写进附录：v2 的连续性以 canon 为准，不再有单独的 ledger。
 - user 里先放【机器读数】（`ctx.craftStats`：字数/段/场/平均句长/最长句/短句占比/对话比/感官/二字组多样性/汉字种类/对话轮次/单轮均长/问句占比/对话间动作/抽象情绪/副词/AI 标记/人名密度），再放正文。0 也是有效读数，必须显示（「AI 标记 0 处」），缺字段才跳过；整段为空时渲染「无机器读数」，并明确不许编造读数。
 - 先读读数再判：读数已越界的项直接写成 finding，不重复描述；读数正常的项，不许凭感觉报同类问题。

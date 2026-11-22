@@ -81,6 +81,9 @@ test('review：三闸、机器读数与修复动作都在 system 里', () => {
 
   assert.ok(out.user.includes('【机器读数】'), 'review user 缺【机器读数】段')
   assert.ok(out.user.includes('无机器读数'), 'review user 在无读数时缺显式兜底')
+  assert.match(out.system, /逐字.*8–120/)
+  assert.match(out.user, /findings\[\]\.quote/)
+  assert.match(out.user, /"quote"\s*:\s*"[^"\n]+"/)
 })
 
 test('review：机器读数按 ctx.craftStats 渲染成读者可用的数字', () => {

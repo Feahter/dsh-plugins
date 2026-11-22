@@ -5,6 +5,7 @@
 import { z } from 'zod'
 import { createPrompts, SUMMARY_MARKER, sexOf } from './prompts/zh.js'
 import { defaultCraft, severityRank, countCjk } from './craft.js'
+import { countUnquotedFindings, validateFindingQuotes } from './consistency.js'
 import { chaptersOf } from './outline.js'
 import { characterBrief } from './ledger.js'
 import { buildPacket } from './packet.js'
@@ -116,6 +117,7 @@ const paramsSchema = {
     styleGuide: { type: 'string', maxLength: 4000 },
     autoReview: { type: 'boolean' },
     reviewGate: { type: 'boolean' },
+    quoteDowngrade: { type: 'boolean', description: '审校 finding 引文未命中正文时是否降一级（block→warn，warn→note）；默认 false，只标记不降级' },
     seed: { type: 'string', maxLength: 500 },
     protagonistGender: {
       type: 'string',
@@ -285,6 +287,7 @@ const findingSchema = z.object({
   where: z.string(),
   issue: z.string().min(1),
   fix: z.string(),
+  quote: z.string().optional(),
 })
 
 const factPatchSchema = z.union([
@@ -653,7 +656,7 @@ function promptSpec(ctx, promptFn, stage) {
   }
 }
 
-async function askJson(ctx, stage, spec, { extra, maxTokens } = {}) {
+async function askJson(ctx, stage, spec, { extra, maxTokens, reasoningEffort } = {}) {
   const result = await ctx.llm.generate({
     system: spec.system,
     user: extra ? `${spec.user}\n\n${extra}` : spec.user,
@@ -662,6 +665,7 @@ async function askJson(ctx, stage, spec, { extra, maxTokens } = {}) {
     json: true,
     phase: spec.phase ?? stage,
     label: stage,
+    ...(typeof reasoningEffort === 'string' ? { reasoningEffort } : {}),
   })
   const text = String(result?.text ?? '')
   let data = result?.json
@@ -682,8 +686,12 @@ async function callJson(ctx, stage, promptFn, schema, { phase, retryCut = true }
     text = String(error.detail?.text ?? '')
   }
   if (data === undefined && retryCut && (looksCutJson(text) || truncated)) {
+    // 截断的那一枪往往是「思考 + JSON」一起吃预算：补枪时关思考，把预算还给 JSON 本身。
     ;({ data, text } = await requireChapter().retryCutJson(
-      (options) => askJson(ctx, stage, spec, options), spec.maxTokens, text, truncated,
+      (options) => askJson(ctx, stage, spec, { ...options, reasoningEffort: 'off' }),
+      spec.maxTokens,
+      text,
+      truncated,
     ))
   }
   if (data === undefined) {
@@ -756,6 +764,11 @@ async function callText(ctx, stage, promptFn, { phase, maxTokens, temperature } 
  * 中文 1600 字的章按 wordsPerChapter*2.2 要 3520 tokens，换个输出上限低的模型就必撞；
  * 重跑同参数还会撞在同一条线上，所以只能续写。
  */
+// 正文阶段主动关思考：宿主把 max_tokens 同时算「思考 + 正文」，推理一长，
+// 4500 字的章还没开始写就撞上限（2026-11-22 真实事故：ch001 两枪 0 字，整炉失败）。
+// 写小说不需要「先想清楚再动笔」，关掉最省最稳；宿主不支持时网关会静默降级。
+const PROSE_REASONING_EFFORT = 'off'
+
 const EMPTY_TRUNCATE_NOTE = [
   '',
   '【注意】上一枪你把整个输出预算花在了思考上，正文一个字都没写出来。',
@@ -770,6 +783,7 @@ async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, tempe
     maxTokens: Number.isFinite(maxTokens) ? maxTokens : spec.maxTokens,
     temperature: Number.isFinite(temperature) ? temperature : spec.temperature,
     stage,
+    reasoningEffort: PROSE_REASONING_EFFORT,
   }
   const once = async (user) => {
     const { text, parts } = await generateWithContinuation({
@@ -785,6 +799,8 @@ async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, tempe
           json: false,
           phase: phase ?? stage,
           label: stage,
+          // 正文阶段关思考，把输出预算留给正文（见 PROSE_REASONING_EFFORT）。
+          reasoningEffort: next.reasoningEffort ?? PROSE_REASONING_EFFORT,
           // 长章正文由 continuation 负责「接着写」，不让网关再整篇重生成一遍。
           escalate: false,
         }),
@@ -1259,7 +1275,7 @@ function findingLine(finding) {
   return `${finding?.severity ?? 'warn'}${where ? `｜${where}` : ''}：${issue}${fix ? ` → ${fix}` : ''}`
 }
 
-function normalizeFinding(raw) {
+function normalizeFinding(raw, { model = false } = {}) {
   const severity = ['block', 'warn', 'note'].includes(raw?.severity) ? raw.severity : 'warn'
   return {
     severity,
@@ -1267,6 +1283,8 @@ function normalizeFinding(raw) {
     where: String(raw?.where ?? ''),
     issue: String(raw?.issue ?? '').trim() || '审校给出了一条没有描述的问题',
     fix: String(raw?.fix ?? ''),
+    ...(model ? { quote: typeof raw?.quote === 'string' ? raw.quote : '' } : {}),
+    ...(model && typeof raw?.quoted === 'boolean' ? { quoted: raw.quoted } : {}),
   }
 }
 
@@ -1717,20 +1735,34 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         }
 
         const deterministic = Array.isArray(checked?.findings) ? checked.findings : []
-        const findings = [...(data.findings ?? []), ...deterministic].map(normalizeFinding)
+        const rawFindings = data.findings ?? []
+        const needsQuoteCheck = (finding) => !degraded || finding.quote !== undefined
+        const checkedQuotes = validateFindingQuotes(source, rawFindings.filter(needsQuoteCheck), {
+          downgrade: params.quoteDowngrade === true,
+        }).values()
+        // 抢救时只校验已给引文的意见，保留原来的顺序。
+        const modelFindings = rawFindings.map((finding) =>
+          normalizeFinding(needsQuoteCheck(finding) ? checkedQuotes.next().value : finding, { model: true }),
+        )
+        const findings = [...modelFindings, ...deterministic.map((finding) => normalizeFinding(finding))]
         findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
         const counts = countSeverities(findings)
+        const unquotedFindings = countUnquotedFindings(modelFindings)
         const verdict = counts.block > 0 || counts.warn >= 3 ? 'revise' : 'pass'
         const patch = data.canonPatch ?? data.ledgerPatch ?? null
         const artifacts = {
-          [`review/${id}`]: { kind: 'json', content: { findings, canonPatch: hasPatch(patch) ? patch : null, verdict } },
+          [`review/${id}`]: {
+            kind: 'json',
+            content: { findings, canonPatch: hasPatch(patch) ? patch : null, verdict, unquotedFindings },
+          },
         }
         if (hasPatch(patch)) artifacts.canon = { kind: 'json', content: canonLib.mergeCanon(canon, patch, { chapter: id }) }
         return {
           artifacts,
           note:
             `${id} 审校：block ${counts.block} / warn ${counts.warn} / note ${counts.note}，${verdict === 'pass' ? '通过' : '需要修订'}` +
-            (degraded ? '（模型输出降级，仅保留确定性检查与可抢救意见）' : ''),
+            (degraded ? '（模型输出降级，仅保留确定性检查与可抢救意见）' : '') +
+            (unquotedFindings > 0 ? `；其中 ${unquotedFindings} 条引文未命中正文` : ''),
         }
       },
     },
@@ -1993,6 +2025,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
             json: false,
             phase: 'prose',
             label: 'continue',
+            reasoningEffort: PROSE_REASONING_EFFORT,
             escalate: false,
           })
           text = joinProse(text, continuationBody(unit, result?.text ?? ''))

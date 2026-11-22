@@ -431,12 +431,14 @@
 
 ## 10. 新 session 开工提示（交接用）
 
-**先读**：本文件 §8（决策已定，不要重议）→ §3 期一 → 需要背景时再读 `docs/research-ai-novel-generator.md` 对应小节。
+> **2026-11-22 补**：施工前先读 **§11 评审修订**。§3 里有 5 处与真实代码不符（basis 回传链、哈希验收、逐产物去重、prompt 预算、T1.3 的降级语义），期一的落点与顺序以 §11 为准。
+
+**先读**：本文件 §8（决策已定，不要重议）→ §11（最新修订）→ §3 期一 → 需要背景时再读 `docs/research-ai-novel-generator.md` 对应小节。
 
 **第一件事**：`task_resume` 任务 `2026-11-16-novel-forge-capability`，它带着前 10 轮的 claims/decisions 与未决旧账；不要凭本文件重建历史。
 
 **环境**：
-- 仓库 `dsh-plugins/plugins/novel-forge`，HEAD `23adfc3`，`npm test` 基线 **641/641 通过**（实测 454s，本机进程 spawn 慢，属正常）。
+- 仓库 `dsh-plugins/plugins/novel-forge`，HEAD `8f51f07`（2026-11-22 复核；T1.3 的改动在工作区未提交），`npm test` 基线 **641/641 通过**（2026-11-22 实测复跑 314s，本机进程 spawn 慢，属正常；含 T1.3 后为 649/649）。
 - 单测：`node --test test/*.test.mjs`；跑单个文件更快：`node --test test/packet.test.mjs`。
 - 面板验证：`node dev/verify.mjs`（需要真宿主）；端到端：`node dev/e2e.mjs`。
 
@@ -445,3 +447,39 @@
 **不要做的事**：不改 30+17 类检查的 kind 名与 severity 语义；不引入新依赖（期二索引必须零依赖）；不把索引或拆书结果写进 packet/canon 的业务盘。
 
 **交接时若发现**：本文件引用的行号因代码演进漂移，以代码为准并顺手更新附录 §9。
+
+---
+
+## 11. 评审修订（2026-11-22，pi 独立评论家对账 + T1.3 落地）
+
+本轮用独立 pi 会话把 §3 期一逐条对账到真实代码（HEAD `8f51f07`，基线 `npm test` 641/641 实测复跑通过）。结论：**期一不能照稿开工** —— T1.1 / T1.2 / T1.4 各有硬伤，T1.3 可施工且已落地。**冲突时以本节为准，§3 原文保留作对照。**
+
+### 11.1 对账结果（设计原文 → 实测 → 修订）
+
+| 设计原文 | 实测 | 修订 |
+| --- | --- | --- |
+| T1.1 `buildPacket` 返回 `{text,report}` | `packet.js:330` 返回 `{text,report,sections}`；`chapter.js:1103` 只透传前两项；`tools.js:594` 的 context 与 `:637` 的 commit 都不带 basis | 只加返回字段等于没改。施工前先接通回传链：context 展示 basis、commit 收 basis 并用**最新**输入重跑同一拼包函数 |
+| T1.1「改任意一片 cap 或内容 → 哈希变」 | 哈希只覆盖最终文本：短 beats 的 cap 加一、长 beats 裁剪区外的改动，文本不变 → 哈希相等 | 验收改成「**可见文本**变了哈希才变」；来源变化单独用来源指纹测 |
+| T1.1 重放用 `index.js:1645` 的 canon | 该处会用旧 canon 覆盖读取结果 | 重放必须用最新输入，不能用旧材料验证旧材料 |
+| T1.2「正文相同 → 整个提交视为重复」 | `store.js:298` 锁内写入即增版，无 CAS 无去重；`tools.js:672` 一次写正文+摘要+正典+审稿四份 | 去重必须**逐产物**比较最终内容；同正文带新摘要/新补丁不能被跳过 |
+| T1.3 验收点 `test/prompts.test.mjs` 的 system ≤2500 | 该文件不存在；断言在 `test/prompts-craft.test.mjs:24`（`SYSTEM_LIMIT`），draft system 实测 2498 | 验收改为 `prompts-craft.test.mjs`；review system 实测 2005，加规则后 2068 |
+| T1.3「只改 prompt」 | `index.js:287` 的 zod `findingSchema` 与 `:1262` 的 `normalizeFinding` 都会丢掉 `quote` | schema 增**可选** `quote`（必填会把缺引文的意见整条丢弃）；归一化在 model 模式下保留 `quote`/`quoted` |
+| T1.3 `craft.checkDraft` stats 增 `unquotedFindings` | `craft.js:758` 只吃 text/params/beats/previousHook/cast，没有 findings 入参 | 计数改放 `review/<id>` 产物（`unquotedFindings`），不动 checkDraft 签名 |
+| T1.3 引文未命中 → 无条件降级 | 会把 `test/novel-recipe.test.mjs:1346`（3 条无引文 warn → revise）变成 pass，等于改引擎语义；也给模型留了「不引原句就逃避修订」的口子 | 降级改 `params.quoteDowngrade` 显式开关，**默认关**；默认只写 `quoted:false` 与计数 |
+| T1.4 未知事实段追加进 packet | draft system 实测 2498/2500（加 31 字即超）；`canon.js:698` 分节裁切 + `packet.js:280` 再扣标题，满片时未知段会被裁掉 | 先在 draft system 内做**等长替换**腾预算，并把未知段额度预留在 canon 分片内 |
+
+### 11.2 T1.3 已落地（工作区未提交，等用户决定）
+
+- `consistency.js`：`normalizeQuoteText` / `validateFindingQuotes` / `countUnquotedFindings` —— 8–120 **码点**、空白折叠后逐字子串、不修改入参；降级只在显式 `downgrade:true` 时发生。
+- `index.js`：`findingSchema.quote` 可选；`normalizeFinding(raw,{model})` 保留 `quote`/`quoted`；review stage 只校验**模型** findings，确定性 findings 维持五字段；产物增 `unquotedFindings`，note 追加未命中条数；`paramsSchema` 增 `quoteDowngrade`（boolean，默认不降级）。
+- `prompts/zh.js`：review system 增「逐字复制 8–120 字，不改标点、不加省略号、不拼接两处」；`jsonContract` 增 `findings[].quote` 与示例。
+- 测试：新增 `test/review-quote.test.mjs`（13 条，含假 LLM 端到端与抢救路径）；`test/prompts-craft.test.mjs` 加 3 条断言。
+- 回归：`npm test` 649/649 通过（641 基线 + 新增 8）。
+
+### 11.3 下一轮顺序（替代 §10 的「期一施工顺序」）
+
+1. **T1.2**（版本冲突 + 逐产物去重）：先把「同正文改摘要」的语义定死，它决定 T1.1 回执怎么写。
+2. **T1.1**（basis 回传 + 哈希验收改写）：先接通 context/commit 两侧，再谈重放。
+3. **T1.4**（预算重构）：先等长替换腾出 draft system，再谈未知段。
+
+期二 / 期三不变。**不要**把 §3 里 T1.3 的「无条件降级」再照抄一遍 —— 当前实现是显式开关。

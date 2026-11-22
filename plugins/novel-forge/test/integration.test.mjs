@@ -419,6 +419,28 @@ test('window + force：force 重跑也受窗口限制，只重写候选章的前
   assert.equal(after.stages.draft.items.ch04, 'done', '推迟后就停手，ch04 保持上一轮的结果')
 })
 
+test('run 刚收敛成 done 时立刻手写产物，不该吃到假的 RUN_ACTIVE', async (t) => {
+  const { engine, project } = await setup(t)
+  // 收尾顺序是「saveProject → run.status=done → 落盘 run → finally 摘 live」。
+  // 在落盘 run 这一枪里插进去写产物，正好落在旧 #busy 只看 live 键的窗口里。
+  const store = engine.store
+  const original = store.writeRun.bind(store)
+  let probed = false
+  store.writeRun = async (projectId, run) => {
+    if (!probed && run?.status === 'done') {
+      probed = true
+      await engine.writeArtifact(project.id, 'notes/probe', { kind: 'json', content: { ok: true } })
+    }
+    return original(projectId, run)
+  }
+  t.after(() => { store.writeRun = original })
+
+  const started = await engine.startRun(project.id, { stages: ['premise'] })
+  const final = await waitRun(engine, started.id)
+  assert.equal(final.status, 'done')
+  assert.equal(probed, true, '探针没被触发：收尾动作或钩子变了')
+})
+
 test('window + 占位草稿：占位章算候选，同样受窗口限制', async (t) => {
   const { engine, llm, project } = await setup(t)
   const boot = await engine.startRun(project.id, { stages: ['premise', 'bible', 'characters', 'spine', 'outline'] })
