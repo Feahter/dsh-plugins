@@ -428,17 +428,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795347964
+          "updated": 1795348052
         }
       },
       "versions": [
         {
           "version": "0.5.0",
-          "publishTimestamp": 1795347964,
+          "publishTimestamp": 1795348052,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "85a08cf0ae8d1af0c7cefbb50300b84c445e80d3",
+            "commit": "b89a1af1f6924d9cb963b8439cdba2691685bf5c",
             "path": "plugins/archive-rsi"
           },
           "engines": {
