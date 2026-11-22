@@ -133,7 +133,6 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 - **归档整理。** 一个 `session_archive` 工具（`action`：sync、list、read、update、autotag、delete）补上 Harness 缺的能力——在 `~/.dsh/sessions` 上打标签、写笔记、检索、移入回收站。Harness 自己的归档/置顶状态是只读镜像而不是分叉，原始会话文件永不被修改、移动或删除。
 - **在语料上跑 PDCA。** `rsi`（`action`：plan、run、status）计算工具错误率、纠错率、「改了没验证」的缺口、上下文压力和工具目录成本，把异常值变成带 `sessionId + seq` 证据的发现；`rsi_apply`（`action`：act、adopt）产出并应用/回滚上下文补丁（prompt 教训、`AGENTS.md` 规则、技能候选项）。落不成可采纳补丁的观察只留在发现里，不再写成不可采纳的提案。
 - **采纳之后要重估。** 补丁采纳后会在采纳点两侧的会话上重新度量；现在这一步由启动时的自动 run 自己完成（`autoEvaluate`），「观察 → 改上下文 → 再度量」这个闭环不再依赖有人记得去查。
-- **采纳，然后再量一次。** 补丁可被采纳，之后用采纳之后产生的会话重新评估。这个「观察 → 改上下文 → 再观察」的闭环，就是工具层的递归自我改进。
 
 *要求：* DSH ≥ 0.2.1-rc.4 与 Node ≥ 22.15（会话日志是拼接的 zstd 容器，通过 `node:zlib` 解码）。数据在 `~/.dsh/archive-rsi/`。全部计算都在本地，不调用任何 LLM。
 
