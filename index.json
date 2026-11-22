@@ -976,8 +976,8 @@
         "zh": "墨炉 · 小说炼炉"
       },
       "description": {
-        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。0.3 按长篇网文的真实规模重做：卷 → 章两级大纲，卷纲由脚本建骨架、不烧模型；首轮先出「黄金三章」开篇包，世界观与卖点压成固定分片进每章上下文；craft 质检与 story-craft 的 11 项量化指标同口径（句长、感官密度、抽象情绪、副词、AI 套话、人物密度、对话占比），超容差直接列 finding；novel_* 工具按会话开关，不写小说时 0 常驻 token；另带「一句话改写故事核 / 提炼文风 / 起标题」的写作助手与新建向导。0.4 再往前一步：拆书（把现成小说纯文本拆成章节骨架与文风指纹，全本地确定性解析，不调模型）、一键续写本章（接着已有正文的断点往下写，撞输出上限也不丢已写部分）、编辑视角审稿单导出（md + csv 共 14 列）、材料包新增「到期待收线索」独立分片；体检再加词汇重复、对话张力、爽点兑现三类，共单章 30 类、全书 18 类；宿主层在落盘前挡掉缺参写入与非法导出格式，不会再出现一次缺参把整篇产物写成 null。",
-        "en": "A full novel pipeline behind one sentence: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages resume per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. Gender is canon, so pronoun tables are injected into every writing prompt and a deterministic check flags drift. 0.3 rebuilds the pipeline for web-novel scale: volume-to-chapter outlines whose volume skeletons are built by script instead of model calls, a golden-three-chapters opening pack on the first turn, and world/pitch slices pinned into every draft packet. Craft review now reports the same 11 metrics as story-craft (sentence length, sensory density, abstract emotion, adverbs, AI clichés, name density, dialogue ratio) and turns over-tolerance readings into findings. novel_* tools activate per session, so a session that is not writing a novel carries 0 resident tokens; a writing assistant polishes the premise, extracts the tone and names chapters, and a wizard creates the project. 0.4 adds local deconstruction of an existing novel into its chapter skeleton and style fingerprint (fully deterministic, no model calls), one-click continue of the current chapter from where its prose stops (a truncated reply keeps whatever was written), an editor-review export as Markdown plus a 14-column CSV, a dedicated due-threads packet slice, and three more check families (vocabulary repetition, dialogue tension, payoff pacing) for 30 single-chapter and 18 book-level checks; a missing write payload or an unknown export format is now rejected before anything lands on disk."
+        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。0.3 按长篇网文的真实规模重做：卷 → 章两级大纲，卷纲由脚本建骨架、不烧模型；首轮先出「黄金三章」开篇包，世界观与卖点压成固定分片进每章上下文；craft 质检与 story-craft 的 11 项量化指标同口径（句长、感官密度、抽象情绪、副词、AI 套话、人物密度、对话占比），超容差直接列 finding；novel_* 工具按会话开关，不写小说时 0 常驻 token；另带「一句话改写故事核 / 提炼文风 / 起标题」的写作助手与新建向导。0.4 再往前一步：拆书（把现成小说纯文本拆成章节骨架与文风指纹，全本地确定性解析，不调模型）、一键续写本章（接着已有正文的断点往下写，撞输出上限也不丢已写部分）、编辑视角审稿单导出（md + csv 共 14 列）、材料包新增「到期待收线索」独立分片；体检再加词汇重复、对话张力、爽点兑现三类，共单章 30 类、全书 18 类；宿主层在落盘前挡掉缺参写入与非法导出格式，不会再出现一次缺参把整篇产物写成 null。 0.6 加可选的市场坐标：按年份或按标签匹配月票榜参考，默认关闭。0.7 修真实事故：推理模型把 max_tokens 同时算「思考 + 正文」，4500 字的章还没开写就撞上限、连续 0 字——现在空正文截断先关思考重试一次，正文阶段（draft / revise / continue）默认不思考，JSON/细纲补枪同样关思考，错误信息区分「思考吃光预算」与「章太长」并带上 reasoningChars；每本书还生成可在编辑器阅读的 book/ Markdown 快照（本地 Git 记录阶段与逐章变化），工作台书稿目录卡片可直接打开目录或复制路径，已有项目可用回填脚本补建。",
+        "en": "A full novel pipeline behind one sentence: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages resume per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. Gender is canon, so pronoun tables are injected into every writing prompt and a deterministic check flags drift. 0.3 rebuilds the pipeline for web-novel scale: volume-to-chapter outlines whose volume skeletons are built by script instead of model calls, a golden-three-chapters opening pack on the first turn, and world/pitch slices pinned into every draft packet. Craft review now reports the same 11 metrics as story-craft (sentence length, sensory density, abstract emotion, adverbs, AI clichés, name density, dialogue ratio) and turns over-tolerance readings into findings. novel_* tools activate per session, so a session that is not writing a novel carries 0 resident tokens; a writing assistant polishes the premise, extracts the tone and names chapters, and a wizard creates the project. 0.4 adds local deconstruction of an existing novel into its chapter skeleton and style fingerprint (fully deterministic, no model calls), one-click continue of the current chapter from where its prose stops (a truncated reply keeps whatever was written), an editor-review export as Markdown plus a 14-column CSV, a dedicated due-threads packet slice, and three more check families (vocabulary repetition, dialogue tension, payoff pacing) for 30 single-chapter and 18 book-level checks; a missing write payload or an unknown export format is now rejected before anything lands on disk. 0.6 adds an optional market coordinate — yearly or tag-matched reference to a monthly-ticket leaderboard, off by default. 0.7 fixes a real incident: reasoning models count thinking and prose inside the same max_tokens, so a 4,500-character chapter hit the ceiling before writing a word and produced empty drafts; an empty-body truncation now retries once with thinking off, prose stages (draft / revise / continue) default to no thinking, JSON and beat retries do the same, and errors distinguish 'thinking ate the budget' from 'chapter too long' with reasoningChars attached. Each book also gets a reader-friendly book/ Markdown snapshot recorded in local Git, the workbench card opens that folder or copies its path, and existing projects can backfill it with a script."
       },
       "icon": "plugins/novel-forge/icon.svg",
       "author": "Feahter",
@@ -1003,10 +1003,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795186227
+          "updated": 1795362408
         }
       },
       "versions": [
+        {
+          "version": "0.7.0",
+          "publishTimestamp": 1795362408,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "6807f12aeb1f476e94eac94ee7517a430c8c053f",
+            "path": "plugins/novel-forge"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.6.0",
           "publishTimestamp": 1795186227,
