@@ -238,9 +238,10 @@ test('整条流水线：6 章从故事核跑到导出', async (t) => {
   assert.equal(count('volumeChapters'), 1, '短篇一次展开全部卷')
   assert.equal(count('beats'), 6)
   assert.equal(count('prose'), 6)
-  // 正文没带内联摘要/正典补丁时各补一次；命中 warn 的章还会被修订并重新摘要。
+  // 正文没带内联摘要/正典补丁时各补一次；短稿补写（topup）增长正文后按合并稿重建记忆，
+  // 摘要与正典补丁各再调一次，所以正典补丁每章 2 次（e0670c1 起的既定行为）。
   assert.ok(count('summary') >= 6, `summary=${count('summary')}`)
-  assert.equal(count('canonPatch'), 6)
+  assert.equal(count('canonPatch'), 12)
   assert.equal(count('review'), 6)
   assert.ok(llm.calls.length >= 30, `calls=${llm.calls.length}`)
 
