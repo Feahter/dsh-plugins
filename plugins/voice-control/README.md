@@ -107,3 +107,11 @@ node test/client-harness.mjs   # 浏览器半片的离线 harness
 - 服务端 TTS 首音 0.96–1.37 s，所以「听到回复」最快也在 2 s 上下；完全零延迟的打断式对话不成立。
 - 单次识别是整段 WAV（≤120 s / 8 MiB 是服务端 ASR 的限制；本机没有这个限制，但也只做整段）。
 - 没有唤醒词，没有常驻监听：必须按键说话。
+
+## 属于 dsh-plugins
+
+本插件收录在 [dsh-plugins](https://github.com/Feahter/dsh-plugins)——十一个 DSH 插件与一份自托管的插件市场索引。在 DSH 的 **插件 → 发现** 里添加索引地址即可安装（也可直接看 [插件目录](https://github.com/Feahter/dsh-plugins#plugin-catalog)）：
+
+```
+https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
+```

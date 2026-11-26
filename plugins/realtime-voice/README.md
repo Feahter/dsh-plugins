@@ -107,3 +107,11 @@ cp client.js index.js package.json "$D/" && mkdir -p "$D/host" && cp host/refine
 - 润色/排版全在本地；翻译需要 Host 半 + 网络，失败按设置退回原文或阻断，不静默丢句。
 - 模型驱动的「按应用调语气」尚未接（Host 半的 `cleanup` 恒 `false`），当前润色是确定性规则。
 - 单段上限 15 s；长句按断句切成多段连续提交。
+
+## 属于 dsh-plugins
+
+本插件收录在 [dsh-plugins](https://github.com/Feahter/dsh-plugins)——十一个 DSH 插件与一份自托管的插件市场索引。在 DSH 的 **插件 → 发现** 里添加索引地址即可安装（也可直接看 [插件目录](https://github.com/Feahter/dsh-plugins#plugin-catalog)）：
+
+```
+https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
+```

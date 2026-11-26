@@ -271,3 +271,11 @@ node archive-rsi/.verify-client.mjs  # 11 项：模块注册、插槽、locale�
   真值来源。
 - Cohort 全量解码的最坏情况是每个会话几 MB、耗时 1–3 秒；结果按 (mtime, size, digest)
   缓存，未变更的会话不会重复解码。
+
+## 属于 dsh-plugins
+
+本插件收录在 [dsh-plugins](https://github.com/Feahter/dsh-plugins)——十一个 DSH 插件与一份自托管的插件市场索引。在 DSH 的 **插件 → 发现** 里添加索引地址即可安装（也可直接看 [插件目录](https://github.com/Feahter/dsh-plugins#plugin-catalog)）：
+
+```
+https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
+```

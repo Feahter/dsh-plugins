@@ -98,3 +98,11 @@ npm test                          # 上面三项一起跑
 - 只索引白名单扩展名，跳过 `node_modules` / `.git` / `dist` 等；单文件 > 8MB 只记元数据，不抽正文。
 - 不修改、不移动被扫描的原文件；purge 只清索引与库内副本。
 - 二进制条目不进上下文，只给路径，交给 `read_image` 或系统工具。
+
+## 属于 dsh-plugins
+
+本插件收录在 [dsh-plugins](https://github.com/Feahter/dsh-plugins)——十一个 DSH 插件与一份自托管的插件市场索引。在 DSH 的 **插件 → 发现** 里添加索引地址即可安装（也可直接看 [插件目录](https://github.com/Feahter/dsh-plugins#plugin-catalog)）：
+
+```
+https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
+```

@@ -201,3 +201,11 @@ node dev/mount-check.mjs # 临时 DSH_HOME 起真 dsh web，验证侧栏挂载�
 - `novel_run` 每轮默认最多写 10 章（`window` 可调）：写满就停，阶段状态停在 `partial`，下一轮从断点接着写。窗口名单在 run 开始时定死，改 `window` 要新起一轮。
 - 模型偶发把 token 全花在思考上、返回空正文；审校拿不到 JSON 时降级为确定性检查，不中断整炉。
 - 插件是 ESM 模块，宿主运行中不热替换；更新代码后需要重启 DSH 才生效。
+
+## 属于 dsh-plugins
+
+本插件收录在 [dsh-plugins](https://github.com/Feahter/dsh-plugins)——十一个 DSH 插件与一份自托管的插件市场索引。在 DSH 的 **插件 → 发现** 里添加索引地址即可安装（也可直接看 [插件目录](https://github.com/Feahter/dsh-plugins#plugin-catalog)）：
+
+```
+https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
+```
