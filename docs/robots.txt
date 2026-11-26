@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://feahter.github.io/dsh-plugins/sitemap.xml

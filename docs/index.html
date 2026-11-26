@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-plugins — eleven open-source plugins for DeepSeek Harness (dsh)</title>
+<meta name="description" content="Eleven open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub triage, session archiving, health checks, mind maps and a task ledger.">
+<link rel="canonical" href="https://feahter.github.io/dsh-plugins/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="dsh-plugins">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="dsh-plugins — eleven open-source plugins for DeepSeek Harness (dsh)">
+<meta property="og:description" content="A self-hosted plugin market index and eleven MIT-licensed plugins for DeepSeek Harness: voice, GitHub, session archiving, health checks, mind maps, a context library, a task ledger and a novel pipeline.">
+<meta property="og:url" content="https://feahter.github.io/dsh-plugins/">
+<meta name="twitter:card" content="summary_large_image">
+<meta property="og:image" content="https://feahter.github.io/dsh-plugins/og.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="dsh-plugins — eleven open-source plugins for DeepSeek Harness (dsh)">
+<meta name="twitter:image" content="https://feahter.github.io/dsh-plugins/og.png">
+<meta name="twitter:title" content="dsh-plugins — plugins for DeepSeek Harness (dsh)">
+<meta name="twitter:description" content="Eleven open-source plugins plus a format-1 plugin market index for DeepSeek Harness. Install everything from one index URL.">
+<meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">
+<meta name="robots" content="index, follow">
+<style>
+  :root {
+    --bg: #fbfbfd;
+    --fg: #16181d;
+    --muted: #5a6270;
+    --line: #e2e6ed;
+    --card: #ffffff;
+    --accent: #2f5bd7;
+    --accent-soft: #eef2fe;
+    --code-bg: #f1f3f7;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116;
+      --fg: #e6e9ef;
+      --muted: #a3adbc;
+      --line: #242a34;
+      --card: #141922;
+      --accent: #93b2ff;
+      --accent-soft: #1b2333;
+      --code-bg: #1a212b;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  .wrap { width: 100%; max-width: 60rem; margin: 0 auto; padding: 0 1.25rem; }
+  .skip {
+    position: absolute; left: -9999px; top: 0; background: var(--card); color: var(--fg);
+    padding: .6rem 1rem; border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  .skip:focus { left: 1rem; top: 1rem; z-index: 10; }
+  header.top {
+    border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+  .top-inner {
+    display: flex; flex-wrap: wrap; gap: .5rem 1rem;
+    align-items: baseline; justify-content: space-between;
+    padding: .85rem 0;
+  }
+  .brand { font-weight: 700; letter-spacing: -.01em; }
+  .brand span { color: var(--muted); font-weight: 400; }
+  .top-links { display: flex; gap: 1rem; font-size: .9rem; }
+  main { padding-bottom: 3rem; }
+  .hero { padding: 2.75rem 0 1.5rem; }
+  .kicker {
+    margin: 0 0 .6rem; font-size: .8rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  h1 {
+    margin: 0 0 1rem; font-size: clamp(1.75rem, 1.1rem + 2.6vw, 2.6rem);
+    line-height: 1.2; letter-spacing: -.02em;
+  }
+  .lede { margin: 0 0 1rem; font-size: 1.06rem; max-width: 44rem; }
+  .lede strong { font-weight: 650; }
+  .zh {
+    margin: 0 0 1.5rem; padding-left: .9rem;
+    border-left: 3px solid var(--line);
+    color: var(--muted); max-width: 44rem;
+  }
+  .install { margin: 1.5rem 0 0; }
+  .install h2 { font-size: 1rem; margin: 0 0 .6rem; }
+  pre {
+    margin: 0 0 .75rem; padding: .9rem 1rem; overflow-x: auto;
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: var(--radius); font-size: .86rem; line-height: 1.55;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: .88em;
+  }
+  p code, li code, td code, dd code {
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: .05em .35em;
+  }
+  .note { color: var(--muted); font-size: .9rem; max-width: 44rem; }
+  .toc { padding: 1.5rem 0 2rem; border-top: 1px solid var(--line); }
+  .toc h2 { margin: 0 0 .9rem; font-size: 1.05rem; }
+  .toc ul {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; gap: .4rem 1.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  }
+  .toc a { text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc .cn { color: var(--muted); font-size: .88em; }
+  section.plugin {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 1.4rem 1.5rem;
+    margin: 0 0 1.1rem;
+  }
+  section.plugin h2 {
+    margin: 0 0 .15rem; font-size: 1.2rem; line-height: 1.35;
+  }
+  section.plugin h2 .cn {
+    display: block; font-size: .86rem; font-weight: 400; color: var(--muted);
+    margin-top: .15rem;
+  }
+  .def { margin: .7rem 0 .5rem; }
+  .def-zh { margin: 0 0 .8rem; color: var(--muted); font-size: .95rem; }
+  .plugin ul { margin: .4rem 0 .9rem; padding-left: 1.15rem; }
+  .plugin li { margin: .3rem 0; }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: .4rem 1.4rem;
+    margin: 0; padding-top: .8rem; border-top: 1px dashed var(--line);
+    font-size: .88rem; color: var(--muted);
+  }
+  .meta b { color: var(--fg); font-weight: 600; }
+  .notice {
+    margin: 0 0 1rem; padding: .7rem .9rem;
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--accent-soft); font-size: .92rem;
+  }
+  section.faq { padding: 2.25rem 0 0; }
+  section.faq h2 { font-size: 1.35rem; margin: 0 0 1rem; }
+  .qa { margin: 0 0 1.15rem; }
+  .qa h3 { margin: 0 0 .25rem; font-size: 1rem; }
+  .qa p { margin: 0; color: var(--muted); max-width: 46rem; }
+  .cite { margin-top: 2rem; }
+  .cite h2 { font-size: 1.15rem; margin: 0 0 .6rem; }
+  footer {
+    border-top: 1px solid var(--line); background: var(--card);
+    margin-top: 2.5rem; padding: 1.6rem 0 calc(1.6rem + env(safe-area-inset-bottom));
+    font-size: .9rem; color: var(--muted);
+  }
+  footer p { margin: 0 0 .5rem; }
+  footer a { color: var(--accent); }
+  @media (max-width: 34rem) {
+    .hero { padding-top: 1.9rem; }
+    section.plugin { padding: 1.15rem 1.1rem; }
+    .top-links { font-size: .85rem; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <div class="brand">dsh-plugins <span>· for DeepSeek Harness</span></div>
+    <nav class="top-links" aria-label="Repository">
+      <a href="https://github.com/Feahter/dsh-plugins">GitHub</a>
+      <a href="https://github.com/Feahter/dsh-plugins/blob/main/llms.txt">llms.txt</a>
+      <a href="https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json">index.json</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="hero">
+    <p class="kicker">Plugin collection and market index</p>
+    <h1>dsh-plugins: eleven open-source plugins for DeepSeek Harness (dsh)</h1>
+    <p class="lede">
+      <strong>dsh-plugins is a collection of eleven open-source plugins for DeepSeek Harness (dsh), the agent harness built on the everything-is-a-plugin Cordis architecture, plus the self-hosted format-1 plugin market index that installs them.</strong>
+      Each plugin is a standard DSH bundle: a Host half, an optional Web client half, and a
+      <code>cordis.patch.yml</code> that wires it into the app.
+    </p>
+    <p class="zh" lang="zh-CN">
+      dsh-plugins 收录十一个 DeepSeek Harness（DSH）插件：本地语音输入、语音看板娘与语音路由、GitHub 项目管理、会话归档与 PDCA 自改进、技能与 Agents 说明书体检、无限画布脑图、本机上下文资源库、外置任务账本、版本更新检查、长篇小说流水线；仓库同时自带一份插件市场索引，在 DSH 的「插件 → 发现」里填一个地址即可全部安装。全部插件均为 MIT 许可。
+    </p>
+
+    <div class="install">
+      <h2>Install</h2>
+      <p class="note">Add this index URL in DSH under <b>Plugins → Discover</b>, then search for a plugin by its market title:</p>
+      <pre><code>https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json</code></pre>
+      <p class="note">From the command line, install a pinned release (this example is Voice companion 0.7.0):</p>
+      <pre><code>dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#27d741d61fa63a072159de9049e411fc3696da80&amp;path:/plugins/voice-companion"</code></pre>
+      <p class="note">The commit after <code>#</code> is the one recorded for that version in <code>index.json</code>; swap it for the version you want. Every plugin requires DSH 0.2.1-rc.4 or newer.</p>
+    </div>
+  </div>
+
+  <nav class="toc" aria-labelledby="toc-heading">
+    <h2 id="toc-heading">The eleven plugins</h2>
+    <ul>
+      <li><a href="#realtime-voice">Realtime voice input</a> <span class="cn" lang="zh-CN">实时语音输入</span></li>
+      <li><a href="#voice-companion">Voice companion</a> <span class="cn" lang="zh-CN">语音看板娘</span></li>
+      <li><a href="#voice-control">Voice control</a> <span class="cn" lang="zh-CN">语音控制</span></li>
+      <li><a href="#github-manager">GitHub project manager</a> <span class="cn" lang="zh-CN">GitHub 项目管理</span></li>
+      <li><a href="#archive-rsi">Session archive + PDCA alchemy</a> <span class="cn" lang="zh-CN">归档会话与 PDCA 炼金</span></li>
+      <li><a href="#dsh-360">dsh-360</a> <span class="cn" lang="zh-CN">两面体检</span></li>
+      <li><a href="#mind-canvas">Mind canvas</a> <span class="cn" lang="zh-CN">脑图创意画布</span></li>
+      <li><a href="#context-lib">Context library</a> <span class="cn" lang="zh-CN">上下文资源库</span></li>
+      <li><a href="#task-ledger">Task ledger</a> <span class="cn" lang="zh-CN">任务账本</span></li>
+      <li><a href="#update-check">Version update check</a> <span class="cn" lang="zh-CN">版本更新检查</span></li>
+      <li><a href="#novel-forge">Ink Furnace — novel forge</a> <span class="cn" lang="zh-CN">墨炉 · 小说炼炉</span></li>
+    </ul>
+  </nav>
+
+  <section id="realtime-voice" class="plugin" aria-labelledby="realtime-voice-h">
+    <h2 id="realtime-voice-h">Realtime voice input <span class="cn" lang="zh-CN">实时语音输入</span></h2>
+    <p class="def">Realtime voice input writes speech into the DSH composer as cleaned-up text, with speech recognition running locally on the CPU.</p>
+    <p class="def-zh" lang="zh-CN">点一次麦克风，连续说话，每个停顿的句子被清理后写进输入框；识别在本机 CPU 上用 SenseVoiceSmall（ONNX，int8）完成，音频不出设备。</p>
+    <ul>
+      <li>Continuous dictation: every paused sentence lands in the composer, so a long thought does not have to be typed.</li>
+      <li>Offline sentence cleanup removes fillers, merges repeated words, follows self-corrections such as "no, I mean…", and normalizes punctuation and casing without spending model tokens.</li>
+      <li>Neighbouring sentences are polished together, so a misplaced pause or a half-corrected sentence is not inserted as-is.</li>
+      <li>Optional dictation translation: in <code>translate</code> mode a spoken Chinese sentence is written in English, and if translation is unavailable the original text is kept with a notice.</li>
+      <li>Exposes a <code>ctx.get('voiceInput')</code> service with <code>attach/start/stop/toggle/settings</code>, so other input surfaces can reuse the audio stack.</li>
+      <li>Replaces the built-in dictation button instead of sitting next to it: it registers at <code>conversation.input.activity</code> with <code>priority: -1</code>.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.4.0</code></span>
+      <span><b>Data</b> browser <code>localStorage</code> key <code>dsh.realtime-voice.settings.v2</code>; no on-disk data directory</span>
+      <span><b>Status</b> superseded by Voice companion ≥0.4.0</span>
+    </p>
+  </section>
+
+  <section id="voice-companion" class="plugin" aria-labelledby="voice-companion-h">
+    <h2 id="voice-companion-h">Voice companion <span class="cn" lang="zh-CN">语音看板娘</span></h2>
+    <p class="def">Voice companion puts call mode, composer dictation and a hold-to-talk hotkey in one floating panel, and reads task progress back out loud.</p>
+    <p class="def-zh" lang="zh-CN">一个面板覆盖整套语音面：通话模式逐句朗读、输入框听写、按住 Ctrl+Shift+Space 说话，再配一个可换形象与音色的看板娘。</p>
+    <ul>
+      <li>Call mode runs energy VAD with sentence splitting, speaks each reply sentence by sentence, and reads task progress back.</li>
+      <li>A global <code>Ctrl+Shift+Space</code> hold-to-talk hotkey works while the DSH window has focus; if the combination is rejected it tries modifier-added candidates and falls back to an on-panel button.</li>
+      <li>The panel drags anywhere, remembers its position, and folds into a pill when it is in the way.</li>
+      <li>Mascots are original inline SVG characters you can switch, and you can use your own image as the avatar (resized to 512 px and stored in the browser) with one of three voice slots.</li>
+      <li>A task view draws one spoken task as a node chain — heard, dispatched, every tool call and reply, delivered — refreshing every 1.6 s and freezing into a snapshot when the task ends.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.7.0</code></span>
+      <span><b>Data</b> browser <code>localStorage</code> (<code>dsh.voice-companion.themes</code>, <code>.face</code>, <code>.pos</code>, <code>.hotkey</code>); task records live in Host memory and clear on restart</span>
+    </p>
+  </section>
+
+  <section id="voice-control" class="plugin" aria-labelledby="voice-control-h">
+    <h2 id="voice-control-h">Voice control <span class="cn" lang="zh-CN">语音控制</span></h2>
+    <p class="def">Voice control delivers one spoken sentence to the session it belongs to and speaks the reply back.</p>
+    <p class="def-zh" lang="zh-CN">按住一个键说话，这句话被送进「该去的那个 Session」，回复用语音播回来；拿不准时先问，不猜。</p>
+    <p class="notice">Retired: the hotkey and session routing moved into Voice companion ≥0.4.0. This package still works at 0.2.0 but gets no new features, and both plugins bind <code>Ctrl+Shift+Space</code>, so enable one of the two.</p>
+    <ul>
+      <li>Hold <code>Ctrl+Shift+Space</code>, release, and the HUD shows which session received the sentence.</li>
+      <li>Routing is one pure function in <code>host/router.js</code> covered by 17 unit tests, not a model call.</li>
+      <li>An explicit new-session phrase creates a session and uses the sentence as its first message; a strong title match resumes that session.</li>
+      <li>A plain "continue" goes to the single most recent candidate, and a locator phrase like "back to X" that matches no title speaks the candidates and asks for a number instead of guessing.</li>
+      <li>Anything under 0.6 confidence becomes a spoken confirmation, because a wrong route is worse than no route.</li>
+      <li>The Host half holds the API key and drives <code>sessionController</code>; the browser half records, shows the HUD and speaks, so the key never reaches the page.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.2.0</code></span>
+      <span><b>Data</b> hotkey override in <code>localStorage['dsh.voice-control.hotkey']</code>; no on-disk data directory</span>
+    </p>
+  </section>
+
+  <section id="github-manager" class="plugin" aria-labelledby="github-manager-h">
+    <h2 id="github-manager-h">GitHub project manager <span class="cn" lang="zh-CN">GitHub 项目管理</span></h2>
+    <p class="def">GitHub project manager adds a sidebar GitHub panel and a family of <code>github_*</code> agent tools to DSH.</p>
+    <p class="def-zh" lang="zh-CN">侧边栏面板加一组 github_* 工具：浏览仓库与分支、处理 Issue、查看 Pull Request，复用本机 gh 登录，token 不下发浏览器。</p>
+    <ul>
+      <li>Browse repositories and branches without leaving DSH.</li>
+      <li>Triage issues and create, close or comment on them from the panel or from a chat message.</li>
+      <li>Inspect pull requests and their conversation before reviewing.</li>
+      <li>Credentials are resolved on the Host from your existing <code>gh auth login</code> (including the macOS keyring) or from <code>GH_TOKEN</code> / <code>GITHUB_TOKEN</code>, and never reach the browser.</li>
+      <li>The panel and the tools share one implementation, so an issue created by a tool call shows up in the panel without a refresh.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>1.2.0</code></span>
+      <span><b>Data</b> no data directory — credentials come from <code>gh auth login</code> or <code>GH_TOKEN</code> / <code>GITHUB_TOKEN</code></span>
+    </p>
+  </section>
+
+  <section id="archive-rsi" class="plugin" aria-labelledby="archive-rsi-h">
+    <h2 id="archive-rsi-h">Session archive + PDCA alchemy <span class="cn" lang="zh-CN">归档会话与 PDCA 炼金</span></h2>
+    <p class="def">Session archive + PDCA alchemy curates DSH session history and mines it for measurable context fixes, closing the loop by re-measuring every patch it adopts.</p>
+    <p class="def-zh" lang="zh-CN">给 Harness 的会话历史加上标签、笔记、搜索与回收站，再用 PDCA 循环把异常会话变成可度量的上下文修补，采纳后自己重估效果。全部本地计算，不调模型。</p>
+    <ul>
+      <li><code>session_archive</code> (actions: sync, list, read, update, autotag, delete) adds tags, notes, search and trash over <code>~/.dsh/sessions</code>.</li>
+      <li>Original session files are never modified, moved or deleted; the Harness's own archive and pin state is mirrored read-only rather than forked.</li>
+      <li><code>rsi</code> (actions: plan, run, status) computes tool-error rate, correction rate, the edit-then-no-verification gap, context pressure and tool-catalog cost, and turns outliers into findings carrying <code>sessionId + seq</code> evidence.</li>
+      <li><code>rsi_apply</code> (actions: act, adopt) proposes context patches — prompt lessons, <code>AGENTS.md</code> rules, skill candidates — and applies or reverts one, with a backup written first.</li>
+      <li>The boot-time run re-measures adopted patches against the sessions on both sides of the adoption, so the loop closes without anyone remembering to ask.</li>
+      <li>0.5.0 cut the resident tool surface from eleven tools to three, shrinking the tool catalog from 7352 B to 5231 B — context you pay for every step.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.5.0</code></span>
+      <span><b>Data</b> <code>~/.dsh/archive-rsi/</code></span>
+      <span><b>Requires</b> Node ≥ 22.15</span>
+    </p>
+  </section>
+
+  <section id="dsh-360" class="plugin" aria-labelledby="dsh-360-h">
+    <h2 id="dsh-360-h">dsh-360 — two health checks in one <span class="cn" lang="zh-CN">dsh-360 两面体检</span></h2>
+    <p class="def">dsh-360 scores two health surfaces — the skills catalog and everything injected into agent context — on one shared 18-bucket S~E grade scale.</p>
+    <p class="def-zh" lang="zh-CN">一个面板两份体检：技能目录按需加载这条路走不走得通，以及 AGENTS.md、子代理定义、agent preset 这些每轮都注入的内容值不值这个 token。四轴分类，同一套 S~E 等级。</p>
+    <ul>
+      <li>The skills surface scores each catalog entry's on-demand loading path: catalog selectability, real load evidence, trigger uniqueness, progressive disclosure, actionability, boundaries, hygiene and evolution.</li>
+      <li>The agents surface scores everything injected into context — <code>AGENTS.md</code> / <code>CLAUDE.md</code>, subagent definitions and agent presets — for injection hit rate, resident token cost, layering, imperative rules with verification commands, scope and cross-file conflicts.</li>
+      <li>Every item gets a four-axis classification (role / kind / scope / state) plus, for skills, a split between meta skills and task skills.</li>
+      <li>The panel paints the last snapshot before revalidating, keeps filters behind one icon, and shows optimization cards with what changed and a real undo.</li>
+      <li>Four <code>dsh360_*</code> tools take a <code>surface</code> parameter (<code>skills</code>, <code>agents</code> or <code>both</code>); every write is backed up and undoable.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.3.0</code></span>
+      <span><b>Data</b> <code>~/.dsh/dsh-360/</code> (backups, reports, state, cache)</span>
+      <span><b>Requires</b> Node ≥ 22.15</span>
+    </p>
+  </section>
+
+  <section id="mind-canvas" class="plugin" aria-labelledby="mind-canvas-h">
+    <h2 id="mind-canvas-h">Mind canvas <span class="cn" lang="zh-CN">脑图创意画布</span></h2>
+    <p class="def">Mind canvas is an infinite-canvas mind map that runs inside the DSH sidebar and exports to formats other outliners can open.</p>
+    <p class="def-zh" lang="zh-CN">侧边栏里的无限画布脑图：Tab 长出子节点、一键整理成不重叠的树、AI 发散、从自媒体工作台导入灵感，可导出 Markdown / OPML / FreeMind / JSON / PNG。</p>
+    <ul>
+      <li>Jot a thought and press Enter for the first node; <code>Tab</code> grows a child and drops straight into editing, <code>⌘Z</code> undoes, and deleting a node takes its whole subtree.</li>
+      <li>Tidy up runs a d3-hierarchy tidy-tree layout so siblings never overlap, growing right or down, and any node can collapse its subtree.</li>
+      <li>Five theme presets (paper, midnight, forest, sunset, indigo) plus a custom palette of 13 colour slots; Follow app inherits the host's light and dark tokens, and all 14 colour pairs pass WCAG 4.5:1.</li>
+      <li>From inspirations imports entries from the Media desk plugin as roots; AI branch asks the host's default model for 3–6 concrete child ideas and fails loudly instead of inventing content when no model is configured.</li>
+      <li>Export to a Markdown outline, OPML (XMind / MindNode), FreeMind <code>.mm</code>, raw JSON or PNG.</li>
+      <li>Agent tools <code>mind_canvas_read</code> (outline plus stats) and <code>mind_canvas_add</code> (branch a node by text match) let the model work on the same map.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.4.0</code></span>
+      <span><b>Data</b> <code>~/.dsh/mind-canvas/state.json</code></span>
+    </p>
+  </section>
+
+  <section id="context-lib" class="plugin" aria-labelledby="context-lib-h">
+    <h2 id="context-lib-h">Context library <span class="cn" lang="zh-CN">上下文资源库</span></h2>
+    <p class="def">Context library indexes the files already on this machine into one searchable library that the agent can read as context.</p>
+    <p class="def-zh" lang="zh-CN">把本机的 Markdown、代码、图片、PDF、Office 文档与会话日志索引成一个可检索的资源库，扫描只登记不改动原文件，并给 agent 九个 context_lib_* 工具。</p>
+    <ul>
+      <li>Sources are directories: scans respect a depth cap and an extension whitelist and register files by size and mtime, so a rescan only touches what changed.</li>
+      <li>Linked files are only ever described — never moved or deleted.</li>
+      <li>The panel gives search plus type, collection and tag filters, a detail view with notes and editing, trash and restore, and four view modes (list, cards, table, gallery).</li>
+      <li>Local previews without a parser zoo: <code>textutil</code> converts doc/docx/rtf/odt, <code>qlmanage</code> renders pdf/xlsx/ppt thumbnails cached by file plus size plus mtime, and HTML is stripped to text.</li>
+      <li>Nine <code>context_lib_*</code> tools — search, read, put, update, delete, scan, stats, sources, pack — plus a short library briefing injected every turn.</li>
+      <li>Pack a collection into one readable block when a whole topic has to be loaded at once.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.3.1</code></span>
+      <span><b>Data</b> <code>~/.dsh/context-lib/</code> (index.json, notes, blobs, cached thumbnails)</span>
+      <span><b>Requires</b> macOS for previews</span>
+    </p>
+  </section>
+
+  <section id="task-ledger" class="plugin" aria-labelledby="task-ledger-h">
+    <h2 id="task-ledger-h">Task ledger <span class="cn" lang="zh-CN">任务账本</span></h2>
+    <p class="def">Task ledger keeps goals, decisions, evidence and next actions in an external ledger so a task outlives the session that started it.</p>
+    <p class="def-zh" lang="zh-CN">把状态所有权从会话搬到外置账本：目标、决策、证据、下一步都在磁盘上，关掉会话、换模型或换 agent 之后，交回 task_id 就能续跑。</p>
+    <ul>
+      <li>Five tools: <code>task_list</code>, <code>task_open</code>, <code>task_resume</code>, <code>task_checkpoint</code> and <code>task_close</code>.</li>
+      <li><code>task_resume</code> takes a single-writer lease and returns a <code>run_id</code>, so two runs cannot quietly write the same ledger.</li>
+      <li><code>task_checkpoint</code> writes evidence, claims, decisions and next actions under an optimistic <code>expected_version</code>.</li>
+      <li>A closeout evidence gate runs before a task may be marked done; a failing gate downgrades <code>done</code> to <code>blocked</code> unless the override is recorded as a decision.</li>
+      <li>The sidebar panel reads the ledger directly rather than keeping a second copy of it.</li>
+      <li>A failed ledger write is reported in the run report instead of being silently swallowed.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>1.1.0</code></span>
+      <span><b>Data</b> <code>~/.dsh/task-ledger/</code> (state.json, task.json, JSONL logs)</span>
+    </p>
+  </section>
+
+  <section id="update-check" class="plugin" aria-labelledby="update-check-h">
+    <h2 id="update-check-h">Version update check <span class="cn" lang="zh-CN">版本更新检查</span></h2>
+    <p class="def">Version update check reads the installed DSH version from the app bundle and the newest version from your update feed, then hands an available upgrade to the in-app updater.</p>
+    <p class="def-zh" lang="zh-CN">侧边栏面板回答「我现在跑的是哪个版本、有没有更新」：当前版本从安装包本体读，最新版本从桌面端自己的更新源读，有新版就交给应用内更新器。</p>
+    <ul>
+      <li>The installed version is read from the app bundle itself (Info.plist or the packaged manifest), not guessed from a filename.</li>
+      <li>The newest version comes from your configured update source — the same <code>app-update.yml</code> electron-updater uses.</li>
+      <li>One button hands the upgrade to the in-app updater: download, verify, confirm restart.</li>
+      <li>The page never shells out and never replaces a signed <code>.app</code>.</li>
+      <li>In a plain browser with no preload bridge it says so and turns the button into a download link.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.2.0</code></span>
+      <span><b>Data</b> no data directory — reads the app bundle and your configured update feed</span>
+    </p>
+  </section>
+
+  <section id="novel-forge" class="plugin" aria-labelledby="novel-forge-h">
+    <h2 id="novel-forge-h">Ink Furnace — novel forge <span class="cn" lang="zh-CN">墨炉 · 小说炼炉</span></h2>
+    <p class="def">Ink Furnace — novel forge runs one premise through a resumable stage pipeline to a finished, continuity-checked novel.</p>
+    <p class="def-zh" lang="zh-CN">一句话故事核进，成稿小说出：设定、人物、情感脊柱、大纲、细纲、正文、连续性审校、修订、导出 Markdown / EPUB，全流程按条目断点续跑。</p>
+    <ul>
+      <li>The pipeline runs premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export as explicit stages.</li>
+      <li>A generic stage engine that knows nothing about novels drives the recipe, so every stage resumes per item and a run can stop and continue at chapter granularity.</li>
+      <li>Malformed review JSON is salvaged instead of discarded, and chapter summaries are written in the same call as the prose they belong to — 78 to 54 calls and 27% less input on a 12 × 3000-word book.</li>
+      <li>Pronouns are tracked per character with a deterministic drift check, so a female lead is not rewritten as "him".</li>
+      <li>Volume-to-chapter outlines build volume skeletons by script instead of model calls, and the first turn produces a golden-three-chapters opening pack.</li>
+      <li><code>novel_*</code> tools activate per session, so a session that is not writing a novel carries zero resident tokens.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.8.0</code></span>
+      <span><b>Data</b> <code>~/.dsh/novel-forge/</code>; projects export to Markdown or EPUB</span>
+      <span><b>Requires</b> a configured model</span>
+    </p>
+  </section>
+
+  <section class="faq" aria-labelledby="faq">
+    <h2 id="faq">Frequently asked questions</h2>
+
+    <div class="qa">
+      <h3>What is DeepSeek Harness?</h3>
+      <p>DeepSeek Harness (<code>dsh</code>) is an open-source agent harness from DeepSeek AI, built on an everything-is-a-plugin architecture powered by Cordis. It runs as a local Web UI or desktop app, and plugins add panels, tools and services to it.</p>
+    </div>
+    <div class="qa">
+      <h3>What is dsh-plugins?</h3>
+      <p>A repository of eleven DSH plugins plus a self-hosted format-1 plugin market index (<code>index.json</code>). Adding the index URL in DSH Discover makes all eleven installable from one place.</p>
+    </div>
+    <div class="qa">
+      <h3>Are these official DeepSeek plugins?</h3>
+      <p>No. dsh-plugins is an independent community project maintained by Feahter. It targets the public DSH plugin API and is not published or endorsed by DeepSeek.</p>
+    </div>
+    <div class="qa">
+      <h3>How do I install a plugin?</h3>
+      <p>Open Plugins → Discover in DSH, add <code>https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json</code>, then search for the market title. Command-line installs use <code>dsh plugin install</code> with the commit recorded in <code>index.json</code> for that version.</p>
+    </div>
+    <div class="qa">
+      <h3>Do the plugins send my data anywhere?</h3>
+      <p>Almost never. Recognition, session analysis, scoring, indexing and the ledger all run locally. The exceptions are the sentence text in translation mode, reply text sent to your TTS provider, model calls for novel-forge and the mind-canvas AI branch, and GitHub API calls made with your token.</p>
+    </div>
+    <div class="qa">
+      <h3>Do I need an API key?</h3>
+      <p>Only for the features that call a model: novel-forge, the mind-canvas AI branch, realtime-voice translation and voice-companion speech output. Everything else runs without one.</p>
+    </div>
+    <div class="qa">
+      <h3>Which plugin should I install first?</h3>
+      <p>If you want to stop typing, start with Realtime voice input. If you want the agent's state to survive sessions, start with Task ledger.</p>
+    </div>
+    <div class="qa">
+      <h3>Where is plugin data stored?</h3>
+      <p>Under <code>~/.dsh/&lt;plugin&gt;/</code> for the plugins that keep a directory; the voice plugins keep settings in browser localStorage. Nothing is written into the DSH app bundle, and original session files are never modified, moved or deleted.</p>
+    </div>
+    <div class="qa">
+      <h3>Which plugins need Node 22.15 or newer?</h3>
+      <p><code>archive-rsi</code> and <code>dsh-360</code>, because they decode concatenated-zstd session logs through <code>node:zlib</code>. macOS is required only for the <code>context-lib</code> document previews.</p>
+    </div>
+    <div class="qa">
+      <h3>Can I run two voice plugins at the same time?</h3>
+      <p>No. <code>voice-companion</code> and <code>voice-control</code> both bind <code>Ctrl+Shift+Space</code>, so enable one of the two. The dictation half of <code>realtime-voice</code> and the hotkey of <code>voice-control</code> already live inside <code>voice-companion</code>.</p>
+    </div>
+
+    <div class="cite">
+      <h2>Citation</h2>
+      <pre><code>@misc{dsh-plugins2026,
+  title  = {dsh-plugins: open-source plugins and a market index for DeepSeek Harness},
+  author = {Feahter},
+  year   = {2026},
+  url    = {https://github.com/Feahter/dsh-plugins}
+}</code></pre>
+      <p class="note">The repository also ships <code>llms.txt</code> for retrieval-augmented agents and a <code>CITATION.cff</code> for GitHub's "Cite this repository" button.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><b>dsh-plugins</b> — eleven plugins and a format-1 market index for DeepSeek Harness (dsh). Licensed MIT, Copyright (c) 2026 Feahter.</p>
+    <p>
+      <a href="https://github.com/Feahter/dsh-plugins">Repository</a> ·
+      <a href="https://github.com/Feahter/dsh-plugins/blob/main/llms.txt">llms.txt</a> ·
+      <a href="https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json">index.json</a> ·
+      <a href="https://github.com/Feahter/dsh-plugins/blob/main/LICENSE">MIT license</a> ·
+      <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
+    </p>
+    <p>Last updated 26 November 2026.</p>
+  </div>
+</footer>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "dsh-plugins",
+  "alternateName": "Feahter's DSH plugins",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "AI agent harness plugin collection",
+  "operatingSystem": "macOS, Windows, Linux",
+  "url": "https://feahter.github.io/dsh-plugins/",
+  "description": "A collection of eleven open-source plugins for DeepSeek Harness (dsh), plus a self-hosted format-1 plugin market index. The plugins cover local voice input and speech output, GitHub project management, session archiving with a PDCA self-improvement loop, skill and agent-instruction health checks, mind mapping, a local context library, an external task ledger, version update checks and a novel-writing pipeline.",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "author": {
+    "@type": "Person",
+    "name": "Feahter",
+    "url": "https://github.com/Feahter"
+  },
+  "codeRepository": "https://github.com/Feahter/dsh-plugins",
+  "isBasedOn": "https://github.com/deepseek-ai/deepseek-harness",
+  "softwareRequirements": "DSH 0.2.1-rc.4 or newer; Node 22.15 or newer for archive-rsi and dsh-360",
+  "keywords": "DeepSeek Harness, dsh, dsh plugins, DSH plugin market, agent harness plugins, voice input, task ledger, context engineering"
+}
+</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  "name": "dsh-plugins plugin catalog",
+  "description": "The eleven plugins in dsh-plugins, in catalog order.",
+  "numberOfItems": 11,
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Realtime voice input", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice"},
+    {"@type": "ListItem", "position": 2, "name": "Voice companion", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion"},
+    {"@type": "ListItem", "position": 3, "name": "Voice control", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control"},
+    {"@type": "ListItem", "position": 4, "name": "GitHub project manager", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/github-manager"},
+    {"@type": "ListItem", "position": 5, "name": "Session archive + PDCA alchemy", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/archive-rsi"},
+    {"@type": "ListItem", "position": 6, "name": "dsh-360", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/dsh-360"},
+    {"@type": "ListItem", "position": 7, "name": "Mind canvas", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/mind-canvas"},
+    {"@type": "ListItem", "position": 8, "name": "Context library", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/context-lib"},
+    {"@type": "ListItem", "position": 9, "name": "Task ledger", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/task-ledger"},
+    {"@type": "ListItem", "position": 10, "name": "Version update check", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check"},
+    {"@type": "ListItem", "position": 11, "name": "Ink Furnace — novel forge", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/novel-forge"}
+  ]
+}
+</script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "What is DeepSeek Harness?", "acceptedAnswer": {"@type": "Answer", "text": "DeepSeek Harness (dsh) is an open-source agent harness from DeepSeek AI, built on an everything-is-a-plugin architecture powered by Cordis. It runs as a local Web UI or desktop app, and plugins add panels, tools and services to it."}},
+    {"@type": "Question", "name": "What is dsh-plugins?", "acceptedAnswer": {"@type": "Answer", "text": "A repository of eleven DSH plugins plus a self-hosted format-1 plugin market index (index.json). Adding the index URL in DSH Discover makes all eleven installable from one place."}},
+    {"@type": "Question", "name": "Are these official DeepSeek plugins?", "acceptedAnswer": {"@type": "Answer", "text": "No. dsh-plugins is an independent community project maintained by Feahter. It targets the public DSH plugin API and is not published or endorsed by DeepSeek."}},
+    {"@type": "Question", "name": "How do I install a plugin?", "acceptedAnswer": {"@type": "Answer", "text": "Open Plugins → Discover in DSH, add https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json, then search for the market title. Command-line installs use dsh plugin install with the commit recorded in index.json for that version."}},
+    {"@type": "Question", "name": "Do the plugins send my data anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Almost never. Recognition, session analysis, scoring, indexing and the ledger all run locally. The exceptions are the sentence text in translation mode, reply text sent to your TTS provider, model calls for novel-forge and the mind-canvas AI branch, and GitHub API calls made with your token."}},
+    {"@type": "Question", "name": "Do I need an API key?", "acceptedAnswer": {"@type": "Answer", "text": "Only for the features that call a model: novel-forge, the mind-canvas AI branch, realtime-voice translation and voice-companion speech output. Everything else runs without one."}},
+    {"@type": "Question", "name": "Which plugin should I install first?", "acceptedAnswer": {"@type": "Answer", "text": "If you want to stop typing, start with Realtime voice input. If you want the agent's state to survive sessions, start with Task ledger."}},
+    {"@type": "Question", "name": "Where is plugin data stored?", "acceptedAnswer": {"@type": "Answer", "text": "Under ~/.dsh/<plugin>/ for the plugins that keep a directory; the voice plugins keep settings in browser localStorage. Nothing is written into the DSH app bundle, and original session files are never modified, moved or deleted."}},
+    {"@type": "Question", "name": "Which plugins need Node 22.15 or newer?", "acceptedAnswer": {"@type": "Answer", "text": "archive-rsi and dsh-360, because they decode concatenated-zstd session logs through node:zlib. macOS is required only for the context-lib document previews."}},
+    {"@type": "Question", "name": "Can I run two voice plugins at the same time?", "acceptedAnswer": {"@type": "Answer", "text": "No. voice-companion and voice-control both bind Ctrl+Shift+Space, so enable one of the two. The dictation half of realtime-voice and the hotkey of voice-control already live inside voice-companion."}}
+  ]
+}
+</script>
+</body>
+</html>

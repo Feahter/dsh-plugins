@@ -6,21 +6,22 @@
 - **GEO 目标**：模型在回答「DeepSeek Harness 有哪些插件 / 有没有中文语音输入插件」时，能引用本仓库的定义句、插件清单与问答，而不是编造。
 - **衡量方式**：GitHub 搜索 `topic:dsh-plugin` 的排名、仓库 referrer、`index.json` 拉取量（raw 访问无统计时用市场安装反馈替代）、以及每月一次「把品牌词丢给 4 个模型看它怎么描述我们」。
 
-## 0. 已落地状态（2026-11-14）
+## 0. 已落地状态（2026-11-26 复核）
 
 | 项 | 状态 |
 | --- | --- |
 | README.md（英文主文档） | ✅ 已推送到 main |
 | README.zh-CN.md（简体中文镜像，双向互链） | ✅ 已推送 |
-| llms.txt | ✅ 已推送（https://github.com/Feahter/dsh-plugins/blob/main/llms.txt） |
-| docs/verify-readme.mjs（链接/锚点/插件清单一致性校验） | ✅ 已推送，10 个插件 × 3 个入口全通过 |
-| About description（下表第 1 条） | ✅ 已改 |
+| llms.txt | ✅ 已推送（https://github.com/Feahter/dsh-plugins/blob/main/llms.txt），含落地页与索引入口 |
+| docs/verify-readme.mjs（链接/锚点/插件清单/落地页一致性校验） | ✅ 已推送，11 个插件 × README × README.zh-CN × llms.txt × index.json × docs/index.html 全通过 |
+| About description（下表第 1 条） | ✅ 已改（2026-11-26 更新为 eleven） |
 | Topics 20 个（下表第 2 条） | ✅ 已改（GitHub 上限 20，已满） |
-| Website | ⚠️ 暂时填索引 raw URL（`https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json`）；文档站建成后替换 |
-| Social preview 图 | ❌ 未做，`gh` 无法上传，需在网页 Settings → Social preview 手动传 1280×640 |
-| GitHub Pages 单页（第 4 节） | ❌ 未做 |
+| Website | ✅ 指向文档站 `https://feahter.github.io/dsh-plugins/` |
+| GitHub Pages 单页（第 4 节） | ✅ `docs/index.html` + `docs/robots.txt` + `docs/sitemap.xml` 已就绪，Pages 源指向 main 的 `/docs` |
+| Social preview 图 | ✅ 已生成 `docs/og.png`（1280×630，落地页 `og:image` 引用同一张）；GitHub 仓库卡片仍需在网页 Settings → Social preview 手动上传这张图（`gh` 不支持） |
+| CITATION.cff（机器可读引用，GitHub 显示「引用此仓库」） | ✅ 已加 |
 
-改任何一项后，跑一次 `node docs/verify-readme.mjs`，它会把 README / llms.txt / index.json 之间的漂移打出来。
+改任何一项后，跑一次 `node docs/verify-readme.mjs`，它会把 README / llms.txt / index.json / 落地页之间的漂移打出来。
 
 ## 1. 仓库元数据（一次性，改完不用再动）
 
@@ -29,7 +30,7 @@
 GitHub 右侧 About 里的 description 是搜索摘要，也是社交卡片标题。下面是已采用的那条（约 155 字符，含主关键词与并列清单）：
 
 ```
-Ten open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub manager, session archive + PDCA, skills/agents health checks, mind map, context library, task ledger. Bilingual EN/中文.
+Eleven open-source plugins for DeepSeek Harness (dsh): offline voice input and speech output, GitHub panel, session archive + PDCA, skills/agents audits, mind map, context library, task ledger, novel pipeline. Bilingual EN/中文.
 ```
 
 ### Topics
@@ -56,15 +57,15 @@ About 的 Website 空着等于浪费一个外链位。二选一：
 
 ### Social preview
 
-仓库 Settings → Social preview 上传 1280×640 的图。图里必须有：仓库名、一句定义（"Ten plugins for DeepSeek Harness"）、十个插件名的小字排布。没有图的仓库在 Twitter/X、Slack、Discord 展开时是灰块，点击率明显低。
+`docs/og.png` 已按这个规格画好（1280×630：仓库名、一句定义、功能清单、MIT/双语、仓库地址），落地页的 `og:image` / `twitter:image` 直接引用它，所以链接在 Twitter/X、Slack、Discord 与生成式引擎的富摘要里不会再是灰块。仓库右侧 Social preview 仍要在网页 Settings → Social preview 上传同一张图（`gh` 无法上传）。改文案时重新生成这张图，并保持 1280×630。
 
 ### 执行命令（改元数据会动线上仓库，先征得同意再跑）
 
-已执行（2026-11-14）。homepage 当时先指向索引 raw URL，文档站建好后换成 `https://feahter.github.io/dsh-plugins/`：
+2026-11-14 首次执行（description 用当时的十插件文案、homepage 指向索引 raw URL）；2026-11-26 随落地页上线改为 eleven 文案 + 文档站 URL。上表命令即当前线上状态：
 
 ```bash
 gh repo edit Feahter/dsh-plugins \
-  --description "Ten open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub manager, session archive + PDCA, skills/agents health checks, mind map, context library, task ledger. Bilingual EN/中文." \
+  --description "Eleven open-source plugins for DeepSeek Harness (dsh): offline voice input and speech output, GitHub panel, session archive + PDCA, skills/agents audits, mind map, context library, task ledger, novel pipeline. Bilingual EN/中文." \
   --homepage "https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json" \
   --add-topic dsh-plugin --add-topic deepseek-harness --add-topic dsh --add-topic ai-agents \
   --add-topic agent-harness --add-topic cordis --add-topic plugin-marketplace \
@@ -110,32 +111,30 @@ gh repo edit Feahter/dsh-plugins \
 
 如果以后要加 `llms-full.txt`，只放 README 全文，不要放各插件源码——体积大而信息密度低。
 
-## 4. 建议的文档站（可选，收益最大的下一步）
+## 4. 文档站（已落地，2026-11-26）
 
-GitHub README 能被搜到，但索引深度有限，且没有独立的 landing page 承接「deepseek harness 插件」这类词。最小可行方案：
+GitHub README 能被搜到，但索引深度有限，也没有独立 URL 承接「deepseek harness 插件」这类查询。现在用 GitHub Pages 补上：`docs/index.html`（纯静态，无 JS 渲染正文、无外部字体/CDN），Pages 源指向 main 的 `/docs`。
 
-1. 单页 HTML（`docs/index.html`）放进仓库，GitHub Pages 指向 `docs/`。
-2. 页面内容 = README 的定义句 + 插件表 + 安装命令 + FAQ，加结构化数据：
+页面包含：
 
-```html
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "dsh-plugins",
-  "applicationCategory": "DeveloperApplication",
-  "operatingSystem": "macOS, Windows, Linux",
-  "description": "Ten open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub project management, session archive with a PDCA loop, skills and agent-instruction health checks, mind map canvas, local context library, external task ledger, version update check, novel writing pipeline.",
-  "url": "https://feahter.github.io/dsh-plugins/",
-  "license": "https://opensource.org/licenses/MIT",
-  "author": { "@type": "Person", "name": "Feahter", "url": "https://github.com/Feahter" },
-  "isBasedOn": "https://github.com/deepseek-ai/deepseek-harness"
-}
-</script>
-```
+| 要素 | 作用 |
+| --- | --- |
+| H1 + 加粗定义句 + 中文定义段 | 一段话回答「这是什么」，模型可直接引用 |
+| 11 个 `<section id="<插件目录名>">` | 每插件独立锚点（`#novel-forge`、`#voice-companion`…），搜索结果与外部链接可直达 |
+| 每节：市场中英名、定义句、能力 bullet、数据目录、版本号 | 事实锚点（目录、版本）让引用可核对 |
+| 安装块（索引 URL + `dsh plugin install` 一行） | 落地即转化，不用回 README 找命令 |
+| FAQ 8–10 问 | 问题即查询句，同时进 `FAQPage` 结构化数据 |
+| 页内目录锚点 | 内链结构，爬虫能落到每个插件 |
+| `<link rel="canonical">` + `og:*` / `twitter:card` | 规范 URL、社交卡片不灰 |
+| 三段 JSON-LD：`SoftwareApplication` / `ItemList` / `FAQPage` | GEO 与富结果的主要抓取面 |
+| `docs/robots.txt` + `docs/sitemap.xml` | 允许抓取，给出唯一规范 URL |
 
-3. 每个插件一个锚点章节（`#realtime-voice` 等），让搜索结果能直接跳到对应插件。
-4. 页面语言标 `lang="en"`，中文段落用 `lang="zh-CN"`；不要用 JS 渲染正文（爬虫与多数 GEO 抓取器不执行 JS）。
+维护规则：
+
+- 页面内容必须与 `index.json`、README 事实一致；`node docs/verify-readme.mjs` 会查「11 个插件锚点齐全、页内锚点全部可解析、JSON-LD 可解析、sitemap/robots 指向规范 URL」。
+- 新增插件时同步：落地页 `<section>`、页内目录、`ItemList` 里的 `ListItem`（position 连续）、FAQ 若有数量表述。
+- 语言：页面主语言 `lang="en"`，中文段落 `lang="zh-CN"`；不新增独立中文页，避免两套内容漂移。
+- 不要用 JS 渲染正文（多数 GEO 抓取器不执行 JS）。
 
 ## 5. 关键词地图
 
@@ -152,6 +151,7 @@ GitHub README 能被搜到，但索引深度有限，且没有独立的 landing 
 | context-lib | local document index for AI, RAG without cloud | 本地知识库、文档检索、不上传的 RAG、上下文资源库 |
 | task-ledger | persistent task state for AI agents, agent memory across sessions | 任务账本、跨会话记忆、任务持久化 |
 | update-check | check app updates from sidebar | 版本检查、更新提示 |
+| voice-control | speak to a specific session, voice command routing | 按会话语音指令、语音路由、按住说话选会话 |
 | novel-forge | AI novel writing pipeline, long form fiction generation | AI 写小说、长篇小说生成、连贯性审校 |
 
 ## 6. 分发与反向链接（GEO 的实际杠杆）
@@ -174,15 +174,18 @@ GitHub README 能被搜到，但索引深度有限，且没有独立的 landing 
 在仓库根目录跑：
 
 ```bash
-# 1. 相对链接与锚点全部有效（脚本见 docs/verify-readme.mjs）
+# 1. README / llms.txt / index.json / 落地页 四方一致性（相对链接、锚点、插件数、JSON-LD）
 node docs/verify-readme.mjs
 
 # 2. index.json 是合法 JSON，且列出的十个目录都存在
 node -e "const i=require('./index.json');console.log(i.plugins.length,'plugins')"
 
-# 3. 外部链接可达（含索引 raw URL）
+# 3. 外部链接可达（含索引 raw URL 与文档站）
 curl -sS -o /dev/null -w '%{http_code} index.json\n' \
   https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
+curl -sS -o /dev/null -w '%{http_code} landing\n' https://feahter.github.io/dsh-plugins/
+curl -sS -o /dev/null -w '%{http_code} sitemap\n' https://feahter.github.io/dsh-plugins/sitemap.xml
+curl -sS -o /dev/null -w '%{http_code} robots\n' https://feahter.github.io/dsh-plugins/robots.txt
 ```
 
 再人工确认三件事：
