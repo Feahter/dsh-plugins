@@ -15,6 +15,8 @@
 - **本地优先。** 识别、扫描、评分、账本都在本机完成；少数必须外发的功能全部列在「隐私与数据」一节。
 - **MIT 许可。** 十一个插件与索引格式都在这个仓库里。
 
+**文档站：** <https://feahter.github.io/dsh-plugins/> —— 同一份目录的静态落地页，每个插件一个锚点（`#novel-forge`、`#voice-companion` 等），带安装代码与常见问答。页面由 `index.json` 生成，不会出现市场里没有的插件。
+
 ## 目录
 
 - [安装](#安装)
@@ -338,3 +340,5 @@ MIT —— 见 [LICENSE](./LICENSE)。
   url    = {https://github.com/Feahter/dsh-plugins}
 }
 ```
+
+机器可读格式：[`CITATION.cff`](./CITATION.cff)（GitHub 会据此显示「引用此仓库」按钮）。

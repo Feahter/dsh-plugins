@@ -21,6 +21,7 @@ Add this URL in DeepSeek Harness to install any plugin:
 
 ## Machine-readable entry points
 
+- [Landing page](https://feahter.github.io/dsh-plugins/): static HTML catalog generated from index.json — one anchor per plugin (`#realtime-voice`, `#voice-companion`, …), install block, FAQ, and schema.org `SoftwareApplication` / `ItemList` / `FAQPage` markup. `/sitemap.xml` and `/robots.txt` sit next to it.
 - [index.json](https://github.com/Feahter/dsh-plugins/blob/main/index.json): Format-1 DSH plugin market index — bilingual titles and descriptions, categories (voice / developer-tools / context-engineering / creative), keywords, `engines.dsh`, and pinned commit + path per version. This is the canonical machine-readable list of the plugins.
 - [README.md](https://github.com/Feahter/dsh-plugins/blob/main/README.md): Human-readable English documentation — install, catalog, per-plugin detail, privacy table, compatibility, FAQ, citation.
 - [README.zh-CN.md](https://github.com/Feahter/dsh-plugins/blob/main/README.zh-CN.md): The same documentation in Simplified Chinese (简体中文).

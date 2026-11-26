@@ -15,6 +15,8 @@ The plugins cover voice input and speech output, GitHub project management, sess
 - **Local first.** Recognition, scanning, scoring and ledger data stay on the machine; the few features that call out are listed under [Privacy and data](#privacy-and-data).
 - **MIT licensed.** Every plugin, including the index format, is in this repository.
 
+**Docs site:** <https://feahter.github.io/dsh-plugins/> — the same catalog as a static landing page, with one anchor per plugin (`#novel-forge`, `#voice-companion`, …), an install block and an FAQ. It is built from `index.json`, so it never lists a plugin the market does not have.
+
 ## 中文导读
 
 一个仓库收录十一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件，并自带一份可被插件市场直接读取的索引。在 DSH Web UI 的 **插件 → 发现** 里添加：
@@ -348,3 +350,5 @@ If you reference this collection in a paper, post or agent response:
   url    = {https://github.com/Feahter/dsh-plugins}
 }
 ```
+
+Machine-readable form: [`CITATION.cff`](./CITATION.cff) (GitHub renders a "Cite this repository" button from it).
