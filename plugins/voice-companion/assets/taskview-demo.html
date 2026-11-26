@@ -1,0 +1,86 @@
+<!doctype html>
+<!--
+  Task view self-check page: no Host, no network. The mock `/tasks` endpoint
+  returns one finished task and one running one, so the canvas, the active-node
+  highlight, the rail and the pan/zoom surface can be eyeballed in a browser.
+
+    python3 -m http.server 8765     # from the plugin root
+    open http://127.0.0.1:8765/assets/taskview-demo.html
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>voice-companion · 任务视图自查</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #070b16; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { createTaskView } from '../src/client/taskview.js'
+
+      const now = Date.now()
+      const tasks = [
+        {
+          taskId: 'demo-running',
+          title: '补 README',
+          text: '给 voice-control 的 README 补一段隐私边界，再跑一遍测试',
+          utterance: '帮我给 voice-control 的 README 补一段隐私说明，顺手把测试跑了',
+          status: 'running',
+          dispatchedAt: now - 40_000,
+          settledAt: null,
+          summary: '',
+        },
+        {
+          taskId: 'demo-done',
+          title: '修热键',
+          text: '热键松开偶发不触发，查一下',
+          utterance: '热键松手有时候没反应，你看下',
+          status: 'done',
+          dispatchedAt: now - 26 * 60_000,
+          settledAt: now - 20 * 60_000,
+          summary: '热键的 keyup 在窗口失焦时丢了，已在 blur 时补一次释放。',
+        },
+      ]
+
+      const runningNodes = [
+        { id: 'h', kind: 'heard', title: '听到', content: tasks[0].utterance, status: 'done' },
+        { id: 'd', kind: 'dispatch', title: '派活', content: tasks[0].text, status: 'done', detail: '会话 sessio…123 · 完全访问 · 推理 high' },
+        { id: 't1', kind: 'tool', title: '读取文件', content: 'README.md', status: 'done', detail: 'read · 8.2 kB' },
+        { id: 't2', kind: 'tool', title: '更新计划', content: '✓ 读 README\n▶ 补隐私一节\n○ 跑测试', status: 'done', detail: 'todo_write' },
+        { id: 'm1', kind: 'message', title: '回复', content: 'README 里没有隐私边界，我补一节，然后跑测试。', status: 'done' },
+        { id: 't3', kind: 'tool', title: '编辑文件', content: 'README.md', status: 'active', detail: 'edit' },
+      ]
+
+      const doneNodes = [
+        { id: 'h2', kind: 'heard', title: '听到', content: tasks[1].utterance, status: 'done' },
+        { id: 'd2', kind: 'dispatch', title: '派活', content: tasks[1].text, status: 'done', detail: '会话 sessio…456 · 完全访问 · 推理 high' },
+        { id: 't4', kind: 'tool', title: '搜索内容', content: 'keyup', status: 'done', detail: 'grep · 6 hits' },
+        { id: 't5', kind: 'tool', title: '编辑文件', content: 'src/client/hotkey.js', status: 'done', detail: 'edit' },
+        { id: 'r', kind: 'result', title: '交付', content: tasks[1].summary, status: 'done' },
+      ]
+
+      const view = createTaskView({
+        requestJson: async (path) => {
+          if (path.startsWith('/tasks?taskId=')) {
+            const id = decodeURIComponent(path.split('taskId=')[1].split('&')[0])
+            const task = tasks.find((candidate) => candidate.taskId === id)
+            return { ok: true, task, nodes: id === 'demo-running' ? runningNodes : doneNodes }
+          }
+          return { ok: true, tasks, tracked: 1 }
+        },
+        onClose: () => {},
+      })
+
+      view.open()
+      window.__demo = view
+      // Keep the "running" node chain moving so the pulse is visible in a screenshot.
+      setInterval(() => {
+        const last = runningNodes[runningNodes.length - 1]
+        if (!last) return
+        void view.ingest({ task: tasks[0], nodes: runningNodes })
+      }, 1_600)
+    </script>
+  </body>
+</html>

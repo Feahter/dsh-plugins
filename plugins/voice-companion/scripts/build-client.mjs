@@ -12,6 +12,7 @@ const PARTS = [
   'theme-store.js',
   'voice-profile.js',
   'avatar.js',
+  'taskview.js',
   'audio.js',
   'polish.js',
   'dictation.js',

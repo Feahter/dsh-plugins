@@ -1,4 +1,4 @@
-# 语音管家（voice-companion）v0.6
+# 语音管家（voice-companion）v0.7
 
 DSH 的「一个插件装完所有语音面」：**面板通话**、**输入框听写**、**全局热键指令**、**3D 看板**、**自由换肤**、**自定义形象**、**自定义声音**都在这里，不再需要另外两个插件。
 
@@ -125,11 +125,12 @@ v0.4 默认形象是**自研的 3D 科幻核心**（`src/client/core3d.js`）：
    - 派活前插件会把这个会话设成**完全访问权限**（`danger-full-access`：沙箱全开、审批 `never`）并把推理档拉到 **high**，所以语音派出去的活不用再回 GUI 点批准。新会话的 Agent 在 `agent/created` 事件里补设，老会话在 dispatch 时直接设。
 4. 后台干完主动开口：「老板，README 补完了，加了隐私边界那一段」。
 5. 想打断就继续说，检测到人声后停播，并把触发停播的 220 毫秒语音交给识别。
-6. 再点「结束」挂断。麦克风意外断开时，面板会结束当前通话并给出重连提示。接回设备后，点「开始通话」重试。
+6. 点面板上的 ▦（任务视图）看画布：每个派出去的活是一条节点链，正在跑的那个节点会高亮，点节点看全文。
+7. 再点「结束」挂断。麦克风意外断开时，面板会结束当前通话并给出重连提示。接回设备后，点「开始通话」重试。
 
 挂断会中止本次通话中的 `/turn` 请求。宿主感知断连后，会在模型返回、创建会话、应用权限和推理默认值、提交任务等阶段之间检查取消。断连被宿主感知前，以及会话创建、权限切换或推理设置调用已启动时，仍可能留下对应副作用。已发出的模型、语音请求可能已被处理。任务一旦交给会话队列，仍按原有规则执行和追踪，即使挂断导致面板收不到派发回执。
 
-调试入口：`__dshVoiceCompanion.status()` / `.say('测试一下')` / `.start()` / `.stop()` / `.character('chibi')` / `.mode('dictation')` / `.voice()` / `.setVoice({map:{base:'tide'},speed:1.1})`。
+调试入口：`__dshVoiceCompanion.openTasks()` 开任务画布、`.tasks()` 拉 `/tasks` 原始数据；`__dshVoiceCompanion.status()` / `.say('测试一下')` / `.start()` / `.stop()` / `.character('chibi')` / `.mode('dictation')` / `.voice()` / `.setVoice({map:{base:'tide'},speed:1.1})`。
 
 ## 架构
 
@@ -140,7 +141,8 @@ v0.4 默认形象是**自研的 3D 科幻核心**（`src/client/core3d.js`）：
 │ 输入框听写：整段转写 + 润色  │ ◀──────────── │ /speak  句子级 TTS + 缓存     │
 │ 热键：按住录音 → 松手路由    │               │ /plan   一句话归到哪个动作    │
 │ 看板娘 + 字幕 + 音色选择     │               │ /send   投递 / 回答           │
-│                            │ ◀──────────── │ /dispatch /events 后台任务    │
+│ 任务画布：节点链 / 实时高亮  │ ◀──────────── │ /dispatch /events 后台任务    │
+│                            │ ◀──────────── │ /tasks  任务列表 + 节点链     │
 └────────────────────────────┘               │ /transcribe /characters       │
                                              └──────────────────────────────┘
 ```
@@ -161,12 +163,41 @@ v0.4 默认形象是**自研的 3D 科幻核心**（`src/client/core3d.js`）：
 | POST | `/speak` | 一句文本出去，回 base64 WAV（带 `voiceId`） |
 | POST | `/plan` | 热键路径：一句话 → `{plan:{action:'ask'\|'new'\|'resume', sessionId?, candidates?}, confirmation}` |
 | POST | `/send` | 热键路径：确认后真正执行（`prompt`/`new`/`cancel`，`resume` 由客户端翻成 `prompt`） |
-| POST | `/dispatch` | 直接派活（`/turn` 判定为任务时内部也走它），派活前先设完全权限 + high 推理 |
+| POST | `/dispatch` | 直接派活（`/turn` 判定为任务时内部也走它），派活前先设完全权限 + high 推理；可带 `utterance` 让画布第一格显示原话 |
 | GET | `/events?since=` | 后台任务完成事件，游标语义 |
+| GET | `/tasks` | 任务视图数据：不带 `taskId` 列出所有派过的活（新→旧，含状态/标题/原话）；带 `taskId=&live=1` 返回该任务的节点链（运行中每次读会话事件，已结束用结算快照） |
 | POST | `/transcribe` | ASR 回退通路：base64 WAV → 本机 SenseVoice 文本 |
 | POST | `/theme/design` | 一句话 → 模型 → 消毒后的主题补丁（`{utterance, base?, keep?}` → `{theme, changed, dropped, message, model, usage}`），限流 8/min + 60/h |
 
+## 任务视图
+
+面板右上角 ▦ 打开全屏画布（Esc / 右上 × 关闭），把一次语音派活的完整链路画成一条节点链：
+
+```
+听到 → 派活(权限/推理/会话) → 工具/回复的每一步 → 交付
+```
+
+- 节点状态：`active`（正在跑的那个，呼吸高亮 + 「进行中」）、`done`、`error`（红框）、`pending`（还没跑完但已经停下）。
+- 运行中的任务每 1.6 秒刷新一次：宿主读会话事件里的 `tool/call`、`tool/result`、`assistant/message`，新的工具调用会把上一个节点标成 done，最后一个调用是 active；没有在飞的工具时补一个「下一步」节点。
+- 任务结束（`agent/status` 变 idle 或 `agent/error`）时把节点链快照冻住，之后再打开不再读会话日志，历史记录不会被日志裁剪影响。
+- 左栏是任务列表（新→旧，最多 50 条），点一条切过去；点节点在底部看完整内容。画布可拖动、滚轮缩放，切任务时自动对准 active 节点。
+![任务视图](assets/screenshot-taskview.png)
+
+- 节点正文在宿主截到 1200 字、单次最多读 60 条会话事件；超长链路折叠中间节点成一个「省略」节点，画布不至于铺开几百格。
+
 ## 验收记录
+
+**v0.7** 这批（任务视图）：
+
+| 项 | 证据 |
+| --- | --- |
+| 单元测试 | `node --test "test/*.test.mjs"` **184/184 通过**（新增 `task-view.test.mjs` 13 条：节点构建、工具参数摘要、失败/长链折叠、列表与结算快照、`/tasks` 404；`taskview.test.mjs` 9 条：蛇形布局、连线、画布组件开合/切任务/点节点/缩放/空态） |
+| 路由 | `host-companion.test.mjs` 33/33，新增 `GET /tasks` 列表 + 详情 + 404 的假宿主路由测试 |
+| 客户端半片 | `test/client-harness.mjs` 107 条 ok（构建产物含 `taskview.js`，`__test` 不与 avatar 冲突） |
+| 看板娘 / 热键 | `test/avatar-harness.mjs` 26/26、`test/hotkey-harness.mjs` 18/18 |
+| 打包 | `client.js` **285,193 B**，12 个片段（`taskview.js` 在 `avatar.js` 之后、`index.js` 之前） |
+
+**没验的**：任务画布没在运行中的 GUI 上点过（新宿主代码要重载插件才进内存）；真浏览器里拖动/缩放手感、和面板的层级关系只能人眼确认；「正在跑」的粒度来自会话事件聚合，不是宿主原生的 step 事件，模型长时间不产生事件时会停在最后一个工具节点。
 
 **v0.6** 这批（挂断中止、打断识别、断连提示、设置面板分组）：
 
@@ -232,5 +263,7 @@ open assets/avatar-demo.html      # 形象自查页
 - TTS 目录只有两个音色：`stella`（明亮）/ `tide`（温柔），`/health` 和 `/characters` 都能看到。上游只认这两个 id、没有语速/音高/克隆参数，所以「自定义声音」是选槽 + 客户端变速，不是真音色克隆；想加音色只能改 `host/voice.js` 的 `VOICE_CATALOG` 与 `CHARACTER_VOICES`（前提是上游真支持新 id）。
 - 看板娘是 SVG 程序化绘制，细节不如贴图丰富；加新形象只需在 `characters.js` 里加一个 `build()` 与 `CHARACTERS` 条目。
 - 后台任务完成事件依赖 `agent/status`；Session 被别的客户端取消时走 `task-failed` 分支。
+- 任务画布的任务记录只存在宿主内存里：插件重载 / GUI 重启后清空，已结算的快照不落盘。
+- 「正在跑」的节点靠会话事件推断：模型在两个工具调用之间长时间思考时，画布停在最后一个工具节点，不会显示逐 token 的进度。
 - **没有 WebGL 的机器**（远程桌面、禁用硬件加速）会退到 Canvas2D 版核心：观感是发光球 + 两个环，没有体积辉光和立体光照；再退一档是纯 CSS 渐变球。降级是自动的，`/health` 不报告当前后端。
 - **模型改样式不保证每次都合心意**：它只输出 token 补丁，不能改布局结构与脚本，输出为空时宿主回 502 `model-empty-patch`；一句话改不理想时最多再改两轮（限流 8/min），别指望它一次做出一整套设计系统。

@@ -1,4 +1,4 @@
-# voice-companion 协议 v0.2
+# voice-companion 协议 v0.7
 
 一个「打电话式」语音管家，外加听写与热键两条单句通道：连续听、边说边识别、拟人回话、能把活派给后台 Session、干完主动汇报。
 
@@ -21,8 +21,10 @@
 | POST | `/speak` | `{text, character?, voiceMode?, index?, total?, voiceId?, voiceMap?}` | `{ok, audioBase64, mimeType, durationMs, voiceId, cached}` |
 | POST | `/plan` | `{utterance, currentSessionId?, pending?}` | `{ok, plan:{action:'ask'\|'new'\|'resume', sessionId?, candidates?, confidence, reason, text}, confirmation}` |
 | POST | `/send` | `{action:'prompt'\|'new'\|'cancel', sessionId?, text?}` | `{ok, action:'prompt'\|'new'\|'cancel', sessionId?, text?}`，动作非法 400，Session 不存在 404 |
-| POST | `/dispatch` | `{text, sessionId?, title?}` | `{ok, taskId, sessionId}`（目标会话先被设成完全权限 + high 推理，见下） |
+| POST | `/dispatch` | `{text, sessionId?, title?, utterance?}` | `{ok, taskId, sessionId}`（目标会话先被设成完全权限 + high 推理，见下） |
 | GET | `/events?since=<cursor>` | — | `{ok, events:[{id,type,text,summary,sessionId,title}], cursor}` |
+| GET | `/tasks` | — | `{ok, tasks:[{taskId,sessionId,title,text,utterance,status,dispatchedAt,settledAt,summary,nodeCount}], tracked}`（新→旧，最多 50 条） |
+| GET | `/tasks?taskId=<id>&live=1` | — | `{ok, task, nodes:[{id,kind,title,content,status,detail?}]}`；`live=0` 不读会话事件，404 表示没有这个任务 |
 | POST | `/transcribe` | `{audioBase64, providerId?}` | `{ok, text, providerId}` |
 | POST | `/theme/design` | `{utterance, base?, keep?}` | `{ok, theme, changed, dropped, message, model, usage}`（限流 8/min + 60/h） |
 
@@ -85,6 +87,16 @@
 时序上有个坑：`sessionController.create()` 只建 Session 不建 Agent，所以派活那一刻新会话还没有 Agent 可改。板子同时订阅 `agent/created`（宿主 `serial` 派发，在 Agent 开跑前触发），对该板子跟踪中的会话补一次同样的设置。老会话在 dispatch 时直接设。
 
 两项设置各自 try/catch，任何一个服务缺失（例如测试里的假 ctx）都静默跳过，不影响派活本身。`/health` 的 `tasks.defaults` 暴露这两个默认值，方便排查。
+
+## 任务视图（`/tasks`）
+
+`/tasks` 是任务画布的数据源，不进播报链路。
+
+- `task.status`：`running` / `done` / `failed`。派活那一刻就进列表；`prompt` 没投进会立刻标成 `failed` 并带原因，不会留一个永远 running 的卡片。
+- `nodes[].kind`：`heard`（语音原话）、`dispatch`（派活，带权限/推理/会话短 id）、`tool`（工具调用，`content` 是参数摘要、`detail` 是结果前缀）、`message`（助手回复）、`live`（模型继续思考的占位）、`result`（交付或失败原因）、`gap`（长链折叠）。
+- `nodes[].status`：`active`（正在跑，同一时刻最多一个）/ `done` / `error` / `pending`（已停但没结算）。
+- 运行中每次请求读最近 60 条会话事件（`tool/call`、`tool/result`、`assistant/message`）；任务结算时把节点链快照写进内存，之后 `detail` 直接回快照，不再读日志。
+- 节点正文截到 1200 字符串；超过 36 个节点时保留头 5 + 尾 30，中间折成一个 `gap` 节点。
 
 ## 完成事件
 

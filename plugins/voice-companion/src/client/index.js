@@ -154,6 +154,7 @@ function apply(ctx) {
     call: null,
     sessionId: undefined,
     receiptTask: null,
+    taskView: null,
     character: resolveCharacter(storedValue(CHARACTER_KEY) || 'core', storedFace()).id,
     voiceProfile: readVoiceProfile(),
     mode: storedValue(MODE_KEY) === 'dictation' ? 'dictation' : 'call',
@@ -267,6 +268,7 @@ function apply(ctx) {
     if (runtime.avatar && typeof runtime.avatar.setReceipt === 'function') {
       runtime.avatar.setReceipt(task);
     }
+    if (task) refreshTaskBadge();
     // The host picks a voice per sentence (character base, bright or soft); keep the
     // pairing so one reply never changes timbre halfway through.
     const voices = Array.isArray(reply.voices) ? reply.voices : [];
@@ -296,6 +298,7 @@ function apply(ctx) {
               runtime.avatar.setReceiptState(next);
             }
             runtime.receiptTask = null;
+            refreshTaskBadge();
           }
         }
         runtime.avatar && runtime.avatar.setSubtitle(event.text, { role: 'assistant' });
@@ -461,6 +464,44 @@ function apply(ctx) {
     }
   }
 
+  // 任务视图：懒加载一个全屏画布，首次点入口时创建；轮询由它自己管。
+  function ensureTaskView() {
+    if (runtime.taskView) return runtime.taskView;
+    runtime.taskView = createTaskView({
+      doc: document,
+      mount: document.body,
+      requestJson: (path, options, timeoutMs) => requestJson(path, options, timeoutMs || 8000),
+      onClose: () => refreshTaskBadge(),
+    });
+    return runtime.taskView;
+  }
+
+  function openTaskView() {
+    const view = ensureTaskView();
+    view.open();
+    return view;
+  }
+
+  // 入口上的小圆点：只关心还有几个在跑，失败就静默（不影响主流程）。
+  let badgeInFlight = false;
+  function refreshTaskBadge() {
+    if (badgeInFlight) return;
+    badgeInFlight = true;
+    requestJson('/tasks', null, 8000)
+      .then((body) => {
+        const tasks = Array.isArray(body && body.tasks) ? body.tasks : [];
+        const running = tasks.filter((task) => task.status === 'running').length;
+        if (runtime.avatar && typeof runtime.avatar.setTaskBadge === 'function') {
+          runtime.avatar.setTaskBadge(running);
+        }
+        if (runtime.taskView) void runtime.taskView.refresh();
+      })
+      .catch(() => {})
+      .finally(() => {
+        badgeInFlight = false;
+      });
+  }
+
   function mount() {
     if (typeof document === 'undefined' || !document.body) return;
     const host = document.createElement('div');
@@ -487,8 +528,11 @@ function apply(ctx) {
           log('theme', { id: value && value.id });
         }
         if (name === 'theme-design') void designTheme(value);
+        if (name === 'tasks') openTaskView();
       },
     });
+
+    refreshTaskBadge();
 
     // 版本自查：只在宿主报告有新版本时挂徽标，失败或已最新时什么都不渲染。
     requestJson('/version', null, 8000)
@@ -621,6 +665,9 @@ function apply(ctx) {
         if (id !== undefined) runtime.sessionId = id;
         return runtime.sessionId;
       },
+      tasks: () => requestJson('/tasks', null, 8000),
+      openTasks: () => openTaskView(),
+      taskView: () => runtime.taskView,
     };
   }
 
@@ -643,6 +690,7 @@ function apply(ctx) {
     runtime.hotkey && runtime.hotkey.dispose();
     runtime.dictation && runtime.dictation.dispose();
     runtime.engine && runtime.engine.dispose();
+    runtime.taskView && runtime.taskView.dispose();
     runtime.avatar && runtime.avatar.dispose();
     if (runtime.host && runtime.host.remove) runtime.host.remove();
     delete window.__dshVoiceCompanion;

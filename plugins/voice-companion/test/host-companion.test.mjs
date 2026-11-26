@@ -261,7 +261,7 @@ test('GET /version exposes the version-check payload', async () => {
   const versionChecker = {
     check: async ({ refresh }) => ({
       plugin: 'dsh-voice-companion',
-      current: '0.6.0',
+      current: '0.7.0',
       latest: '0.4.3',
       updateAvailable: true,
       homepage: 'https://example.test/voice-companion',
@@ -287,7 +287,7 @@ test('GET /health exposes providers, voices, key state and tracked tasks', async
   })
   assert.equal(response.status, 200)
   assert.equal(response.json.ok, true)
-  assert.equal(response.json.version, '0.6.0')
+  assert.equal(response.json.version, '0.7.0')
   assert.deepEqual(response.json.tts.voices, ['stella', 'tide'])
   assert.equal(response.json.tts.apiKeyConfigured, true)
   assert.deepEqual(response.json.asr.providers, ['sensevoice', 'parakeet'])
@@ -653,6 +653,37 @@ test('POST /turn rejects a missing utterance with 400', async () => {
   const response = await call(app.route('/turn'), post({ utterance: '  ' }))
   assert.equal(response.status, 400)
   assert.equal(response.json.code, 'invalid')
+})
+
+test('GET /tasks lists dispatched work and serves its node chain', async () => {
+  const app = setup()
+  const dispatched = await call(
+    app.route('/dispatch'),
+    post({ text: '整理 README', title: '整理', utterance: '帮我整理 README' }),
+  )
+  assert.equal(dispatched.status, 200)
+
+  const list = await call(app.route('/tasks'))
+  assert.equal(list.status, 200)
+  assert.equal(list.json.ok, true)
+  assert.equal(list.json.tasks.length, 1)
+  const task = list.json.tasks[0]
+  assert.equal(task.taskId, dispatched.json.taskId)
+  assert.equal(task.status, 'running')
+  assert.equal(task.utterance, '帮我整理 README')
+
+  const detail = await call(app.route('/tasks'), {
+    url: '/tasks?taskId=' + encodeURIComponent(task.taskId) + '&live=1',
+  })
+  assert.equal(detail.status, 200)
+  assert.equal(detail.json.task.taskId, task.taskId)
+  assert.equal(Array.isArray(detail.json.nodes), true)
+  assert.equal(detail.json.nodes[0].kind, 'heard')
+  assert.equal(detail.json.nodes[0].content, '帮我整理 README')
+  assert.equal(detail.json.nodes.at(-1).status, 'active')
+
+  const missing = await call(app.route('/tasks'), { url: '/tasks?taskId=nope' })
+  assert.equal(missing.status, 404)
 })
 
 test('POST routes reject a cross-origin page with 403', async () => {

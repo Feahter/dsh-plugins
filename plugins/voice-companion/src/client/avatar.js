@@ -160,6 +160,11 @@ color:var(--vc-btn-color, #eef3ff);background:var(--vc-btn-bg, rgba(255,255,255,
 [data-vc-avatar] .vc-gear:hover{background:rgba(255,255,255,.14)}
 [data-vc-avatar] .vc-gear:focus-visible{outline:2px solid var(--vc-btn-focus-ring, #9db4ff);outline-offset:2px}
 [data-vc-avatar] .vc-gear[aria-expanded="true"]{background:linear-gradient(180deg,var(--vc-accent-soft, #7d95ff),var(--vc-accent-strong, #4d6bfe));border-color:rgba(200,216,255,.55);color:#fff}
+/* Task view entry: same round icon as the gear, plus a dot while work runs. */
+[data-vc-avatar] .vc-tasks{position:relative}
+[data-vc-avatar] .vc-tasks[data-busy="1"]{color:#bcd0ff;border-color:rgba(157,180,255,.5)}
+[data-vc-avatar] .vc-tasks[data-busy="1"]::after{content:"";position:absolute;top:-1px;right:-1px;width:6px;height:6px;border-radius:50%;background:var(--vc-accent-base, #6b85ff);box-shadow:0 0 6px var(--vc-accent-base, #6b85ff);animation:vc-task-dot 1.6s ease-in-out infinite}
+@keyframes vc-task-dot{0%,100%{opacity:.45}50%{opacity:1}}
 [data-vc-avatar] .vc-sheet{position:absolute;inset:0;z-index:6;display:none;padding:10px;border-radius:var(--vc-sheet-radius, 18px);background:linear-gradient(165deg,var(--vc-sheet-bg-from, rgba(15,24,50,.97)),var(--vc-sheet-bg-to, rgba(6,11,24,.98)));overflow:auto}
 [data-vc-avatar] .vc-sheet[data-open="1"]{display:block}
 [data-vc-avatar] .vc-sheet-backdrop{position:absolute;inset:0;border-radius:var(--vc-sheet-radius, 18px);cursor:pointer}
@@ -425,6 +430,20 @@ export function createAvatar(options = {}) {
     title: '声音与形象设置',
   }, '\u2699');
 
+  // 任务视图入口：跟齿轮同款圆按钮，有活时右上角亮一颗点。
+  const tasksButton = element(doc, 'button', {
+    class: 'vc-gear vc-tasks',
+    type: 'button',
+    'data-busy': '0',
+    'aria-label': '任务视图',
+    title: '任务视图：语音派出去的活走到哪一步了',
+  }, '\u25a6');
+  if (typeof tasksButton.addEventListener === 'function') {
+    tasksButton.addEventListener('click', () => {
+      if (onAction) onAction('tasks');
+    });
+  }
+
   // Fold / unfold. Kept in the head so the same gesture that drags also hides it.
   const minButton = element(doc, 'button', {
     class: 'vc-min',
@@ -493,6 +512,7 @@ export function createAvatar(options = {}) {
   head.appendChild(label);
   head.appendChild(modeButton);
   head.appendChild(gearButton);
+  head.appendChild(tasksButton);
   head.appendChild(minButton);
   head.appendChild(actions);
   head.appendChild(versionLink);
@@ -1840,6 +1860,21 @@ export function createAvatar(options = {}) {
     return value;
   }
 
+  // 任务视图入口上的小圆点：有在跑的任务就亮着。
+  function setTaskBadge(count) {
+    const running = Number(count) || 0;
+    tasksButton.setAttribute('data-busy', running > 0 ? '1' : '0');
+    tasksButton.setAttribute(
+      'aria-label',
+      running > 0 ? `任务视图（${running} 个在跑）` : '任务视图',
+    );
+    tasksButton.setAttribute(
+      'title',
+      running > 0 ? `任务视图：${running} 个任务正在跑` : '任务视图：语音派出去的活走到哪一步了',
+    );
+    return running;
+  }
+
   function setVersionBadge(badge) {
     if (disposed) return null;
     const data = badge && typeof badge === 'object' ? badge : null;
@@ -1870,6 +1905,7 @@ export function createAvatar(options = {}) {
   return {
     root,
     setState,
+    setTaskBadge,
     setVersionBadge,
     setNotice,
     setHoldFallback,

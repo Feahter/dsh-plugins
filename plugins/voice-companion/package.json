@@ -1,6 +1,6 @@
 {
   "name": "dsh-voice-companion",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "One voice plugin for DeepSeek Harness: call-mode conversation, dictation, global hotkey, two switchable mascots and adaptive TTS voices.",
   "author": "Feahter",
   "license": "MIT",

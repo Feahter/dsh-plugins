@@ -33,7 +33,7 @@ import { DEFAULT_CHARACTER, listCharacters, resolveCharacter } from './src/clien
 
 export const name = 'voice-companion'
 export const ROUTE_PREFIX = '/api/voice-companion'
-export const VERSION = '0.6.0'
+export const VERSION = '0.7.0'
 
 const CONFIG_PATH = join(homedir(), '.deepseek', 'config.toml')
 const CONFIG_TTL_MS = 60_000
@@ -228,6 +228,7 @@ export function apply(ctx, options = {}) {
         text: decision.task.text,
         sessionId,
         title: decision.task.title,
+        utterance,
         signal,
       })
       task = {
@@ -335,7 +336,10 @@ export function apply(ctx, options = {}) {
     }
     const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : undefined
     const title = typeof payload.title === 'string' ? payload.title.trim() : undefined
-    const dispatched = await board.dispatch({ text, sessionId, title })
+    // The spoken wording, when the caller knows it, is what the task view shows
+    // as the first node; fall back to the task text otherwise.
+    const utterance = typeof payload.utterance === 'string' ? payload.utterance.trim() : undefined
+    const dispatched = await board.dispatch({ text, sessionId, title, utterance })
     return { body: { ok: true, taskId: dispatched.taskId, sessionId: dispatched.sessionId } }
   }
 
@@ -364,6 +368,23 @@ export function apply(ctx, options = {}) {
         cursor,
       },
     }
+  }
+
+  /**
+   * The task view's data source: no `taskId` lists every task this Host
+   * dispatched (newest first); with `taskId` it returns that task's node chain.
+   * `live=0` skips the session-log read for a running task.
+   * @param {import('node:http').IncomingMessage} request
+   */
+  async function handleTasks(request) {
+    const url = new URL(request.url ?? '/', 'http://localhost')
+    const taskId = (url.searchParams.get('taskId') ?? '').trim()
+    const live = url.searchParams.get('live') !== '0'
+    if (taskId === '') {
+      return { body: { ok: true, tasks: board.list(), tracked: board.tracked } }
+    }
+    const detail = await board.detail({ taskId, live })
+    return { body: { ok: true, ...detail } }
   }
 
   /**
@@ -456,6 +477,7 @@ export function apply(ctx, options = {}) {
       register('/speak', jsonRoute({ handle: handleSpeak, getOrigin: origin }))
       register('/dispatch', jsonRoute({ handle: handleDispatch, getOrigin: origin }))
       register('/events', getRoute(handleEvents))
+      register('/tasks', getRoute(handleTasks))
       register('/transcribe', jsonRoute({ handle: handleTranscribe, getOrigin: origin }))
       register('/plan', jsonRoute({ handle: handlePlan, getOrigin: origin }))
       register('/send', jsonRoute({ handle: handleSend, getOrigin: origin }))

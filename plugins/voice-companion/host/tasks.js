@@ -13,6 +13,254 @@ const PROMPT_TIMEOUT_MS = 20_000
 const EVENTS_TIMEOUT_MS = 2_000
 const SUMMARY_MAX = 200
 const SPOKEN_DETAIL_MAX = 40
+/** How many tasks the task view can page through. */
+const HISTORY_LIMIT = 50
+/** Session events read for one live timeline request. */
+const TIMELINE_MAX = 60
+/** Upper bound for a single node's text; the canvas truncates visually. */
+const NODE_TEXT_MAX = 1_200
+/** Beyond this the middle of a long run folds into one "省略" node. */
+const NODE_LIMIT = 36
+
+/** Human labels for the tools dispatched tasks normally use. */
+const TOOL_LABELS = {
+  bash: '运行命令',
+  read: '读取文件',
+  write: '写入文件',
+  edit: '编辑文件',
+  grep: '搜索内容',
+  glob: '查找文件',
+  todo_write: '更新计划',
+  todowrite: '更新计划',
+  'web_search': '联网搜索',
+  'web-fetch': '读取网页',
+  web_fetch: '读取网页',
+  task_list: '查看任务',
+  task_resume: '接续任务',
+  task_checkpoint: '记录进度',
+  task_close: '收尾任务',
+  subagent_scout: '子代理侦察',
+  subagent_worker: '子代理执行',
+  subagent_deep: '子代理深研',
+  subagent_review: '子代理审查',
+  spawn_teammate: '派出队友',
+  send_message: '给队友发消息',
+  team_task_create: '建团队任务',
+  team_task_update: '更新团队任务',
+  present: '交付文件',
+}
+
+/**
+ * @param {string} text
+ * @param {number} max
+ */
+function trimText(text, max) {
+  const value = String(text === null || text === undefined ? '' : text)
+  if (value.length <= max) return value
+  return `${value.slice(0, max).trimEnd()}…`
+}
+
+/**
+ * Reduce a tool's raw JSON arguments to the one line a node card shows:
+ * the field a human would look at, and for `todo_write` the plan itself.
+ * @param {string} name
+ * @param {string} raw
+ * @returns {string}
+ */
+export function summarizeToolArguments(name, raw) {
+  const text = asString(raw)
+  if (text === '') return ''
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return trimText(text, 200)
+  }
+  if (parsed === null || typeof parsed !== 'object') return trimText(String(parsed), 200)
+  if (Array.isArray(parsed)) return trimText(text, 200)
+  if ((name === 'todo_write' || name === 'todowrite') && Array.isArray(parsed.todos)) {
+    const marks = { completed: '✓', in_progress: '▶', pending: '○' }
+    return parsed.todos
+      .map((item) => `${marks[item?.status] ?? '○'} ${asString(item?.content)}`)
+      .join('\n')
+  }
+  for (const key of [
+    'command',
+    'file_path',
+    'path',
+    'pattern',
+    'query',
+    'url',
+    'prompt',
+    'description',
+    'text',
+    'session_id',
+  ]) {
+    if (typeof parsed[key] === 'string' && parsed[key].trim() !== '') {
+      return trimText(parsed[key], 240)
+    }
+  }
+  const pairs = Object.entries(parsed)
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+  return trimText(pairs.join(' · '), 240)
+}
+
+/**
+ * Text of the last assistant message in a session timeline.
+ * @param {any[]} events
+ * @returns {string | undefined}
+ */
+export function lastAssistantText(events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'assistant/message') continue
+    const content = event?.data?.message?.content
+    if (!Array.isArray(content)) continue
+    const text = content
+      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join('')
+      .trim()
+    if (text !== '') return text
+  }
+  return undefined
+}
+
+/**
+ * Tool result text, used as the node's small print.
+ * @param {any} event
+ * @returns {string}
+ */
+function toolResultText(event) {
+  const content = event?.data?.message?.content
+  if (!Array.isArray(content)) return ''
+  return trimText(
+    content
+      .filter((part) => typeof part?.text === 'string')
+      .map((part) => part.text)
+      .join('')
+      .trim(),
+    240,
+  )
+}
+
+/**
+ * Turn one task plus its session events into the ordered node chain the canvas
+ * draws: what was said → what was dispatched → what the agent actually did →
+ * how it ended. Pure so the shape is unit-testable without a Host.
+ *
+ * @param {object} input
+ * @param {{ title?: string, text?: string, utterance?: string, sessionId?: string }} input.task
+ * @param {any[]} [input.events] Chronological session events.
+ * @param {boolean} [input.running]
+ * @param {string} [input.failure]
+ * @returns {Array<{ id: string, kind: string, title: string, content: string, status: string, detail?: string }>}
+ */
+export function buildTaskNodes({ task, events = [], running = false, failure } = {}) {
+  const nodes = []
+  let sequence = 0
+  const push = (node) => {
+    sequence += 1
+    nodes.push({ id: `n${sequence}`, ...node })
+    return nodes[nodes.length - 1]
+  }
+
+  const heard = asString(task?.utterance) || asString(task?.text)
+  if (heard !== '') {
+    push({ kind: 'heard', title: '听到', content: trimText(heard, NODE_TEXT_MAX), status: 'done' })
+  }
+  push({
+    kind: 'dispatch',
+    title: '派活',
+    content: trimText(asString(task?.text) || heard, NODE_TEXT_MAX),
+    status: 'done',
+    detail: `会话 ${shortSession(task?.sessionId)} · 完全访问 · 推理 high`,
+  })
+
+  /** @type {Map<string, any>} */
+  const byCallId = new Map()
+  for (const event of Array.isArray(events) ? events : []) {
+    const type = event?.type
+    const data = event?.data ?? {}
+    if (type === 'tool/call') {
+      const callId = typeof data.callId === 'string' ? data.callId : ''
+      const node = push({
+        kind: 'tool',
+        title: TOOL_LABELS[data.name] ?? (asString(data.name) || '工具调用'),
+        content: summarizeToolArguments(data.name, data.arguments),
+        status: running ? 'active' : 'pending',
+        detail: asString(data.name),
+      })
+      if (callId !== '') byCallId.set(callId, node)
+      continue
+    }
+    if (type === 'tool/result') {
+      const node = byCallId.get(typeof data.callId === 'string' ? data.callId : '')
+      if (node === undefined) continue
+      const failed = data?.message?.isError === true
+      node.status = failed ? 'error' : 'done'
+      const text = toolResultText(event)
+      if (text !== '') node.detail = `${node.detail ? node.detail + ' · ' : ''}${failed ? '失败：' : ''}${text}`
+      byCallId.delete(typeof data.callId === 'string' ? data.callId : '')
+      continue
+    }
+    if (type === 'assistant/message') {
+      const content = data?.message?.content
+      if (!Array.isArray(content)) continue
+      const text = content
+        .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text)
+        .join('')
+        .trim()
+      if (text === '') continue
+      push({ kind: 'message', title: '回复', content: trimText(text, NODE_TEXT_MAX), status: 'done' })
+    }
+  }
+
+  // A run that stopped with a call still open marks that call as the step it
+  // died on, rather than leaving it looking merely "pending".
+  if (!running) {
+    for (const node of byCallId.values()) {
+      node.status = failure === undefined ? 'done' : 'error'
+    }
+  }
+
+  const hasActive = nodes.some((node) => node.status === 'active')
+  if (running && !hasActive) {
+    push({ kind: 'live', title: '下一步', content: '模型正在继续…', status: 'active' })
+  }
+  if (!running) {
+    push(
+      failure === undefined
+        ? { kind: 'result', title: '交付', content: trimText(asString(task?.summary) || '做完了', NODE_TEXT_MAX), status: 'done' }
+        : { kind: 'result', title: '没做成', content: trimText(failure, NODE_TEXT_MAX), status: 'error' },
+    )
+  }
+
+  if (nodes.length <= NODE_LIMIT) return nodes
+  const head = nodes.slice(0, 5)
+  const tail = nodes.slice(nodes.length - (NODE_LIMIT - 6))
+  const gap = {
+    id: 'n-gap',
+    kind: 'gap',
+    title: '…',
+    content: `中间省略 ${nodes.length - head.length - tail.length} 个节点`,
+    status: 'done',
+  }
+  return [...head, gap, ...tail]
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function shortSession(value) {
+  const id = asString(value)
+  if (id === '') return '新会话'
+  if (id.length <= 10) return id
+  return `${id.slice(0, 6)}…${id.slice(-3)}`
+}
 
 /** Permission preset a dispatched Session should run under. */
 export const TASK_PERMISSION_PRESET = 'danger-full-access'
@@ -58,37 +306,29 @@ function agentSessionId(agent) {
 }
 
 /**
- * Pull the newest assistant text out of a Session's event history.
- *
- * `sessionController.events` is the public surface for this; the internal
- * `assistantOutput` helper is not exposed, so we scan assistant/message
- * records for text blocks ourselves.
+ * Read a Session's recent events for the task view. `sessionController.events`
+ * is the public surface for this; the internal `assistantOutput` helper is not
+ * exposed, so the timeline is read raw and interpreted here.
  * @param {any} controller
  * @param {string} sessionId
- * @returns {Promise<string | undefined>}
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<any[]>}
  */
-async function readLastAssistantText(controller, sessionId) {
+async function readSessionTimeline(controller, sessionId, signal) {
   if (controller === null || typeof controller !== 'object' || typeof controller.events !== 'function') {
-    return undefined
+    return []
   }
-  const page = await controller.events(
-    { address: { kind: 'session', sessionId }, maxMessages: 20 },
-    AbortSignal.timeout(EVENTS_TIMEOUT_MS),
-  )
-  const records = Array.isArray(page?.records) ? page.records : []
-  for (let index = records.length - 1; index >= 0; index -= 1) {
-    const event = records[index]?.event ?? records[index]
-    if (event?.type !== 'assistant/message') continue
-    const content = event?.data?.message?.content
-    if (!Array.isArray(content)) continue
-    const text = content
-      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-      .map((part) => part.text)
-      .join('')
-      .trim()
-    if (text !== '') return text
+  let page
+  try {
+    page = await controller.events(
+      { address: { kind: 'session', sessionId }, maxMessages: TIMELINE_MAX },
+      signal ?? AbortSignal.timeout(EVENTS_TIMEOUT_MS),
+    )
+  } catch {
+    return []
   }
-  return undefined
+  const records = Array.isArray(page?.records) ? page.records : Array.isArray(page) ? page : []
+  return records.map((record) => record?.event ?? record).filter((event) => event !== null && typeof event === 'object')
 }
 
 /**
@@ -113,7 +353,13 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
   let sequence = 0
   /** @type {Array<{ id: number, type: string, text: string, summary: string, sessionId: string, title: string, at: number }>} */
   const queue = []
-  /** @type {Map<string, { taskId: string, sessionId: string, title: string, text: string, dispatchedAt: number }>} */
+  /**
+   * Every task this Host dispatched, newest last. The task view pages through
+   * this; `tracked` only holds the ones still running.
+   * @type {Array<{ taskId: string, sessionId: string, title: string, text: string, utterance: string, dispatchedAt: number, status: 'running' | 'done' | 'failed', settledAt: number | null, summary: string, nodes: any[] | null }>}
+   */
+  const history = []
+  /** @type {Map<string, { taskId: string, sessionId: string, title: string, text: string, utterance: string, dispatchedAt: number, status: 'running' | 'done' | 'failed', settledAt: number | null, summary: string, nodes: any[] | null }>} */
   const tracked = new Map()
   let watching = false
   /** @type {Array<() => void>} */
@@ -318,22 +564,18 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
   }
 
   /**
-   * @param {{ taskId: string, sessionId: string, title: string, text: string }} entry
+   * @param {{ taskId: string, sessionId: string, title: string, text: string, utterance: string }} entry
    * @param {'task-done' | 'task-failed'} type
    * @param {unknown} [failure]
    */
   async function settle(entry, type, failure) {
+    let timeline = []
+    if (type === 'task-done') {
+      timeline = await readSessionTimeline(service('sessionController'), entry.sessionId)
+    }
     let detail
     if (type === 'task-done') {
-      try {
-        detail = await readLastAssistantText(
-          typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined,
-          entry.sessionId,
-        )
-      } catch (error) {
-        logger.warn?.(`[voice-companion] could not read last assistant text: ${errorMessage(error)}`)
-        detail = undefined
-      }
+      detail = lastAssistantText(timeline)
     } else {
       detail = errorMessage(failure)
     }
@@ -347,6 +589,18 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
       type === 'task-done'
         ? `老板，「${entry.title}」做完了。${spokenDetail}`.trim()
         : `老板，「${entry.title}」没做成。${spokenDetail}`.trim()
+
+    // Freeze the node chain at settle time: the session log stays on disk, but
+    // the snapshot keeps the canvas stable even if the log is later pruned.
+    entry.status = type === 'task-done' ? 'done' : 'failed'
+    entry.settledAt = now()
+    entry.summary = summary
+    entry.nodes = buildTaskNodes({
+      task: entry,
+      events: timeline,
+      running: false,
+      failure: type === 'task-failed' ? summary : undefined,
+    })
 
     sequence += 1
     queue.push({
@@ -436,12 +690,31 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
     unwatch = []
   }
 
+  /**
+   * Public shape of one task. Nodes are not included; `detail` returns them.
+   * @param {any} entry
+   */
+  function taskSummary(entry) {
+    return {
+      taskId: entry.taskId,
+      sessionId: entry.sessionId,
+      title: entry.title,
+      text: entry.text,
+      utterance: entry.utterance,
+      status: entry.status,
+      dispatchedAt: entry.dispatchedAt,
+      settledAt: entry.settledAt,
+      summary: entry.summary,
+      nodeCount: Array.isArray(entry.nodes) ? entry.nodes.length : null,
+    }
+  }
+
   return {
     /**
-     * @param {{ text?: unknown, sessionId?: unknown, title?: unknown, cwd?: unknown, signal?: AbortSignal }} input
+     * @param {{ text?: unknown, sessionId?: unknown, title?: unknown, utterance?: unknown, cwd?: unknown, signal?: AbortSignal }} input
      * @returns {Promise<{ taskId: string, sessionId: string, title: string }>}
      */
-    async dispatch({ text, sessionId, title, cwd, signal } = {}) {
+    async dispatch({ text, sessionId, title, utterance, cwd, signal } = {}) {
       signal?.throwIfAborted()
       const body = asString(text)
       if (body === '') throw boardError(400, 'invalid', '任务内容不能为空')
@@ -458,7 +731,20 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
 
       const taskTitle = truncate(asString(title) || body, 12) || '新任务'
       const taskId = `vc-task-${now()}-${Math.random().toString(16).slice(2, 8)}`
-      const entry = { taskId, sessionId: targetSessionId, title: taskTitle, text: body, dispatchedAt: now() }
+      const entry = {
+        taskId,
+        sessionId: targetSessionId,
+        title: taskTitle,
+        text: body,
+        utterance: asString(utterance) || body,
+        dispatchedAt: now(),
+        status: 'running',
+        settledAt: null,
+        summary: '',
+        nodes: null,
+      }
+      history.push(entry)
+      while (history.length > HISTORY_LIMIT) history.shift()
       // Apply defaults before committing work to the queue. Once prompt() is
       // invoked, its existing timeout and task tracking own the outcome.
       await applyDefaults(targetSessionId, signal)
@@ -470,6 +756,12 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
         await promptSession(targetSessionId, body, taskTitle)
       } catch (error) {
         tracked.delete(targetSessionId)
+        // The task view should still show a dispatch that never landed, with
+        // the reason, instead of a card stuck on "running" forever.
+        entry.status = 'failed'
+        entry.settledAt = now()
+        entry.summary = errorMessage(error)
+        entry.nodes = buildTaskNodes({ task: entry, events: [], running: false, failure: entry.summary })
         throw error
       }
       return { taskId, sessionId: targetSessionId, title: taskTitle }
@@ -477,6 +769,40 @@ export function createTaskBoard({ ctx, now = () => Date.now() } = {}) {
 
     watch,
     stop: stopWatching,
+
+    /**
+     * Newest first; the task view's left rail.
+     * @returns {Array<any>}
+     */
+    list() {
+      return history.slice().reverse().map(taskSummary)
+    },
+
+    /**
+     * One task plus its node chain. A running task reads the Session's events
+     * on every call, which is what makes the canvas live; a settled task serves
+     * the snapshot frozen at settle time.
+     * @param {{ taskId?: unknown, live?: boolean }} [input]
+     * @returns {Promise<{ task: any, nodes: any[] }>}
+     */
+    async detail({ taskId, live = true } = {}) {
+      const id = asString(taskId)
+      const entry = history.find((candidate) => candidate.taskId === id)
+      if (entry === undefined) throw boardError(404, 'not-found', '没有这个任务')
+      let nodes = entry.nodes
+      if (entry.status === 'running' && live !== false) {
+        const timeline = await readSessionTimeline(service('sessionController'), entry.sessionId)
+        nodes = buildTaskNodes({ task: entry, events: timeline, running: true })
+      } else if (!Array.isArray(nodes)) {
+        nodes = buildTaskNodes({
+          task: entry,
+          events: [],
+          running: false,
+          failure: entry.status === 'failed' ? entry.summary : undefined,
+        })
+      }
+      return { task: taskSummary(entry), nodes }
+    },
 
     /**
      * @param {number} [since] Cursor returned by the previous poll; 0 on first call.
