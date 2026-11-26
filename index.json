@@ -165,8 +165,8 @@
         "zh": "语音看板娘"
       },
       "description": {
-        "zh": "语音看板娘 0.6：设置面板收成「语音管家设置」一页，形象、声音、主题分组可改；挂断会中止本次通话的 /turn 请求，人声打断后把触发停播的那 220 毫秒语音交给识别，麦克风意外断开时结束当前通话并提示重连。形象仍是自研的 3D 发光核（单文件 WebGL，不依赖 three.js、不加载贴图），五套状态调色板、87 个样式 token 可改，跟模型说一句就能换主题并存成自己的。面板只做两件事：语音输入（通话逐句朗读、输入框听写、按住热键说话）与派活给 DSH。 0.7 加任务视图：面板右上 ▦ 打开全屏画布，把一次语音派活画成节点链（听到 → 派活(权限/推理/会话) → 每一步工具与回复 → 交付），运行中每 1.6 秒刷新并高亮当前节点，任务结束后节点链冻结成快照、不受会话日志裁剪影响；左栏切历史任务，点节点看全文，画布可拖动缩放。新增 GET /tasks 读任务列表与节点链。",
-        "en": "Voice companion 0.6: the settings panel is one sheet with grouped appearance, voice and theme sections. Hanging up aborts the call in-flight /turn request, a spoken interruption hands the 220 ms that stopped playback to recognition, and an unexpected microphone disconnect ends the call with a reconnect hint. The mascot is still an original 3D surface (one WebGL file, no three.js, no textures) with five state palettes and 87 style tokens; say one sentence to restyle it and save your own theme. The panel keeps two jobs: voice input (call-mode speech, composer dictation, hold-to-talk) and handing work to DSH. 0.7 adds a task view: the ▦ button opens a full-screen canvas that draws one spoken task as a node chain (heard → dispatched with permissions, reasoning and session setup → each tool call and reply → delivered), refreshing every 1.6 s and highlighting the running node; when a task ends the chain freezes into a snapshot that survives session-log trimming. A left rail switches between past tasks, clicking a node shows its full text, and the canvas pans and zooms. A new GET /tasks serves the task list and node chains."
+        "zh": "语音看板娘 0.7：设置面板收成「语音管家设置」一页，形象、声音、主题分组可改；挂断会中止本次通话的 /turn 请求，人声打断后把触发停播的那 220 毫秒语音交给识别，麦克风意外断开时结束当前通话并提示重连。形象仍是自研的 3D 发光核（单文件 WebGL，不依赖 three.js、不加载贴图），五套状态调色板、87 个样式 token 可改，跟模型说一句就能换主题并存成自己的。面板只做两件事：语音输入（通话逐句朗读、输入框听写、按住热键说话）与派活给 DSH。 任务视图（0.7 新增）：面板右上 ▦ 打开全屏画布，把一次语音派活画成节点链（听到 → 派活(权限/推理/会话) → 每一步工具与回复 → 交付），运行中每 1.6 秒刷新并高亮当前节点，任务结束后节点链冻结成快照、不受会话日志裁剪影响；左栏切历史任务，点节点看全文，画布可拖动缩放。新增 GET /tasks 读任务列表与节点链。",
+        "en": "Voice companion 0.7: the settings panel is one sheet with grouped appearance, voice and theme sections. Hanging up aborts the call in-flight /turn request, a spoken interruption hands the 220 ms that stopped playback to recognition, and an unexpected microphone disconnect ends the call with a reconnect hint. The mascot is still an original 3D surface (one WebGL file, no three.js, no textures) with five state palettes and 87 style tokens; say one sentence to restyle it and save your own theme. The panel keeps two jobs: voice input (call-mode speech, composer dictation, hold-to-talk) and handing work to DSH. The task view added in 0.7: the ▦ button opens a full-screen canvas that draws one spoken task as a node chain (heard → dispatched with permissions, reasoning and session setup → each tool call and reply → delivered), refreshing every 1.6 s and highlighting the running node; when a task ends the chain freezes into a snapshot that survives session-log trimming. A left rail switches between past tasks, clicking a node shows its full text, and the canvas pans and zooms. A new GET /tasks serves the task list and node chains."
       },
       "icon": "plugins/voice-companion/icon.svg",
       "author": "Feahter",
@@ -576,8 +576,8 @@
         "zh": "dsh-360 两面体检"
       },
       "description": {
-        "zh": " 0.2.3 收紧打分口径：跨文件冲突只在拿到组合级 detectConflicts 结果时给分，缺数据记 N/A 而不是默认满分；analyze/score/report 三件套与 RUBRIC.md 对齐，并补了锁住该口径的测试。",
-        "en": " 0.2.3 tightens the rubric: cross-file conflicts are graded only when a composition-level detectConflicts result exists — missing data is N/A, never a default full score; analyze, score and report now follow RUBRIC.md, and tests pin the rule."
+        "zh": " 打分口径（0.2.3 起收紧）：跨文件冲突只在拿到组合级 detectConflicts 结果时给分，缺数据记 N/A 而不是默认满分；analyze/score/report 三件套与 RUBRIC.md 对齐，并补了锁住该口径的测试。",
+        "en": " The rubric (tightened since 0.2.3): cross-file conflicts are graded only when a composition-level detectConflicts result exists — missing data is N/A, never a default full score; analyze, score and report now follow RUBRIC.md, and tests pin the rule."
       },
       "icon": "plugins/dsh-360/icon.svg",
       "author": "Feahter",
