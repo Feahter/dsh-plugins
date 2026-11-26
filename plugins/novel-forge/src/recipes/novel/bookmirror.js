@@ -2,9 +2,9 @@
 import { buildOutlineSkeleton } from './plan.js'
 import { chapterId } from './outline.js'
 import { countCjk } from './craft.js'
-import { splitInline } from './chapter.js'
+import { castTier, splitInline } from './chapter.js'
 import { slugify } from './export.js'
-import { emptyCanon, formatCanon, mergeCanon } from './canon.js'
+import { emptyCanon, entityOf, formatCanon, mergeCanon } from './canon.js'
 
 const list = (value) => Array.isArray(value) ? value : []
 const text = (value) => typeof value === 'string' ? value.trim() : ''
@@ -38,7 +38,7 @@ function chapterPlan(outline, spine, params, artifacts) {
     const planned = new Map(group.rows.map((row, i) => [number(row.index) || chapterNumber(row.id) || offset + i + 1, row]))
     for (let i = 1; i <= size; i++) {
       const no = offset + i
-      if (!planned.has(no) && i > group.rows.length) planned.set(no, { skeleton: true })
+      if (!planned.has(no)) planned.set(no, { skeleton: true })
     }
     group.rows = [...planned].sort(([a], [b]) => a - b).map(([no, row]) => {
       const id = row.id || chapterId(no - 1, total)
@@ -117,12 +117,44 @@ export function renderBook(project, artifacts, { stage, itemId } = {}) {
   const bible = get('bible')
   if (text(bible)) files.set('bible.md', bible)
   const cast = list(get('characters')?.cast)
-  if (cast.length) put('characters.md', ['# 人物档案', ...cast.map((person) => [
-    `\n## ${line(person.name)}`,
-    ...Object.entries({ role: '定位', gender: '性别', want: '欲望（want）', need: '需求（need）', wound: '创伤（wound）', lie: '谎言（lie）' })
-      .map(([key, label]) => bullet(label, person[key])),
-    bullet('关系', list(person.relations).map(({ to, kind }) => [line(to), line(kind)].filter(Boolean).join('：')).filter(Boolean).join('；')),
-  ].filter(Boolean).join('\n'))].join('\n'))
+  const source = get('canon') ?? get('ledger')
+  const canon = source && (Number(source.version) === 2 ? source : mergeCanon(emptyCanon(), source))
+  const covered = new Set()
+  const withCanon = cast.filter((person) => text(person?.name)).map((person) => {
+    const found = entityOf(canon, person.name)
+    if (!found || found.entity.kind !== 'character') return person
+    covered.add(found.name)
+    const { entity } = found
+    const aliases = [...new Set([...list(person.aliases), ...list(entity.aliases)].map(line))]
+      .filter((alias) => alias && alias !== line(person.name))
+    return { ...person, aliases, firstSeen: person.firstSeen || entity.firstSeen }
+  })
+  const registered = Object.entries(canon?.entities ?? {}).filter(([key, entity]) => entity?.kind === 'character' && !covered.has(key))
+    .map(([key, entity]) => ({ ...entity, name: entity.displayName || key, tier: 'minor' }))
+  const roster = [...withCanon, ...registered]
+  if (roster.length) {
+    const byTier = (tier) => roster.filter((person) => castTier(person) === tier)
+    const aliasesOf = (person) => list(person.aliases).map(line).filter((alias) => alias && alias !== line(person.name)).join('、')
+    const core = byTier('core').map((person) => [
+      `\n### ${line(person.name)}`,
+      ...Object.entries({ role: '定位', gender: '性别', want: '欲望（want）', need: '需求（need）', wound: '创伤（wound）', lie: '谎言（lie）' })
+        .map(([key, label]) => bullet(label, person[key])),
+      bullet('关系', list(person.relations).map(({ to, kind }) => [line(to), line(kind)].filter(Boolean).join('：')).filter(Boolean).join('；')),
+      bullet('别名', aliasesOf(person)), bullet('首次出场', person.firstSeen),
+    ].filter(Boolean).join('\n'))
+    const major = byTier('major').map((person) => `- ${[
+      line(person.name), line(person.role), person.want && `想要：${line(person.want)}`,
+      person.pressure && `压力：${line(person.pressure)}`, person.recognitionTag && `标签：${line(person.recognitionTag)}`,
+      aliasesOf(person) && `别名：${aliasesOf(person)}`, person.firstSeen && `首次出场：${line(person.firstSeen)}`,
+    ].filter(Boolean).join('｜')}`)
+    const minor = byTier('minor').map((person) => [
+      cell([line(person.name), aliasesOf(person) && `（${aliasesOf(person)}）`].filter(Boolean).join('')),
+      cell(person.role), cell(person.firstSeen),
+    ])
+    put('characters.md', ['# 人物档案', '', '## 核心人物', ...core,
+      '', '## 阶段人物', '', ...major, '', '## 登记人物', '', table(['名字', '定位', '首次出场'], minor),
+    ].join('\n'))
+  }
 
   if (outline || spine) {
     put('outline.md', ['# 卷章大纲', '', bullet('主线', spine?.mainline), bullet('结局', spine?.ending),
@@ -134,9 +166,7 @@ export function renderBook(project, artifacts, { stage, itemId } = {}) {
       ].filter(Boolean).join('\n')),
     ].join('\n'))
   }
-  const source = get('canon') ?? get('ledger')
-  if (source) {
-    const canon = Number(source.version) === 2 ? source : mergeCanon(emptyCanon(), source)
+  if (canon) {
     const formatted = formatCanon(canon, { maxChars: 0 })
     if (formatted) put('canon.md', `# 正典\n\n${formatted.replace(/^【(.+)】$/gm, '\n## $1\n').trim()}`)
   }

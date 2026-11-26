@@ -32,7 +32,7 @@ const cmpStr = (a, b) => {
 }
 
 /** 章节 id 里的数字序号；解析不出来按「最久远」处理（-1）。 */
-function chapterNumber(id) {
+export function chapterNumber(id) {
   const matched = String(id ?? '').match(/\d+/)
   return matched ? Number(matched[0]) : -1
 }
@@ -128,6 +128,7 @@ function characterEntries(characters) {
 
 function entityFromCharacter(person) {
   const entity = blankEntity('character')
+  entity.displayName = norm(person.displayName) || norm(person.name)
   entity.gender = norm(person.gender)
   entity.role = norm(person.role)
   entity.aliases = uniqueStrings(person.aliases)
@@ -381,21 +382,40 @@ function mergeEntities(canon, entities) {
   for (const [rawName, rawState] of Object.entries(entities)) {
     const name = norm(rawName)
     if (!name || !rawState || typeof rawState !== 'object' || Array.isArray(rawState)) continue
-    const current = canon.entities[name] ?? blankEntity(norm(rawState.kind) || 'character')
+    const key = entityKeyOf(canon.entities, name) ?? name
+    const current = Object.hasOwn(canon.entities, key) ? canon.entities[key] : blankEntity(norm(rawState.kind) || 'character')
     const next = { ...blankEntity(current.kind || 'character'), ...current }
+    next.displayName = norm(rawState.displayName) || norm(current.displayName) || key
     if (rawState.kind != null) next.kind = norm(rawState.kind) || next.kind
     for (const field of ['gender', 'role', 'firstSeen', 'lastSeen', 'location', 'state']) {
       if (rawState[field] != null) next[field] = norm(rawState[field])
     }
-    if (rawState.aliases != null) next.aliases = uniqueStrings([...(next.aliases ?? []), ...(Array.isArray(rawState.aliases) ? rawState.aliases : [])])
+    next.aliases = uniqueStrings([
+      ...(Array.isArray(next.aliases) ? next.aliases : []),
+      ...(Array.isArray(rawState.aliases) ? rawState.aliases : []),
+      name, key, next.displayName,
+    ])
     if (rawState.knows != null) next.knows = uniqueStrings([...(next.knows ?? []), ...(Array.isArray(rawState.knows) ? rawState.knows : [])])
     if (rawState.relations != null) {
       next.relations = normalizeRelations([...(next.relations ?? []), ...(Array.isArray(rawState.relations) ? rawState.relations : [])])
     }
     if (norm(rawState.lastSeen)) next.lastSeen = norm(rawState.lastSeen)
     else if (norm(rawState.chapter)) next.lastSeen = norm(rawState.chapter)
-    canon.entities[name] = next
+    Object.defineProperty(canon.entities, key, { value: next, enumerable: true, configurable: true, writable: true })
   }
+}
+
+export function recordAppearances(canon, names, chapter) {
+  if (!names.length) return canon
+  const next = mergeCanon(canon, { entities: Object.fromEntries(names.map((name) => [name, { kind: 'character' }])) })
+  for (const name of names) {
+    const { entity } = entityOf(next, name)
+    entity.appearances = uniqueStrings([...(Array.isArray(entity.appearances) ? entity.appearances : []), chapter])
+    const ordered = entity.appearances.slice().sort((a, b) => chapterNumber(a) - chapterNumber(b))
+    entity.firstSeen = ordered[0]
+    entity.lastSeen = ordered.at(-1)
+  }
+  return next
 }
 
 function mergeTimeline(canon, entries, chapter) {
@@ -584,7 +604,16 @@ export function queryCanon(canon, { cast, keywords, location, atChapter, limit }
   const invariants = uniqueStrings(safe.invariants).slice(0, RULES_LIMIT)
   const pick = (list) => list.slice(0, max).map((item) => clone(item.fact ?? item.note ?? item.thread ?? item.entry))
   const pickedFacts = pick(facts)
-  const pickedNotes = pick(notes)
+  const protectedNotes = new Set(briefNotesOf(notes.map(({ note }) => note), BRIEF_NOTE_CHARS))
+  let remainingNotes = Math.max(0, max - protectedNotes.size)
+  const pickedNotes = notes
+    .filter(({ note }) => {
+      if (protectedNotes.has(note)) return true
+      if (remainingNotes <= 0) return false
+      remainingNotes -= 1
+      return true
+    })
+    .map(({ note }) => clone(note))
   const pickedThreads = pick(threads)
   const pickedEntities = entities.slice(0, max).map((item) => ({ name: item.name, ...clone(item.entity) }))
   const pickedTimeline = pick(timeline)
@@ -622,7 +651,7 @@ function clip(text, maxChars) {
 }
 
 // 分节预算：先保底再按权重分，最后把没用掉的额度补给还没放完的节。
-// 保底只做两件事：硬规则/不可违背各留一小块；有未回收线索时留出「标题 + 至少 2 条正文」。
+// 保底：brief 注记优先，其次给硬规则/不可违背和未回收线索留额度。
 // 这样第 500 章事实再多，线索区块也不会被事实挤掉（§4 承诺 open threads 进 packet）。
 const SECTION_WEIGHTS = {
   rules: 0.2,
@@ -633,8 +662,11 @@ const SECTION_WEIGHTS = {
   entities: 1.2,
   timeline: 0.8,
 }
-// 没放完的额度按此顺序补给；事实优先保持「占大头」，线索紧随其后。
-const SECTION_REFILL_ORDER = ['facts', 'threads', 'notes', 'entities', 'timeline', 'rules', 'invariants']
+// 保底之外的额度按此顺序回填，按权重分配时事实仍占大头。
+const SECTION_REFILL_ORDER = ['notes', 'facts', 'threads', 'entities', 'timeline', 'rules', 'invariants']
+const NOTES_TITLE = '【连续性注记】'
+const BRIEF_NOTE_CHARS = 220
+const BRIEF_NOTE_LINES = 6
 // 小于这个额度时不再保证 2 条线索正文，只按比例分。
 const THREAD_GUARANTEE_CHARS = 1200
 const THREAD_GUARANTEE_LINES = 2
@@ -677,6 +709,25 @@ function factLine(fact) {
   return `- [${chapter}] ${norm(fact.s)}｜${norm(fact.p)}｜${norm(fact.o)}`
 }
 
+function noteLine(note) {
+  return `- [${norm(note.chapter) || '—'}] ${norm(note.text)}`
+}
+
+/** 保底额度包含注记标题、行前缀与换行，按整条注记选入。 */
+function briefNotesOf(notes, budget) {
+  const picked = []
+  let used = NOTES_TITLE.length
+  for (const note of notes) {
+    if (!Array.isArray(note.tags) || !note.tags.includes('brief')) continue
+    const cost = 1 + noteLine(note).length
+    if (used + cost > budget) continue
+    picked.push(note)
+    used += cost
+    if (picked.length === BRIEF_NOTE_LINES) break
+  }
+  return picked
+}
+
 function entityLine(name, entity) {
   const head = [norm(entity.role), norm(entity.gender)].filter(Boolean).join('｜')
   const parts = []
@@ -713,14 +764,9 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
     facts.filter((fact) => fact && typeof fact === 'object').map(factLine),
   )
 
-  const notes = Array.isArray(slice.notes) ? slice.notes : []
-  push(
-    'notes',
-    '【连续性注记】',
-    notes
-      .filter((note) => note && typeof note === 'object')
-      .map((note) => `- [${norm(note.chapter) || '—'}] ${norm(note.text)}`),
-  )
+  const notes = (Array.isArray(slice.notes) ? slice.notes : [])
+    .filter((note) => note && typeof note === 'object')
+  push('notes', NOTES_TITLE, notes.map(noteLine))
 
   const threads = (Array.isArray(slice.threads) ? slice.threads : []).filter(
     (thread) => thread && norm(thread.status) !== 'closed',
@@ -772,21 +818,37 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
   }
 
   const limit = Math.floor(maxChars)
+  if (!limit) return ''
   const full = sections.reduce(
     (sum, section) => sum + sectionCost(section.title, section.lines),
-    0,
+    sections.length - 1,
   )
   // 全部装得下：与旧实现逐字节一致，且不出现截断标记。
   if (full <= limit) return sections.map((section) => render(section, section.lines)).join('\n')
 
+  const protectedNotes = new Set(briefNotesOf(notes, Math.min(BRIEF_NOTE_CHARS, limit)))
+  const notesFloor = sectionCost(NOTES_TITLE, [...protectedNotes].map(noteLine))
+  if (notesFloor) {
+    const section = sections.find(({ key }) => key === 'notes')
+    section.lines = [...protectedNotes, ...notes.filter((note) => !protectedNotes.has(note))].map(noteLine)
+  }
+  // 保底不能被节间换行或截断标记挤掉。空间不足时先留足 brief 注记。
+  const bodyLimit = notesFloor
+    ? Math.max(notesFloor, limit - (sections.length - 1) - (1 + TRUNCATED_TEXT.length))
+    : limit
+
   const totalWeight =
     sections.reduce((sum, section) => sum + (SECTION_WEIGHTS[section.key] ?? 1), 0) || 1
 
-  // 第一轮：保底（线索 2 条 / 规则小块），剩余额度按权重分。
+  // 第一轮：brief 注记已保底，再留线索和规则所需的额度。
   const alloc = new Map()
-  let reserved = 0
+  let reserved = notesFloor
   for (const section of sections) {
     let floor = 0
+    if (section.key === 'notes') {
+      alloc.set(section.key, notesFloor)
+      continue
+    }
     if (section.key === 'threads') {
       floor = threadFloor(section.title, section.lines, limit)
     } else if (section.key === 'rules' || section.key === 'invariants') {
@@ -795,10 +857,11 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
         Math.floor(limit * RULES_FLOOR_RATIO),
       )
     }
+    if (notesFloor) floor = Math.min(floor, bodyLimit - reserved)
     alloc.set(section.key, floor)
     reserved += floor
   }
-  const pool = Math.max(0, limit - reserved)
+  const pool = Math.max(0, bodyLimit - reserved)
   for (const section of sections) {
     const weight = SECTION_WEIGHTS[section.key] ?? 1
     alloc.set(
@@ -816,7 +879,7 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
   }
 
   // 第二轮：把没用掉的额度回填给还没放完的节；循环到没有进展为止。
-  let leftover = limit - used
+  let leftover = bodyLimit - used
   let progressed = true
   while (leftover > 0 && progressed) {
     progressed = false
@@ -849,7 +912,9 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
   }
   const body = parts.join('\n')
   if (!dropped) return clip(body, limit)
-  return clip(`${body}\n${TRUNCATED_TEXT}`, limit)
+  const marked = `${body}\n${TRUNCATED_TEXT}`
+  if (notesFloor) return marked.length <= limit ? marked : body
+  return clip(marked, limit)
 }
 
 // ---------------------------------------------------------------- 自检
@@ -857,8 +922,11 @@ export function formatCanon(slice, { maxChars = 3200 } = {}) {
 /**
  * 账本自身的问题（不是正文问题）：冲突、缺字段、重复 id。
  * 不自动裁决，只把需要人工/LLM 决策的点列出来。
+ *
+ * chapterOnly：审校单章时只看「本章新写的事实」引发的冲突。
+ * 不传时是整本账本视图；传了就不会把前 10 章的旧冲突在每一章重复一遍。
  */
-export function canonProblems(canon, { atChapter } = {}) {
+export function canonProblems(canon, { atChapter, chapterOnly = false } = {}) {
   const safe = canon && typeof canon === 'object' ? canon : emptyCanon()
   const findings = []
   const facts = (Array.isArray(safe.facts) ? safe.facts : []).filter(
@@ -869,16 +937,27 @@ export function canonProblems(canon, { atChapter } = {}) {
   for (const fact of facts) {
     if (norm(fact.status) !== 'canon') continue
     const key = factGroupKey(fact)
-    if (!groups.has(key)) groups.set(key, new Set())
-    groups.get(key).add(norm(fact.o))
+    let entry = groups.get(key)
+    if (!entry) {
+      entry = { values: new Set(), chapters: new Set(), freeform: false }
+      groups.set(key, entry)
+    }
+    const value = norm(fact.o)
+    entry.values.add(value)
+    entry.chapters.add(chapterNumber(fact.chapter))
+    // 「状态/持有」常被用来存一两句自由描述（人物状态快照、随身物清单）。
+    // 带标点或超过 18 字的取值不是互斥枚举，同一 s|p 下多条属于正常演进，不该当冲突裁决。
+    if (value.length > 18 || /[，。；、]/.test(value)) entry.freeform = true
   }
-  for (const [key, values] of groups) {
-    if (values.size <= 1) continue
+  const target = chapterOnly ? chapterNumber(atChapter) : null
+  for (const [key, entry] of groups) {
+    if (entry.values.size <= 1 || entry.freeform) continue
+    if (target != null && target >= 0 && !entry.chapters.has(target)) continue
     findings.push({
       severity: 'warn',
       kind: 'canon-conflict',
       where: key,
-      issue: `同一主体与谓词存在多个正典取值：${[...values].join(' / ')}`,
+      issue: `同一主体与谓词存在多个正典取值：${[...entry.values].join(' / ')}`,
       fix: '人工或 LLM 裁决后，把不再采用的旧事实置 status:"retracted"',
     })
   }
@@ -942,17 +1021,26 @@ export function canonStats(canon) {
   }
 }
 
-/** 名字或别名 → { name, entity }；找不到返回 null。 */
+function entityKeyOf(entities, target) {
+  if (Object.hasOwn(entities, target) && entities[target]) return target
+  let match = null
+  for (const [key, entity] of Object.entries(entities)) {
+    if (!Array.isArray(entity?.aliases) || !entity.aliases.some((alias) => norm(alias) === target)) continue
+    if (match !== null) return null
+    match = key
+  }
+  return match
+}
+
+/** 名字或唯一已登记别名 → { name, entity }；找不到或别名冲突返回 null。 */
 export function entityOf(canon, name) {
   const target = norm(name)
   if (!target) return null
   const entities = canon?.entities && typeof canon.entities === 'object' ? canon.entities : {}
-  if (entities[target]) return { name: target, entity: entities[target] }
-  for (const [entityName, entity] of Object.entries(entities)) {
-    const aliases = Array.isArray(entity?.aliases) ? entity.aliases.map(norm) : []
-    if (aliases.includes(target)) return { name: entityName, entity }
-  }
-  return null
+  const key = entityKeyOf(entities, target)
+  if (key === null) return null
+  const entity = entities[key]
+  return { name: key, entity: entity.displayName ? entity : { ...entity, displayName: key } }
 }
 
 /**

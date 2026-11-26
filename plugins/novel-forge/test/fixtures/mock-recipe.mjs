@@ -66,6 +66,14 @@ export function makeMockRecipe(options = {}) {
         async run(ctx) {
           if (options.betaDelayMs) await sleep(options.betaDelayMs, undefined, { signal: ctx.signal })
           if (failIds.has(ctx.item.id)) throw new Error(`boom ${ctx.item.id}`)
+          // 「这一轮轮不到」：条目保持原状态并中断本阶段，用于验证 defer 不回退已完成状态。
+          if ((options.deferIds || []).includes(ctx.item.id) && ctx.run?.options?.force === true) {
+            return { artifacts: {}, defer: true, note: `defer ${ctx.item.id}` }
+          }
+          // 「现在做不了」：没有产物、不算进度，引擎应记 skipped。
+          if ((options.skipIds || []).includes(ctx.item.id)) {
+            return { artifacts: {}, skipped: true, note: `跳过 ${ctx.item.id}` }
+          }
           const generated = await ctx.llm.generate({
             system: 'system prompt',
             user: `写 ${ctx.item.id}`,

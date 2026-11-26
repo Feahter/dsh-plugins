@@ -101,6 +101,15 @@ export function severityRank(severity) {
   return SEVERITY_RANK[severity] ?? 3
 }
 
+const WORD_FREQUENCY_KINDS = new Set(['ai-cliche', 'ai-density', 'ai-pattern', 'emotion', 'sensory'])
+
+/** Deterministic and review verdicts use the same rule while retaining all findings. */
+export function draftVerdict(findings) {
+  if (findings.some(({ severity }) => severity === 'block')) return 'revise'
+  const warnings = findings.filter(({ severity }) => severity === 'warn')
+  return warnings.length >= 3 && warnings.some(({ kind }) => !WORD_FREQUENCY_KINDS.has(kind)) ? 'revise' : 'pass'
+}
+
 function visible(text) {
   return String(text ?? '').replace(/\s+/g, '')
 }
@@ -108,6 +117,23 @@ function visible(text) {
 export function countCjk(text) {
   const matched = String(text ?? '').match(/[\u3400-\u4dbf\u4e00-\u9fff]/g)
   return matched ? matched.length : 0
+}
+
+/** 字符二元组集合的 Jaccard 距离，用于估算修订幅度。 */
+export function editRate(before, after) {
+  if (before === after) return 0
+  const bigrams = (text) => {
+    const chars = Array.from(text)
+    const pairs = new Set()
+    for (let i = 1; i < chars.length; i += 1) pairs.add(chars[i - 1] + chars[i])
+    return pairs
+  }
+  const a = bigrams(before)
+  const b = bigrams(after)
+  let intersection = 0
+  for (const pair of a) if (b.has(pair)) intersection += 1
+  const union = a.size + b.size - intersection
+  return union ? 1 - intersection / union : 1
 }
 
 /**
@@ -161,8 +187,10 @@ function statSentences(text) {
 
 /** 句子读数：count / 平均句长 / 最长句 / 短句占比（≤12 字，百分数 0–100）。 */
 export function sentenceStats(text) {
-  const sentences = statSentences(text)
-  const lens = sentences.map((sentence) => countCjk(sentence))
+  return summarizeSentenceLengths(statSentences(text).map(countCjk))
+}
+
+function summarizeSentenceLengths(lens) {
   if (!lens.length) return { count: 0, avgLen: 0, maxLen: 0, shortRatio: 0 }
   const total = lens.reduce((sum, value) => sum + value, 0)
   return {
@@ -171,6 +199,38 @@ export function sentenceStats(text) {
     maxLen: Math.max(...lens),
     shortRatio: round1((100 * lens.filter((value) => value <= 12).length) / lens.length),
   }
+}
+
+// 表面词形代理，长后缀优先，避免「维度」重复计作「度」。
+function zhProseStats(body, cjk) {
+  const per = (hits, scale) => cjk ? (scale * hits) / cjk : 0
+  return {
+    dePer100: per(countOf(body, '的'), 100),
+    beiPer100: per(countOf(body, '被'), 100),
+    nominalPer1k: per((body.match(/主义|层面|维度|机制|[性化度感]/g) ?? []).length, 1000),
+  }
+}
+
+/** 每满 200 个汉字，检查块内是否有 ≤8 字的短句落点。 */
+function shortSentenceRhythm(lengths, cjk) {
+  const windows = new Set()
+  let end = 0
+  let short = 0
+  for (const length of lengths) {
+    end += length
+    if (length <= 8) {
+      short += 1
+      windows.add(Math.floor((end - 1) / 200))
+    }
+  }
+  let missingWindow = 0
+  for (let i = 0; i < Math.floor(cjk / 200); i += 1) {
+    if (!windows.has(i)) {
+      missingWindow = i + 1
+      break
+    }
+  }
+  return { per200: cjk ? round1((200 * short) / cjk) : 0, missingWindow }
 }
 
 /** 每千汉字命中次数（保留 1 位小数）；空正文返回 0，不除零。 */
@@ -751,6 +811,57 @@ function dialogueTensionFindings(metrics) {
   return findings
 }
 
+// 按区间去重：长框架里的词只算一次（如「空气仿佛凝固」里的「仿佛」）。
+function aiMarkers(body) {
+  const markers = []
+  for (const phrase of AI_CLICHES) {
+    let position = body.indexOf(phrase)
+    while (position !== -1) {
+      markers.push({ label: phrase, start: position, end: position + phrase.length })
+      position = body.indexOf(phrase, position + phrase.length)
+    }
+  }
+  for (const pattern of AI_PATTERNS) {
+    for (const match of scanPattern(body, pattern)) {
+      markers.push({ label: pattern.label, start: match.index, end: match.index + match.text.length })
+    }
+  }
+  markers.sort((a, b) => a.start - b.start || b.end - a.end)
+  const merged = []
+  for (const marker of markers) {
+    if (merged.length && marker.start < merged[merged.length - 1].end) continue
+    merged.push(marker)
+  }
+  return merged
+}
+
+/** 同体裁同长度带内的只读风格向量（写作体系 §6.1）。 */
+export function styleVector(text) {
+  const body = String(text ?? '')
+  const cjk = countCjk(body)
+  const per1k = (hits) => cjk ? (1000 * hits) / cjk : 0
+  // §6.1 将分号算作句界，与 checkDraft 的 story-craft 口径不同。
+  const lengths = body.split(/[。！？；]/).map(countCjk).filter(Boolean)
+  const avgSentenceLen = lengths.length ? cjk / lengths.length : 0
+  const variance = lengths.length
+    ? lengths.reduce((sum, length) => sum + (length - avgSentenceLen) ** 2, 0) / lengths.length
+    : 0
+  const diffs = lengths.slice(1).reduce((sum, length, i) => sum + Math.abs(length - lengths[i]), 0)
+  const numberCount = (body.match(/[0-9０-９]+(?:[.．][0-9０-９]+)?(?:[%％]|年)?/g) ?? []).length
+  const quoteCount = [...body.matchAll(new RegExp(QUOTE_SPAN_SOURCE, 'g'))].length
+  return {
+    ...zhProseStats(body, cjk),
+    aiMarkerPer1k: per1k(aiMarkers(body).length),
+    avgSentenceLen,
+    sentenceCv: avgSentenceLen ? Math.sqrt(variance) / avgSentenceLen : 0,
+    sentenceDiff: lengths.length > 1 ? diffs / (lengths.length - 1) / avgSentenceLen : 0,
+    emptyVerbPer1k: per1k((body.match(/进行|实现|推动|构建|打造|赋能|助力/g) ?? []).length),
+    hedgePer1k: per1k((body.match(/或许|可能|在一定程度上|往往|通常/g) ?? []).length),
+    concretePer1k: per1k(numberCount + quoteCount),
+    cjk,
+  }
+}
+
 /**
  * 确定性检查。返回 findings（形状同 §4.4）与 stats。
  * @param {{text?: string, params?: object, beats?: object|null, previousHook?: string, cast?: Array<{name?: string, role?: string, gender?: string}>}} input
@@ -763,7 +874,10 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   const paragraphs = splitParagraphs(body)
   const cjk = countCjk(body)
   const ratio = dialogueRatio(body)
-  const sentences = sentenceStats(body)
+  const sentenceLengths = statSentences(body).map(countCjk)
+  const sentences = summarizeSentenceLengths(sentenceLengths)
+  const zhProse = zhProseStats(body, cjk)
+  const shortRhythm = shortSentenceRhythm(sentenceLengths, cjk)
   const castNameList = castNames(cast)
   const nameDensity = distinctNameDensity(body, castNameList)
   const sceneCount = countScenes(body, beats)
@@ -781,6 +895,10 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     avgSentenceLen: sentences.avgLen,
     maxSentenceLen: sentences.maxLen,
     shortSentenceRatio: sentences.shortRatio,
+    short8Per200: shortRhythm.per200,
+    dePer100: round1(zhProse.dePer100),
+    beiPer100: round1(zhProse.beiPer100),
+    nominalPer1k: round1(zhProse.nominalPer1k),
     sensoryPer1k: densityPer1k(body, SENSORY_WORDS),
     sensoryBuckets,
     abstractEmotionPer1k: densityPer1k(body, ABSTRACT_EMOTION_WORDS),
@@ -817,8 +935,8 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
 
   // 1. 字数
   const ratioToTarget = cjk / wordsPerChapter
-  if (ratioToTarget < 0.75 || ratioToTarget > 1.35) {
-    const direction = ratioToTarget < 0.75 ? '偏短' : '偏长'
+  if (ratioToTarget < 0.9 || ratioToTarget > 1.15) {
+    const direction = ratioToTarget < 0.9 ? '偏短' : '偏长'
     add(
       'warn',
       'length',
@@ -860,34 +978,17 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
     add('note', 'dialogue', '全章', `对话占比 ${(ratio * 100).toFixed(1)}%，超过 45%，动作与场景被对话挤掉`, '把一部分问答改成动作、停顿或环境反应，让对话之间有身体')
   }
 
-  // 4. AI 腔黑名单 + AI 模式。所有命中按区间合并去重：长框架里的词只算一次
-  //（例如「空气仿佛凝固」里的「仿佛」），不再按起始位置各算各的。
-  const markers = []
-  for (const phrase of AI_CLICHES) {
-    let position = body.indexOf(phrase)
-    while (position !== -1) {
-      markers.push({ label: phrase, start: position, end: position + phrase.length })
-      position = body.indexOf(phrase, position + phrase.length)
-    }
-  }
-  for (const pattern of AI_PATTERNS) {
-    for (const match of scanPattern(body, pattern)) {
-      markers.push({ label: pattern.label, start: match.index, end: match.index + match.text.length })
-    }
-  }
-  markers.sort((a, b) => a.start - b.start || b.end - a.end)
-  const merged = []
+  // 4. AI 腔黑名单 + AI 模式。
+  const markers = aiMarkers(body)
   const markerCounts = new Map()
-  for (const marker of markers) {
-    if (merged.length && marker.start < merged[merged.length - 1].end) continue
-    merged.push(marker)
-    markerCounts.set(marker.label, (markerCounts.get(marker.label) ?? 0) + 1)
-  }
-  const aiMarkerCount = merged.length
+  for (const { label } of markers) markerCounts.set(label, (markerCounts.get(label) ?? 0) + 1)
+  const aiMarkerCount = markers.length
   stats.aiMarkerCount = aiMarkerCount
   stats.aiMarkerPer1k = cjk ? round1((1000 * aiMarkerCount) / cjk) : 0
 
-  if (aiMarkerCount >= 3) {
+  const aiClicheWarn = aiMarkerCount >= 3
+  const countedAiMarker = aiClicheWarn ? '（已计入上条 AI 腔统计）' : ''
+  if (aiClicheWarn) {
     const detail = [...markerCounts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
@@ -897,17 +998,17 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
   }
 
   if (stats.aiMarkerPer1k >= 3) {
-    add('warn', 'ai-density', '全章', `AI 腔标记密度 ${stats.aiMarkerPer1k}/千字，达到 3/千字，跨章比较偏高`, '先删模板句式和套话，再逐句换成具体动作或感官细节')
+    add(aiClicheWarn ? 'note' : 'warn', 'ai-density', '全章', `AI 腔标记密度 ${stats.aiMarkerPer1k}/千字，达到 3/千字，跨章比较偏高${countedAiMarker}`, '先删模板句式和套话，再逐句换成具体动作或感官细节')
   }
 
   // 4b. 「不是…而是…」排比单独提示：这是最容易看出来的模板句式。
   const notButCount = scanPattern(body, AI_PATTERNS[0]).length
   if (notButCount) {
     add(
-      'warn',
+      aiClicheWarn ? 'note' : 'warn',
       'ai-pattern',
       '全章',
-      `出现「不是…而是…」排比 ${notButCount} 次，先否定再抬高的句式像模板`,
+      `出现「不是…而是…」排比 ${notButCount} 次，先否定再抬高的句式像模板${countedAiMarker}`,
       '删掉「不是…」的半句，直接陈述后半句，让信息自己落地',
     )
   }
@@ -999,7 +1100,7 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
 
   if (stats.abstractEmotionPer1k > 12) {
     add(
-      'block',
+      'warn',
       'emotion',
       '全章',
       `抽象情绪词密度 ${stats.abstractEmotionPer1k}/千字，超过 12/千字，情绪在替读者感受`,
@@ -1061,6 +1162,22 @@ export function checkDraft({ text = '', params = {}, beats = null, previousHook 
       `对话占比 ${(ratio * 100).toFixed(1)}%，在 8%–15% 之间，低于 15%–45% 的参考区间`,
       '把一段转述改成两人对话，或让对话承担更多冲突与信息',
     )
+  }
+
+  // 中文体检只作提示，短片段保留读数、跳过判读。
+  if (cjk >= 500) {
+    if (zhProse.dePer100 > 5) {
+      add('note', 'zh-de-density', '全章', `「的」密度 ${stats.dePer100}/百字，超过 5/百字`, '找出密集的「的」字链，拆开多层修饰')
+    }
+    if (zhProse.beiPer100 > 1) {
+      add('note', 'zh-bei-density', '全章', `「被」密度 ${stats.beiPer100}/百字，超过 1/百字`, '中文被动自带遭受义，逐句核对是否需要保留「被」')
+    }
+    if (shortRhythm.missingWindow) {
+      add('note', 'zh-short-rhythm', `第 ${shortRhythm.missingWindow} 个 200 字区间`, '此处没有 ≤8 字的短句，节奏偏平', '试用短句收住一个动作或段落')
+    }
+    if (zhProse.nominalPer1k > 25) {
+      add('note', 'zh-nominal-density', '全章', `名词化密度 ${stats.nominalPer1k}/千字，超过 25/千字`, '逐处追问是哪个具体事例，用动作或物象落地')
+    }
   }
 
   // 10b. 章末落点（08-C4 / 06-R6）：总结词优先，命中即不再报议论落点。

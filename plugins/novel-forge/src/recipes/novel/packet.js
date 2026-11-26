@@ -31,7 +31,7 @@ const SCENE_FIELDS = [
   ['where', '地点'],
 ]
 
-/** 分片固定表（顺序即拼装顺序）。 */
+/** 分片固定表（实际拼装顺序由 priority 决定）。 */
 export const SLICE_SPEC = [
   { name: 'brief', title: '写作要求', cap: 900, priority: 0, required: true },
   { name: 'beats', title: '本章细纲', cap: 2500, priority: 1, required: false },
@@ -44,8 +44,10 @@ export const SLICE_SPEC = [
   { name: 'style', title: '文风', cap: 1200, priority: 6, required: false },
   // v0.3：追加而非插入。assemble() 按 priority 排序，数组下标不再代表拼装顺序，
   // 所以下面统一用 byName() 取 spec，别再写死 SLICE_SPEC[n]。
-  { name: 'world', title: '世界规则', cap: 600, priority: 2, required: false },
+  { name: 'world', title: '世界设定', cap: 600, priority: 2, required: false },
   { name: 'pitch', title: '商业定位', cap: 300, priority: 5, required: false },
+  // 追加而非插入；实际拼装顺序由 priority 决定。
+  { name: 'genre', title: '类型锚', cap: 220, priority: 1, required: false },
 ]
 
 /** 按名字取分片定义；拼装顺序由 priority 决定，不靠数组下标。 */
@@ -88,11 +90,11 @@ function render(slice) {
  * 直接塞进来会在分片填满时被 assemble 再切掉末尾几字——把「…（已截断）」标记或
  * 到期线索的提示语切成半句，且不带任何截断标记。所以在这里先把标题开销让出来。
  */
-function clipToBody(spec, text) {
+export function sliceBodyCap(spec) {
   const cap = Number(spec?.cap)
-  if (!Number.isFinite(cap)) return text
+  if (!Number.isFinite(cap)) return Infinity
   const overhead = spec?.title ? `## ${spec.title}\n`.length : 0
-  return truncate(text, Math.max(0, Math.floor(cap) - overhead))
+  return Math.max(0, Math.floor(cap) - overhead)
 }
 
 function normalizeBeats(beats) {
@@ -218,7 +220,9 @@ function renderBrief({ params, chapter, volume, mode }) {
     if (due.length) lines.push(`本章回收：${due.join('、')}`)
   }
   lines.push(`视角：${req.pov}`)
-  lines.push(`字数要求：${req.words} 字左右（不得少于 ${Math.round(req.words * 0.8)} 字）`)
+  lines.push(
+    `字数要求：${req.words} 字左右（${Math.round(req.words * 0.9)}–${Math.round(req.words * 1.15)} 字之间，不足则补场景与人物反应，不要注水）`,
+  )
   lines.push(`禁语：${req.banned.join('、')}（正文中不得出现）`)
   lines.push('输出格式：先写正文；正文结束后输出 <<<SUMMARY>>> 与本章摘要；摘要结束后输出 <<<CANON>>> 与正典补丁 JSON。')
   if (mode === 'revise') lines.push('本次为修订：优先落实【需修正】中的问题，保留原文骨架，不要整章重写。')
@@ -287,7 +291,7 @@ export function buildPacket(input = {}) {
     slices.push({
       name: spec.name,
       title: spec.title,
-      text: clipToBody(spec, text),
+      text: truncate(text, sliceBodyCap(spec)),
       cap: spec.cap,
       priority: spec.priority,
       required: spec.required,
@@ -299,6 +303,7 @@ export function buildPacket(input = {}) {
     const findings = formatFindings(source.revisionFindings)
     if (findings) push(REVISION_SPEC, findings)
   }
+  push(sliceOf('genre'), textOf(source.genreText))
   push(sliceOf('beats'), normalizeBeats(source.beats))
   push(sliceOf('previous'), renderPrevious(source.previous, source.previousSummary))
   push(sliceOf('recent'), renderRecent(source.recentSummaries))

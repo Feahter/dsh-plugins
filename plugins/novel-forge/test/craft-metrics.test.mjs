@@ -184,7 +184,24 @@ test('指标：长框架内重叠的 AI 词只计一次', () => {
   assert.ok(hasKind(result, 'ai-density', 'warn'))
 })
 
-// ---- P0-4 抽象情绪：>3/千字只 note，>6 warn、>12 block 不动 ----
+test('指标：成批套词合并为一条 warn，保留密度和排比读数', () => {
+  const text = '他缓缓推门，似乎听见一丝风声。那不是脚步声，而是门轴响了。'
+  const result = checkDraft({ text, params: PARAMS })
+  assert.ok(hasKind(result, 'ai-cliche', 'warn'))
+  for (const kind of ['ai-density', 'ai-pattern']) {
+    const finding = result.findings.find((item) => item.kind === kind)
+    assert.equal(finding?.severity, 'note')
+    assert.match(finding.issue, /已计入上条 AI 腔统计/)
+  }
+})
+
+test('指标：抽象情绪超过 12/千字只报 warn', () => {
+  const result = checkDraft({ text: '她焦虑不安，感到难过。', params: PARAMS })
+  assert.ok(result.stats.abstractEmotionPer1k > 12)
+  assert.deepEqual(result.findings.filter((f) => f.kind === 'emotion').map((f) => f.severity), ['warn'])
+})
+
+// ---- P0-4 抽象情绪：>3/千字只 note，>6 warn ----
 test('指标：抽象情绪约 4/千字 → 只有 note，不升 warn/block', () => {
   const filler = '雨落在青石板上声音很轻'
   let text = ''

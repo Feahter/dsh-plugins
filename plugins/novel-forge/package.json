@@ -1,6 +1,6 @@
 {
   "name": "dsh-novel-forge",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "墨炉：AI 小说全流程创作流水线。通用创作引擎 + 小说 recipe，从设定、大纲、细纲、草稿、连续性审校、修订到导出，一章一章把长篇小说炼出来。",
   "type": "module",
   "main": "index.js",

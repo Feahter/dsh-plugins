@@ -33,6 +33,17 @@ const NAME_EDGE_STOP = new Set(
 
 const CJK_NAME = /^[\u3400-\u4dbf\u4e00-\u9fff]{2,4}$/
 
+// 2–4 字高频 n-gram 里混着大量普通名词（「复核」「档案」「推车」「九点」）。
+// 只靠白名单压不住（2026-11-24 实测：20 章报出 160 条 name-drift，真名 0 条）。
+// 改成「姓氏 + 人物动作/言说上下文」双条件：宁可漏报新专名，也不再拿日常词刷屏。
+const NAME_SURNAMES = new Set(
+  '王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤'.split(''),
+)
+const NAME_ACTION =
+  '(?:说|道|问|答|笑|喊|叫|应|看|望|走|站|坐|推|拉|拿|叹|哼|念|挡|拦|抬|低|转|跑|停|摇|点|皱|伸|摆|醒|睡)'
+// 人名很少以这些字收尾；带上它们的基本是普通名词（方向、程序、老头、长条桌）。
+const NAME_TAIL_STOP = new Set('头向序桌面子儿里外间处们者员品物事话声字号点分时天年月日上下中边'.split(''))
+
 // 统计 name-drift 之前先把白名单词整体遮盖掉：否则「什么时候」会在词与词的接缝处切出
 // 「么时」这类假人名。正则只用于 String.replace，用完即重置，不是可变状态。
 const COMMON_WORDS_BY_LENGTH = [...COMMON_WORDS].sort((a, b) => b.length - a.length)
@@ -187,9 +198,11 @@ function parseWhen(value) {
 }
 
 // 「活着」语义优先于「死」：死里逃生、九死一生这类值里含「死」但结论是人还活着。
-// 顺序不能反：先放行、再判未卜、最后才判死，否则会被 /死|亡/ 误杀。
+// 顺序不能反：先放行、再判未卜、最后才判死。
+// DEATH_STATE 只认明确的死亡措辞：不能写 /死|亡/——「锁死后不可分辨」「门被堵死」
+// 这类物理描述会把活人判成死人（2026-11-24 真实误报：陆承状态里的「锁死」）。
 const ALIVE_STATE = /复活|存活|活着|生还|未死|没死|还活着|活下来|^活$|死里逃生|九死一生|死而复生|险死还生|劫后余生|诈死|假死/
-const DEATH_STATE = /死|亡|遇害|殒命|丧命|毙命|遇刺|被杀/
+const DEATH_STATE = /死亡|已死|身亡|阵亡|殒命|丧命|毙命|遇害|被杀|遇刺|殉职|身故|离世|气绝/
 
 function deathState(value) {
   const text = String(value ?? '').trim()
@@ -381,6 +394,17 @@ function isCommonWord(gram, castNames, index) {
   return false
 }
 
+/**
+ * 像个名字才报：首字是常见姓氏（或「老/小/阿」前缀），且正文里紧跟人物动作/言说。
+ * 纯频率统计会把「九点」「复核」「推车」推到榜首，必须用句法位置再筛一道。
+ */
+function looksLikeName(gram, body) {
+  const head = gram[0]
+  if (!NAME_SURNAMES.has(head) && !'老小阿'.includes(head)) return false
+  if (gram.length > 2 && NAME_TAIL_STOP.has(gram.at(-1))) return false
+  return new RegExp(`${escapeRegExp(gram)}${NAME_ACTION}`).test(body)
+}
+
 function nameDriftFindings(body, index, castNames, where) {
   const counts = new Map()
   // 先用白名单词把正文切开（替换成换行），词内与词缝里都不会再生成候选。
@@ -404,6 +428,7 @@ function nameDriftFindings(body, index, castNames, where) {
   for (const [gram, count] of counts) {
     if (count < 3 || index.known.has(gram) || castNames.includes(gram)) continue
     if (isCommonWord(gram, castNames, index)) continue
+    if (!looksLikeName(gram, body)) continue
     candidates.push([gram, count])
   }
   candidates.sort((a, b) => b[1] - a[1] || compareText(a[0], b[0]))

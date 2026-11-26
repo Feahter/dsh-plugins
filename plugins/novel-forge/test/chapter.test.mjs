@@ -443,6 +443,47 @@ test('prepareChapter：默认用真实 prompts.beats 也能组装材料包', asy
   assert.match(prepared.packet.text, /进殡仪馆/)
 })
 
+test('prepareChapter：正典接近 cap 时仍保留主题注记的末句', async () => {
+  const canon = emptyCanon()
+  canon.notes = [
+    { text: '故事核：追查父亲。', tags: ['brief'] },
+    { text: '主题：等价交换。', tags: ['brief'] },
+  ]
+  canon.facts = Array.from({ length: 120 }, () => ({
+    s: '守夜人', p: '位置', o: '字'.repeat(18), chapter: 'ch0001',
+  }))
+  const { packet } = await prepareChapter({
+    outline: plannedOutline(), params: PARAMS, chapterId: 'ch03',
+    read: memoryRead({ canon, 'beats/ch03': beatsPayload }),
+  })
+  assert.match(packet.text, /故事核：追查父亲。/)
+  assert.match(packet.text, /主题：等价交换。/)
+  assert.ok(packet.report.slices.find(({ name }) => name === 'canon').chars <= 3200)
+})
+
+test('prepareChapter：风格样本去首行章标题，商业定位在句末截断', async () => {
+  const opening = '存档要用记忆交换。'
+  const entries = {
+    'beats/ch03': beatsPayload,
+    'draft/ch01': '## 第1章 守夜\n他推开门。',
+    'draft/ch02': '## 第2章 空白栏\r\n她把账本掀开。',
+    pitch: { sellingPoint: opening + '记'.repeat(400) },
+  }
+  const input = { outline: plannedOutline(), params: PARAMS, chapterId: 'ch03' }
+  const { packet } = await prepareChapter({ ...input, read: memoryRead(entries) })
+  const style = packet.text.split('## 文风\n')[1]?.split('\n\n## ')[0]
+  assert.match(style, /他推开门。/)
+  assert.match(style, /她把账本掀开。/)
+  assert.doesNotMatch(style, /## 第/)
+  assert.ok(packet.text.split('\n').includes(`卖点：${opening}…（已截断）`))
+
+  const noBoundary = await prepareChapter({ ...input, read: memoryRead({
+    ...entries, pitch: { sellingPoint: '记'.repeat(400) },
+  }) })
+  assert.match(noBoundary.packet.text, /卖点：记+…（已截断）(?:\n|$)/)
+  assert.equal(noBoundary.packet.report.slices.find(({ name }) => name === 'pitch').chars, 300)
+})
+
 // ---------------------------------------------------------------- commitChapter
 
 test('commitChapter：合并 canon 补丁，artifacts 完整', () => {
@@ -565,7 +606,8 @@ test('checkChapter：植入死亡人物 → block + revise', () => {
 test('checkChapter：干净正文 + 空 canon → pass', () => {
   const checked = checkChapter({
     read: memoryRead({ canon: emptyCanon() }),
-    params: PARAMS,
+    // cleanProse 约 169 字；字数口径 0.9–1.15，目标 180 正好落在干净区间。
+    params: { ...PARAMS, wordsPerChapter: 180 },
     outline: plannedOutline(),
     chapterId: 'ch02',
     text: cleanProse(),

@@ -414,7 +414,7 @@ test('window + force：force 重跑也受窗口限制，只重写候选章的前
 
   const after = await engine.getProject(project.id)
   assert.equal(after.stages.draft.status, 'partial', '还有候选章没写，阶段不能标 done')
-  assert.equal(after.stages.draft.items.ch03, 'pending', '第 3 个候选章 defer 成 pending')
+  assert.equal(after.stages.draft.items.ch03, 'done', '窗口外的 ch03 不该被 defer 打回 pending：它上一轮已完成，正文还在')
   assert.equal(run.status, 'done', 'run 本身正常结束，窗口只影响阶段完成度')
   assert.equal(after.stages.draft.items.ch04, 'done', '推迟后就停手，ch04 保持上一轮的结果')
 })

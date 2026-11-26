@@ -25,7 +25,7 @@ import {
   characterBrief,
   emptyLedger,
 } from '../src/recipes/novel/ledger.js'
-import { AI_CLICHES, checkDraft, dialogueRatio } from '../src/recipes/novel/craft.js'
+import { AI_CLICHES, checkDraft, dialogueRatio, editRate } from '../src/recipes/novel/craft.js'
 import {
   buildManuscript,
   manuscriptMarkdown,
@@ -38,7 +38,7 @@ import {
 } from '../src/recipes/novel/export.js'
 import { validateRecipe } from '../src/forge/recipe.js'
 import { buildOutlineSkeleton } from '../src/recipes/novel/plan.js'
-import { ensureVolume } from '../src/recipes/novel/chapter.js'
+import { ensureVolume, checkChapter } from '../src/recipes/novel/chapter.js'
 import { createPrompts } from '../src/recipes/novel/prompts/zh.js'
 import {
   createFakeCtx,
@@ -613,6 +613,7 @@ test('bible / characters / spine：文本补标题，JSON 过 schema 并按卷�
   const charactersCtx = createFakeCtx({ outputs: [jsonOut(sampleCharacters())] })
   const characters = await stageOf(recipe, 'characters').run(charactersCtx)
   assert.equal(characters.artifacts.characters.content.cast.length, 2)
+  assert.deepEqual(characters.artifacts.characters.content.cast.map(({ tier }) => tier), ['core', 'major'])
 
   // §12：spine 是 JSON，卷数由脚本的卷计划决定（6 章 / 每卷 30 → 1 卷），模型只能填内容。
   const spineCtx = createFakeCtx({ outputs: [jsonOut(sampleSpine(3))] })
@@ -623,6 +624,26 @@ test('bible / characters / spine：文本补标题，JSON 过 schema 并按卷�
   assert.equal(data.volumes[0].id, 'v01')
   assert.equal(data.volumes[0].targetChapters, 6)
   assert.match(spine.note, /模型多给 2 卷，已按卷计划裁掉/)
+})
+
+test('characters：分级新字段容错，并提示近似名字', async () => {
+  const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })
+  const messages = []
+  const ctx = createFakeCtx({ outputs: [jsonOut({ cast: [
+    { name: '沈砚', role: '主角', gender: '男', tier: 12, aliases: false, firstVolume: {}, recognitionTag: {} },
+    { name: '沈岩', role: '掌柜', gender: '女', tier: ' MAJOR ', aliases: ['甲', '乙', '丙', '丁'], firstVolume: 1, recognitionTag: '旧'.repeat(30) },
+  ] })] })
+  ctx.warn = (message) => messages.push(message)
+  const result = await stageOf(recipe, 'characters').run(ctx)
+  const [lead, major] = result.artifacts.characters.content.cast
+  assert.equal(lead.tier, 'core')
+  assert.deepEqual(lead.aliases, [])
+  assert.equal(major.tier, 'major')
+  assert.equal(major.aliases.length, 3)
+  assert.equal(major.recognitionTag.length, 20)
+  assert.equal(major.firstVolume, 1)
+  assert.match(result.note, /核心 1、阶段 1、登记 0/)
+  assert.deepEqual(messages, ['人物名字接近：沈砚／沈岩，同章安排出场时请区分称呼'])
 })
 
 test('spine stage：JSON 写到一半被截断时抬预算重试一次，而不是整段失败', async () => {
@@ -742,7 +763,7 @@ test('draft stage：缺细纲时先补细纲，章 id 用 item，场景顺序由
   assert.match(draftPrompt.ctx.packet.text, /场景 2：/)
   assert.ok(draftPrompt.ctx.packet.text.indexOf('完成交接班') < draftPrompt.ctx.packet.text.indexOf('确认声音来源'))
   assert.ok(draftPrompt.ctx.packet.text.includes('停尸间'))
-  assert.equal(ctx.calls.length, 2, '一次细纲 + 一次正文')
+  assert.equal(ctx.calls.length, 3, '一次细纲 + 一次正文 + 一次字数补写（假模型没有剧本可续）')
 })
 
 test('draft stage：细纲不是 JSON 时直接失败，不重试也不写半章', async () => {
@@ -994,6 +1015,33 @@ test('代词对照：草稿拿到结构化人物速查，审校/修订 prompt �
   assert.match(revisePrompt.user, /按【代词对照】统一/)
 })
 
+test('draft, review and revise receive the same chapter roster including a new name', async () => {
+  const prompts = createScriptedPrompts()
+  const recipe = createNovelRecipe({ prompts })
+  const outline = sampleOutlineV2({ chapters: 6 })
+  const item = outline.chapters[0]
+  const id = item.id
+  const body = '沈砚推开门。新伙计把灯递给他。'.repeat(12)
+  const prose = textOut(sampleProse({ body }))
+  const artifacts = {
+    outline: { kind: 'json', content: outline },
+    characters: { kind: 'json', content: sampleCharacters() },
+    [`beats/${id}`]: { kind: 'json', content: { ...sampleBeats(), cast: ['沈砚', '新伙计'] } },
+  }
+  const run = (stage, outputs, current) => stageOf(recipe, stage).run(createFakeCtx({
+    params: { ...SAMPLE_PARAMS, contextBudget: 12000 }, items: outline.chapters, item, index: 0, artifacts: current, outputs,
+  }))
+  const draft = await run('draft', [prose], artifacts)
+  const current = { ...artifacts, ...draft.artifacts }
+  const review = await run('review', [jsonOut({ findings: [{ severity: 'block', kind: 'logic', where: id, issue: '检查灯', fix: '写清去处' }] })], current)
+  await run('revise', [prose], { ...current, ...review.artifacts })
+  const reviewBrief = prompts.calls.find((call) => call.id === 'review').ctx.castBrief
+  assert.match(reviewBrief, /新伙计（档案缺档/)
+  for (const stage of ['draft', 'revise']) {
+    assert.ok(prompts.calls.find((call) => call.id === stage).ctx.packet.text.includes(`## 本章出场人物\n${reviewBrief}`))
+  }
+})
+
 test('draft stage：正文、摘要、正典补丁同一枪返回时只调一次文本模型', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
@@ -1028,11 +1076,13 @@ test('draft stage：正文、摘要、正典补丁同一枪返回时只调一次
   assert.ok(!draft.includes('<<<CANON>>>'))
   assert.ok(draft.includes('雨下得很大。'))
   assert.ok(out.artifacts['summary/ch01'].content.startsWith('发生：沈砚在雨夜见到回魂'))
-  // 正文/摘要/正典补丁一次拿全（细纲已在产物里）：只剩 1 次文本调用。
-  assert.equal(ctx.calls.length, 1)
+  // 正文/摘要/正典补丁一次拿全（细纲已在产物里）：正常只需 1 次文本调用。
+  // 这篇正文只有几十字，低于目标 1200 的 0.8，会再尝试一次补写（假模型第 2 次没有剧本，补写失败但不影响落盘）。
+  assert.equal(ctx.calls.length, 2)
   assert.equal(ctx.calls[0].json, false)
   assert.equal(ctx.calls[0].phase, 'prose')
   assert.equal(ctx.calls[0].maxTokens, Math.round(1200 * 2.2) + 400)
+  assert.equal(ctx.calls[1].phase, 'topup')
   const canon = out.artifacts.canon.content
   assert.ok(canon.facts.some((fact) => fact.o === '听见父亲的名字'), '内联 CANON 要并进正典 v2')
   // packet 里带着本章细纲（v2 的喂料入口，不再是 v1 的 ctx.materials）
@@ -1075,8 +1125,10 @@ test('draft stage：模型没按格式给摘要时回退独立摘要调用', asy
   assert.ok(!draft.includes('第9章'))
   assert.ok(draft.includes('雨下得很大。'))
   assert.equal(out.artifacts['summary/ch01'].content, '沈砚在雨夜见到回魂，听见父亲的名字。')
-  assert.equal(ctx.calls.length, 2)
+  // 第 3 次是字数补写（正文太短，假模型没有剧本可续）。
+  assert.equal(ctx.calls.length, 3)
   assert.equal(ctx.calls[1].phase, 'summary')
+  assert.equal(ctx.calls[2].phase, 'topup')
   const summaryPrompt = prompts.calls.find((call) => call.id === 'summary')
   assert.equal(summaryPrompt.ctx.draft, draft, 'v2 的摘要上下文键是 ctx.draft')
   assert.ok(summaryPrompt.ctx.beats, '摘要调用也能拿到本章细纲')
@@ -1118,7 +1170,7 @@ test('draft stage：摘要调用失败时正文仍落盘，用自动摘要兜底
   // 正文那一次已经付过费，不能因为摘要失败整章丢弃
   assert.ok(out.artifacts['draft/ch01'].content.includes('雨下得很大。'))
   assert.match(out.artifacts['summary/ch01'].content, /^自动摘要（摘要调用失败）：/)
-  assert.equal(ctx.calls.length, 2)
+  assert.equal(ctx.calls.length, 3, '正文 + 失败的摘要 + 字数补写')
 })
 
 test('draft stage：上一章 summary、上一章钩子与下一章目标进入 packet', async () => {
@@ -1373,6 +1425,29 @@ test('review stage：verdict 规则为 block>0 或 warn≥3（2 warn→pass，3 
   assert.equal(await verdictOf(3), 'revise') // verdict 缺失 → 按 warn 计数推断
 })
 
+test('review 与确定性章检查：三条纯词频 warn 保留，但不触发修订', async () => {
+  const item = { id: 'ch01', title: '起' }
+  const text = Array.from({ length: 25 }, (_, i) => [
+    i < 15 ? '她不安。' : '她关门。',
+    i < 3 ? '似乎到了。' : '他合上木门。',
+    '船员推车绕过门口，把旧箱搬到桌下。船员点头。\n\n“我们从这边过去。”',
+  ].join('')).join('\n\n')
+  const params = { ...SAMPLE_PARAMS, wordsPerChapter: 847 }
+  const ctx = createFakeCtx({
+    item,
+    params,
+    artifacts: { 'draft/ch01': text },
+    outputs: [jsonOut({ findings: [] })],
+  })
+  const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })
+  const review = await stageOf(recipe, 'review').run(ctx)
+  for (const result of [checkChapter({ text, params, chapterId: item.id }), review.artifacts['review/ch01'].content]) {
+    const warnings = result.findings.filter(({ severity }) => severity === 'warn').map(({ kind }) => kind)
+    assert.deepEqual(warnings.sort(), ['ai-cliche', 'emotion', 'sensory'])
+    assert.equal(result.verdict, 'pass')
+  }
+})
+
 test('review stage：缺 canonPatch 不丢 findings；整份不合契约时也抢救 findings', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
@@ -1433,6 +1508,74 @@ test('revise stage：无 block/warn 时跳过，不调模型', async () => {
   assert.deepEqual(out.artifacts, {})
   assert.match(out.note, /跳过修订/)
   assert.equal(ctx.calls.length, 0)
+})
+
+test('revise stage：审校通过时保留有 warn 的正文', async () => {
+  const body = '她放下灯，回头看向门外。'
+  const ctx = createFakeCtx({
+    item: { id: 'ch01' },
+    artifacts: {
+      'draft/ch01': body,
+      'review/ch01': { verdict: 'pass', findings: [{ severity: 'warn' }] },
+    },
+  })
+  const out = await stageOf(novelRecipe, 'revise').run(ctx)
+  assert.deepEqual(out.artifacts, {})
+  assert.equal(out.skipped, true)
+  assert.match(out.note, /审校通过，未覆盖正文.*人工润色/)
+  assert.equal(ctx.text('draft/ch01'), body)
+  assert.equal(ctx.calls.length, 0)
+})
+
+test('revise stage：第三次审校即使要求修订也交给人工', async () => {
+  const ctx = createFakeCtx({
+    item: { id: 'ch01' },
+    artifacts: {
+      'draft/ch01': '她走到门边，伸手关灯。',
+      'review/ch01': { verdict: 'revise', findings: [{ severity: 'block' }] },
+    },
+  })
+  const read = ctx.read
+  ctx.read = (key) => key === 'review/ch01' ? { ...read(key), meta: { version: 3 } } : read(key)
+  const out = await stageOf(novelRecipe, 'revise').run(ctx)
+  assert.deepEqual(out.artifacts, {})
+  assert.equal(out.skipped, true)
+  assert.match(out.note, /第 3 次审校.*人工/)
+  assert.equal(ctx.calls.length, 0)
+})
+
+test('revise stage：接受不足 5% 的修订，第二次审校仍要求修订也停手', async () => {
+  const item = { id: 'ch01', title: '起' }
+  const body = '沈砚推门看见窗边旧木桌，一盏纸灯摇晃。阿绫松开右手，铜钥匙落进青瓷碗。'
+  const draft = `## 第1章 起\n\n${body}`
+  const review = { verdict: 'revise', findings: [{ severity: 'block', issue: '核对字词' }] }
+  const first = createFakeCtx({
+    item,
+    artifacts: { 'draft/ch01': draft, 'review/ch01': review },
+    outputs: [textOut(sampleProse({ body }))],
+  })
+  const stage = stageOf(novelRecipe, 'revise')
+  const revised = await stage.run(first)
+  assert.equal(revised.artifacts['draft/ch01'].content, draft)
+  assert.match(revised.note, /改动不足 5%，停止自动修订/)
+  const second = createFakeCtx({ item, artifacts: { ...revised.artifacts, 'review/ch01': review } })
+  const read = second.read
+  const metas = {
+    'draft/ch01': { by: { stage: 'revise', ...revised.meta } },
+    'review/ch01': { version: 2 },
+  }
+  second.read = (key) => ({ ...read(key), meta: metas[key] })
+  const out = await stage.run(second)
+  assert.deepEqual(out.artifacts, {})
+  assert.equal(out.skipped, true)
+  assert.match(out.note, /改动不足 5%/)
+  assert.equal(second.calls.length, 0)
+})
+
+test('editRate：按字符二元组集合估算改动率', () => {
+  assert.equal(editRate('同样的话', '同样的话'), 0)
+  assert.equal(editRate('甲甲甲甲', '乙乙乙乙'), 1)
+  assert.equal(editRate('甲乙丙', '甲乙丁'), 1 - 1 / 3)
 })
 
 test('revise stage：review 缺失时不冒充“无问题”', async () => {

@@ -29,7 +29,7 @@ async function waitRun(engine, runId, timeout = 5000) {
   }
 }
 
-test('只跑部分 item：阶段标 partial 而不是 done，并留一条 warn', async (t) => {
+test('只跑定向 item：完成度按本轮子集算，不报全量缺口', async (t) => {
   const { engine } = await setup(t)
   const project = await engine.createProject({ title: '部分' })
 
@@ -40,16 +40,16 @@ test('只跑部分 item：阶段标 partial 而不是 done，并留一条 warn',
 
   assert.equal(final.status, 'done')
   const saved = await engine.getProject(project.id)
-  assert.equal(saved.stages.beta.status, 'partial', '只写了 x2，beta 不能算完成')
+  assert.equal(saved.stages.beta.status, 'done', '本轮只要求 x2，跑完就是 done（不是 1/2 的 partial）')
   assert.equal(saved.stages.beta.items.x2, 'done')
 
   const stageEnd = final.events.filter((event) => event.type === 'stage-end').at(-1)
-  assert.equal(stageEnd.data.status, 'partial')
+  assert.equal(stageEnd.data.status, 'done')
 
   const warn = final.events.filter((event) => event.type === 'log' && event.data.level === 'warn')
   assert.ok(
-    warn.some((event) => /1\/2/.test(event.data.message)),
-    `应记录「仅完成 1/2」，实际：${warn.map((event) => event.data.message).join(' | ')}`,
+    !warn.some((event) => /仅完成/.test(event.data.message)),
+    `定向子集不该报全量缺口，实际：${warn.map((event) => event.data.message).join(' | ')}`,
   )
 })
 
@@ -86,7 +86,8 @@ test('补齐剩下 item 后阶段回到 done', async (t) => {
 
   await waitRun(engine, (await engine.startRun(project.id, { stages: ['alpha'] })).id)
   await waitRun(engine, (await engine.startRun(project.id, { stages: ['beta'], items: ['x2'] })).id)
-  assert.equal((await engine.getProject(project.id)).stages.beta.status, 'partial')
+  // 定向子集跑完即 done；补齐另一条后再跑仍然 done。
+  assert.equal((await engine.getProject(project.id)).stages.beta.status, 'done')
 
   await waitRun(engine, (await engine.startRun(project.id, { stages: ['beta'], items: ['x1'] })).id)
   const saved = await engine.getProject(project.id)
@@ -276,4 +277,25 @@ test('成功的重试链路按尝试次数记账', async (t) => {
   assert.ok(llmEvents.length > 0)
   assert.equal(llmEvents[0].data.attempts, 2)
   assert.equal(final.stats.calls, 4, 'beta 两个 item × 每次 2 次尝试')
+})
+
+test('defer：窗口外的条目不能把上一轮已完成的 done 打回 pending', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-defer-'))
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))
+  const engine = new ForgeEngine({
+    root,
+    recipes: [makeMockRecipe({ review: false, deferIds: ['x1'] })],
+    llm: createFakeLlm(),
+  })
+  const project = await engine.createProject({ title: 'defer' })
+  await waitRun(engine, (await engine.startRun(project.id, { stages: ['alpha', 'beta'] })).id)
+  let saved = await engine.getProject(project.id)
+  assert.equal(saved.stages.beta.items.x1, 'done')
+
+  // force 重跑：x1 落在窗口外（defer），x1 原状态必须保留。
+  const run = await engine.startRun(project.id, { stages: ['beta'], force: true, items: ['x1', 'x2'] })
+  await waitRun(engine, run.id)
+  saved = await engine.getProject(project.id)
+  assert.equal(saved.stages.beta.items.x1, 'done', '没被本轮处理的已完成条目，不能被降级成 pending')
+  assert.equal(saved.stages.beta.status, 'partial')
 })

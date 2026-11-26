@@ -8,7 +8,7 @@
 // 五个入口与 §6 一字不差：
 //   inspectChapter / ensureVolume / prepareChapter / commitChapter / checkChapter
 // 外加内联协议解析 splitInline（§12）。
-import { buildPacket, DUE_THREADS_SPEC } from './packet.js'
+import { buildPacket, DUE_THREADS_SPEC, sliceBodyCap, sliceOf } from './packet.js'
 import {
   emptyCanon,
   mergeCanon,
@@ -16,10 +16,13 @@ import {
   formatCanon,
   canonStats,
   canonProblems,
+  chapterNumber,
+  entityOf,
   migrateLedger,
+  recordAppearances,
 } from './canon.js'
 import { checkChapter as checkConsistency } from './consistency.js'
-import { checkDraft, severityRank } from './craft.js'
+import { checkDraft, draftVerdict, severityRank } from './craft.js'
 import {
   isV2,
   migrateOutline,
@@ -27,7 +30,7 @@ import {
   volumeOfChapter,
   mergeVolumeChapters,
 } from './plan.js'
-import { createPrompts } from './prompts/zh.js'
+import { createPrompts, genrePromise } from './prompts/zh.js'
 import { ForgeError } from '../../forge/errors.js'
 
 const SUMMARY_MARKER = '<<<SUMMARY>>>'
@@ -215,28 +218,109 @@ function beatsCastNames(beats) {
   return out
 }
 
-/**
- * 人物小传：人物档案是 castBrief 的唯一来源（ledger.js 不在本章白名单里）。
- * 只取本章相关人物；没有档案时退回名字列表，至少让模型知道谁在场。
- */
-function castBriefOf(characters, names, maxChars = 1500) {
+export function chapterCastFor(chapter, beats) {
+  return uniqueStrings([...chapterCastNames(chapter), ...beatsCastNames(beats)])
+}
+
+const CAST_CAPS = { core: 180, major: 100, minor: 60, missing: 24 }
+
+// 已落盘的旧 cast 沿用完整卡。新档案由 characters stage 推断并写入 tier。
+export function castTier(person) {
+  const tier = text(person?.tier).toLowerCase()
+  return ['core', 'major', 'minor'].includes(tier) ? tier : 'core'
+}
+
+function namedCard(people, name) {
+  const exact = people.find((person) => text(person.name) === name)
+  if (exact) return exact
+  const matches = people.filter((person) => namesOf(person.aliases).includes(name))
+  return matches.length === 1 ? matches[0] : null
+}
+
+/** 按本章点名顺序匹配，低层先让出预算。 */
+export function castBriefFor(characters, names, maxChars = 1500) {
   const people = castList(characters)
-  const wanted = new Set(names)
-  const picked = wanted.size ? people.filter((person) => wanted.has(text(person.name))) : people
-  if (!picked.length) {
-    return clip(names.map((name) => `- ${name}`).join('\n'), maxChars)
-  }
-  const lines = picked.map((person) => {
-    const head = uniqueStrings([person.name, person.gender, person.role]).join(' · ')
+  const candidates = volumeCharacters(characters?.volume?.newCharacters)
+  const rows = namesOf(names).map((name) => {
+    const person = namedCard(people, name)
+    const candidate = candidates.find((card) => card.name === name)
+    if (candidate && !person) {
+      const head = `- ${name}（C3·本卷新增）`.slice(0, CAST_CAPS.major)
+      const detail = [candidate.want && `想要${candidate.want}`, candidate.pressure && `压着${candidate.pressure}`].filter(Boolean)
+      return { tier: 'major', head, line: (detail.length ? `${head}：${detail.join('；')}` : head).slice(0, CAST_CAPS.major) }
+    }
+    if (!person) {
+      const hint = '（档案缺档：只写动作和功能，不要给他编人生史）'
+      const line = `- ${name}${hint.slice(0, CAST_CAPS.missing)}`
+      return { tier: 'missing', head: line, line }
+    }
+    const tier = castTier(person)
+    const head = `- ${uniqueStrings([name, person.gender, person.role]).join(' · ')}`
+    const aliases = namesOf([person.name, ...namesOf(person.aliases)]).filter((alias) => alias !== name)
     const detail = uniqueStrings([
+      aliases.length ? `别名：${aliases.join('、')}` : '',
+      person.recognitionTag ? `标签：${text(person.recognitionTag)}` : '',
       person.want ? `想要：${text(person.want)}` : '',
-      person.fear ? `害怕：${text(person.fear)}` : '',
-      person.secret ? `秘密：${text(person.secret)}` : '',
-      person.voice ? `口吻：${text(person.voice)}` : '',
-    ])
-    return detail.length ? `- ${head}\n  ${detail.join('；')}` : `- ${head}`
+      tier !== 'minor' && person.pressure ? `压力：${text(person.pressure)}` : '',
+      tier === 'core' && person.fear ? `害怕：${text(person.fear)}` : '',
+      tier === 'core' && person.secret ? `秘密：${text(person.secret)}` : '',
+      tier === 'core' && person.voice ? `口吻：${text(person.voice)}` : '',
+    ]).join('；')
+    const limit = CAST_CAPS[tier]
+    return { tier, head: head.slice(0, limit), line: (detail ? `${head}｜${detail}` : head).slice(0, limit) }
   })
-  return clip(lines.join('\n'), maxChars)
+  const tiers = Object.keys(CAST_CAPS)
+  rows.sort((left, right) => tiers.indexOf(left.tier) - tiers.indexOf(right.tier))
+  const render = () => rows.map(({ line }) => line).join('\n')
+  let output = render()
+  for (const tier of ['minor', 'major']) {
+    for (const row of rows.slice().reverse()) {
+      if (output.length <= maxChars) return output
+      if (row.tier !== tier) continue
+      const length = Math.max(row.head.length, row.line.length - (output.length - maxChars))
+      row.line = row.line.slice(0, length)
+      output = render()
+    }
+  }
+  // 极端预算只保留能容纳的完整行，避免半张核心卡或半句缺档指令。
+  while (output.length > maxChars && rows.length) {
+    rows.pop()
+    output = render()
+  }
+  return output
+}
+
+export function chapterCastBrief({ characters, chapter, volume, beats, canon, maxChars = 1500 }) {
+  const names = chapterCastFor(chapter, beats)
+  const people = castList(characters)
+  const at = chapterNumber(chapter?.id)
+  const cards = [...people]
+  const candidateNames = new Set(volumeCharacters(volume?.newCharacters).map(({ name }) => name))
+  const hints = new Map()
+  for (const name of names) {
+    const found = entityOf(canon, name)
+    if (found?.entity.kind !== 'character') continue
+    const { entity } = found
+    const prior = (Array.isArray(entity.appearances) ? entity.appearances : [])
+      .map(chapterNumber).filter((number) => number >= 0 && number < at)
+    const last = prior.length ? Math.max(...prior) : -1
+    const first = chapterNumber(entity.firstSeen)
+    if (!namedCard(people, name) && !candidateNames.has(name) && (last >= 0 || (first >= 0 && first < at))) {
+      cards.push({ name, role: entity.role, tier: 'minor', aliases: entity.aliases, recognitionTag: entity.recognitionTag })
+    }
+    if (last >= 0 && at - last >= 6 && !hints.has(found.name)) {
+      const tag = namedCard(people, name)?.recognitionTag || entity.recognitionTag
+      hints.set(found.name, `再登场提示：${name} 已 ${at - last} 章未出场——第一次入场给一句读者能认回来的旧标签（${tag || 'recognitionTag/旧事'}），不要重新自我介绍`)
+    }
+  }
+  const reminders = []
+  let remaining = maxChars
+  for (const hint of hints.values()) {
+    if (hint.length + 1 > remaining) break
+    reminders.push(hint)
+    remaining -= hint.length + 1
+  }
+  return [castBriefFor({ cast: cards, volume }, names, remaining), ...reminders].filter(Boolean).join('\n')
 }
 
 // ---------------------------------------------------------------- 大纲 / 上下文
@@ -330,15 +414,38 @@ function previousDigestForVolume(read, outline, volume, maxChars = 800) {
   return digestOfVolume(read, outline, previous, { maxChars })
 }
 
-/** 世界规则：bible 前 600 字（第七段『力量与规则』排第二，所以一定包含在内）。 */
+/** 世界设定：bible 前 600 字；新模板把「核心设定与约束」放在第二段。 */
 function worldBriefOf(read) {
   const bible = readText(read, 'bible')
   if (!bible) return ''
   return clip(bible, 600)
 }
 
+function clipAtSentence(value, maxChars, marker) {
+  if (value.length <= maxChars) return value
+  const head = value.slice(0, maxChars - marker.length)
+  const end = Math.max(...['。', '！', '？', '；'].map((mark) => head.lastIndexOf(mark)))
+  return `${end >= 0 ? head.slice(0, end + 1) : head}${marker}`
+}
+
+/** draft 和 revise 从同一组工件生成类型锚。 */
+export function genreTextOf(params, read) {
+  const genre = text(params?.genre) || '通用'
+  const finger = readJson(read, 'pitch')?.goldenFinger
+  const core = [text(finger?.name), text(finger?.rule)].filter(Boolean).join('：')
+    || text(readJson(read, 'brief')?.logline)
+  return [
+    `类型：${genre}`,
+    `类型承诺：${genrePromise(genre)}`,
+    `核心设定：${clipAtSentence(core, 60, '…')}`,
+    '硬要求：每章至少一次让核心设定以代价或后果的形式显形；不得用程序、手续、编号等周边细节替代它。',
+  ].join('\n')
+}
+
 /** 商业定位：只把会影响单章写法的字段压成一行清单，不进 JSON 原文。 */
-function pitchTextOf(read, maxChars = 300) {
+// Cap 包含材料包标题，先让出标题空间，使句末与标记不会再被分片 cap 二次裁剪。
+function pitchTextOf(read) {
+  const maxChars = sliceBodyCap(sliceOf('pitch'))
   const pitch = readJson(read, 'pitch')
   if (!pitch || typeof pitch !== 'object') return ''
   const lines = []
@@ -358,7 +465,7 @@ function pitchTextOf(read, maxChars = 300) {
     const parts = [finger.name, finger.rule, finger.cost].map((item) => text(item)).filter(Boolean)
     if (parts.length) lines.push(`金手指：${parts.join(' · ')}`)
   }
-  return clip(lines.join('\n'), maxChars)
+  return clipAtSentence(lines.join('\n'), maxChars, '…（已截断）')
 }
 
 /** 黄金三章：本章在 1–3 章内时，把该章的钩子与信息差单独交给细纲。 */
@@ -379,7 +486,9 @@ function styleSampleOf(read, outline, chapter) {
   for (const item of chapters.slice(Math.max(0, index - 2), index)) {
     const draft = readText(read, `draft/${item.id}`)
     if (!draft || isPlaceholder(draft)) continue
-    samples.push(`${clip(draft.slice(0, 160), 160)}\n……\n${clip(draft.slice(-160), 160)}`)
+    const body = draft.replace(/^##[^\r\n]*(?:\r?\n|$)/, '')
+    if (!body) continue
+    samples.push(`${clip(body.slice(0, 160), 160)}\n……\n${clip(body.slice(-160), 160)}`)
   }
   return clip(samples.join('\n\n'), 1200)
 }
@@ -512,10 +621,6 @@ function countFindings(findings) {
   return counts
 }
 
-function verdictOf(counts) {
-  return counts.block > 0 || counts.warn >= 3 ? 'revise' : 'pass'
-}
-
 /**
  * 一致性 + craft 检查的共用入口；commitChapter 也走这里，避免两套判定。
  * @returns {{findings:Array, counts:object, verdict:string, stats:object}}
@@ -548,7 +653,10 @@ function runChecks({
     previousHook: previousChapter?.hook ?? '',
     cast: castList(characters),
   }) ?? { findings: [], stats: {} }
-  const canonFindings = canonProblems(canon, Number.isFinite(chapter?.index) ? { atChapter: chapter.index } : {}) ?? []
+  const canonFindings = canonProblems(
+    canon,
+    Number.isFinite(chapter?.index) ? { atChapter: chapter.index, chapterOnly: true } : {},
+  ) ?? []
 
   const findings = dedupeFindings(
     [
@@ -563,7 +671,7 @@ function runChecks({
   return {
     findings,
     counts,
-    verdict: verdictOf(counts),
+    verdict: draftVerdict(findings),
     stats: craftResult.stats ?? {},
   }
 }
@@ -622,7 +730,7 @@ function fallbackVolumePrompt(ctx) {
   const bible = text(ctx?.bible)
   if (bible) lines.push(`【世界设定】\n${clip(bible, 1200)}`)
   const characters = ctx?.characters
-  const brief = castBriefOf(characters, [], 900)
+  const brief = castBriefFor(characters, namesOf(castList(characters)), 900)
   if (brief) lines.push(`【人物档案】\n${brief}`)
   const previous = text(ctx?.previousDigest)
   if (previous) lines.push(`【前情提要】\n${clip(previous, 900)}`)
@@ -783,6 +891,18 @@ function closedChapterRows(value) {
 
 const VOLUME_BATCH_SIZE = 12
 
+/** 卷纲新人物是软字段。坏条目不影响章表，重名保留首次给出的简卡。 */
+function volumeCharacters(value) {
+  const cards = new Map()
+  const label = (input) => typeof input === 'string' ? input.trim() : ''
+  for (const item of Array.isArray(value) ? value : []) {
+    const name = label(item?.name)
+    if (!name || cards.has(name)) continue
+    cards.set(name, { name, role: label(item.role), want: label(item.want), pressure: label(item.pressure) })
+  }
+  return [...cards.values()]
+}
+
 /**
  * 展开下一卷卷纲（§3/§6）。只处理 planned:false 的卷；同卷重复调用不会重复请求模型。
  * @returns {{outline:object, calls:number, created:boolean}}
@@ -821,6 +941,7 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
   const total = Math.floor(Number(target.targetChapters))
   const normalized = []
   let calls = 0
+  let newCharacters = volumeCharacters(target.newCharacters)
   let continuing = false
 
   while (normalized.length < total) {
@@ -831,7 +952,7 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
     const previous = normalized.at(-1)
     const batchCtx = {
       ...ctx,
-      volume: { ...ctx.volume, startChapter: start, targetChapters: count },
+      volume: { ...ctx.volume, startChapter: start, targetChapters: count, newCharacters },
       fullVolume: ctx.volume,
       existingTitles: [clip(normalized.map((row) => row.title).filter(Boolean).join('、'), 600), ctx.existingTitles]
         .filter(Boolean).join('、'),
@@ -849,7 +970,8 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
       throw new ForgeError('BAD_RECIPE', '卷纲 prompt 必须返回 {system,user}')
     }
 
-    const request = `【本批章号】第 ${start}–${end} 章，只返回这 ${count} 章。`
+    const registered = newCharacters.length ? `\n本卷已经登记的 C3 人物：${newCharacters.map(({ name }) => name).join('、')}。可沿用名字，无须重复登记。` : ''
+    const request = `【本批章号】第 ${start}–${end} 章，只返回这 ${count} 章。${registered}`
     const resume = continuing ? `\n从第 ${start} 章继续，不要重复已有章。` : ''
     const bridge = previous ? `\n上一章《${previous.title}》的章末钩子：${clip(previous.hook, 300)}` : ''
     calls += 1
@@ -898,9 +1020,11 @@ export async function ensureVolume({ outline, params = {}, read, llm, language }
       })
     }
     normalized.push(...accepted)
+    newCharacters = volumeCharacters([...newCharacters, ...volumeCharacters(payload?.newCharacters)])
   }
 
   const next = mergeVolumeChapters(current, target.id, normalized)
+  next.volumes = next.volumes.map((volume) => volume.id === target.id ? { ...volume, newCharacters } : volume)
   const expanded = volumeById(next, target.id)
   if (!expanded || !expanded.planned) {
     throw new ForgeError('LLM_PARSE', `第 ${target.id} 卷卷纲合并后为空`)
@@ -936,7 +1060,7 @@ function beatsPromptContext({ outline, params, read, chapter, volume, language }
     volume,
     previousSummary: previous ? readText(read, `summary/${previous.id}`) : '',
     canonText,
-    castBrief: castBriefOf(characters, names, 1500),
+    castBrief: chapterCastBrief({ characters, chapter, volume, canon }),
     openerChapter: openerChapterOf(read, chapter),
     language,
     ...promptIO(read),
@@ -1070,7 +1194,7 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
   }
 
   const canon = loadCanon(read)
-  const names = uniqueStrings([...chapterCastNames(chapter), ...beatsCastNames(beats)])
+  const names = chapterCastFor(chapter, beats)
   const canonText = formatCanon(
     queryCanon(canon, {
       cast: names,
@@ -1079,7 +1203,7 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
       atChapter: chapter.index,
       limit: 120,
     }),
-    { maxChars: 3200 },
+    { maxChars: sliceBodyCap(sliceOf('canon')) },
   )
   const characters = charactersOf(read)
   const packet = buildPacket({
@@ -1093,8 +1217,9 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
     volumeDigest: volumeDigestOf(read, current, chapter),
     canonText,
     dueThreads: dueThreadsText(canon, chapter),
-    castBrief: castBriefOf(characters, names, 1500),
+    castBrief: chapterCastBrief({ characters, chapter, volume, beats, canon, maxChars: sliceBodyCap(sliceOf('cast')) }),
     worldBrief: worldBriefOf(read),
+    genreText: genreTextOf(params, read),
     pitchText: pitchTextOf(read),
     styleSample: styleSampleOf(read, current, chapter),
     nextChapterGoal: nextChapterGoalOf(current, chapter),
@@ -1122,7 +1247,7 @@ function normalizePatch(patch) {
     return parsed ? normalizePatch(parsed) : null
   }
   if (typeof patch !== 'object') return null
-  return Object.keys(patch).length ? patch : null
+  return Object.keys(patch).length ? { ...patch } : null
 }
 
 /**
@@ -1143,7 +1268,28 @@ export function commitChapter({ read, params = {}, outline, chapterId, text, sum
   const previous = previousOf(outline, chapterId) ?? previousOf(current, chapterId)
   const canon = loadCanon(read)
   const patch = normalizePatch(canonPatch ?? split.canonPatch)
-  const merged = patch ? mergeCanon(canon, patch, { chapter: chapterId }) : canon
+  // 本次出场只能由正文核验，状态补丁其余字段仍照常合并。
+  for (const field of ['entities', 'characters']) {
+    if (!patch?.[field] || typeof patch[field] !== 'object' || Array.isArray(patch[field])) continue
+    patch[field] = Object.fromEntries(Object.entries(patch[field]).map(([name, state]) => {
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return [name, state]
+      const { firstSeen, lastSeen, chapter, ...rest } = state
+      return [name, rest]
+    }))
+  }
+  let merged = patch ? mergeCanon(canon, patch, { chapter: chapterId }) : canon
+  const beats = readJson(read, `beats/${chapterId}`)
+  const characters = charactersOf(read)
+  const names = chapterCastFor(chapter, beats)
+  const verified = new Set()
+  for (const name of names) {
+    const found = entityOf(merged, name)
+    if (found && found.entity.kind !== 'character') continue
+    const card = namedCard(castList(characters), name)
+    const spellings = namesOf([name, found?.name, ...namesOf(found?.entity.aliases), card?.name, ...namesOf(card?.aliases)])
+    if (spellings.some((spelling) => split.body.includes(spelling))) verified.add(found?.name ?? card?.name ?? name)
+  }
+  merged = recordAppearances(merged, [...verified], chapterId)
 
   const extraFindings = []
   if (split.parseError) {
@@ -1169,8 +1315,6 @@ export function commitChapter({ read, params = {}, outline, chapterId, text, sum
     })
   }
 
-  const characters = charactersOf(read)
-  const names = uniqueStrings([...chapterCastNames(chapter), ...beatsCastNames(readJson(read, `beats/${chapterId}`))])
   const cast = names.length ? names : null
   const checked = runChecks({
     text: split.body,
@@ -1178,7 +1322,7 @@ export function commitChapter({ read, params = {}, outline, chapterId, text, sum
     chapter,
     previousChapter: previous,
     params,
-    beats: readJson(read, `beats/${chapterId}`),
+    beats,
     cast,
     characters,
     extraFindings,

@@ -73,6 +73,9 @@ function normalizeStageResult(result) {
     meta: result.meta ?? null,
     // 这一条现在不做、留到下一次运行：条目保持 pending，阶段标 partial。
     defer: result.defer === true,
+    // 这一条现在做不了（例如「还没有正文，跳过审校」）：不是完成，也不算进度。
+    // 条目记 skipped、阶段收尾降为 partial，下次运行还会再试。
+    skipped: result.skipped === true,
   }
 }
 
@@ -241,6 +244,10 @@ export class ForgeEngine {
    * @param {string} idOrPrefix
    */
   async getProject(idOrPrefix) {
+    return this.#reconcile(await this.#readProject(idOrPrefix))
+  }
+
+  async #readProject(idOrPrefix) {
     const query = String(idOrPrefix ?? '').trim()
     if (!query) throw new ForgeError('NOT_FOUND', '没有指定项目')
     try {
@@ -254,6 +261,32 @@ export class ForgeEngine {
       throw new ForgeError('NOT_FOUND', `项目不存在：${query}`, { query })
     }
     return matched[0]
+  }
+
+  /**
+   * 读项目时按 recipe 的 reconcile 校正历史脏状态（例：条目记 done，但这一阶段从没为该条产出过东西）。
+   * 只在项目没在跑/没在续写时做，避免和引擎逐条 saveProject 抢写；没变化不落盘，可重复调用。
+   */
+  async #reconcile(project) {
+    let recipe = null
+    try {
+      recipe = this.#recipe(project?.recipe)
+    } catch {
+      return project
+    }
+    if (typeof recipe?.reconcile !== 'function') return project
+    if (!project?.id || this.#busy(project.id)) return project
+    let changed = 0
+    try {
+      changed = Number(recipe.reconcile(project)) || 0
+    } catch {
+      // 校正只是兜底：判定函数自己出错时保持原状态，不能让读项目失败。
+      return project
+    }
+    if (changed <= 0) return project
+    project.updatedAt = this.#now()
+    await this.store.saveProject(project).catch(() => {})
+    return project
   }
 
   /**
@@ -713,9 +746,17 @@ export class ForgeEngine {
 
     let hadError = false
     let deferred = false
+    let skipped = 0
     for (const unit of work) {
+      // defer / 取消时不能把「上一轮已经完成」的条目打回 pending：
+      // force 重跑 + window 会把窗口外的章节原样留着，打回 pending 只是丢状态，
+      // 阶段轨就会出现「有 20 章正文，却只算完成 19 条」（2026-11-24 真实事故）。
+      const before = unit.id ? state.items[unit.id] : null
+      const restore = () => {
+        if (unit.id) state.items[unit.id] = before === 'done' ? 'done' : 'pending'
+      }
       if (this.#aborted(live)) {
-        if (unit.id) state.items[unit.id] = 'pending'
+        restore()
         run.current = { stage: stage.id, item: unit.id ?? null, label: this.#label(stage, unit.id) }
         await this.store.saveProject(project)
         return 'cancelled'
@@ -737,7 +778,7 @@ export class ForgeEngine {
         const ctx = this.#makeCtx(live, stage, unit, allItems)
         const raw = run.options.dryRun ? { artifacts: {} } : await stage.run(ctx)
         if (this.#aborted(live)) {
-          if (unit.id) state.items[unit.id] = 'pending'
+          restore()
           await this.store.saveProject(project)
           return 'cancelled'
         }
@@ -755,12 +796,22 @@ export class ForgeEngine {
           await this.#emit(live, EVENT.ARTIFACT, { key, kind: spec.kind, bytes: written.meta.bytes })
         }
         if (normalized.defer) {
-          if (unit.id) state.items[unit.id] = 'pending'
+          restore()
           deferred = true
           project.updatedAt = this.#now()
           await this.store.saveProject(project)
           if (normalized.note) await this.#log(live, normalized.note)
           break
+        }
+        // 空产物的「现在做不了」：不能记 done。记 done 会把「还没轮到」伪装成「已完成」，
+        // 阶段轨显示 10 章正文配 50 章审校（2026-11-23 真实事故），续跑时又会全被跳过。
+        if (normalized.skipped && Object.keys(normalized.artifacts).length === 0) {
+          if (unit.id) state.items[unit.id] = 'skipped'
+          skipped += 1
+          project.updatedAt = this.#now()
+          await this.store.saveProject(project)
+          if (normalized.note) await this.#log(live, normalized.note)
+          continue
         }
         if (unit.id) state.items[unit.id] = 'done'
         project.updatedAt = this.#now()
@@ -816,15 +867,20 @@ export class ForgeEngine {
 
     // 只跑了一部分条目（例如 --items ch02 单章重跑、或某几条还没跑）时不能标 done，
     // 否则阶段轨显示「完成」而实际缺章。
-    let stageStatus = hadError || deferred ? 'partial' : 'done'
+    let stageStatus = hadError || deferred || skipped > 0 ? 'partial' : 'done'
     if (!hadError && allItems) {
       const items = state.items || {}
-      const covered = allItems.filter((item) => items[item.id] === 'done').length
-      if (covered < allItems.length) {
+      // 分母是本轮实际要跑的条目（run.options.items 定向子集时只算子集），
+      // 不是全书计划章数：50 章只跑 ch001–ch020 不该显示「20/50 / partial」。
+      const covered = units.filter((unit) => !unit.id || items[unit.id] === 'done').length
+      if (covered < units.length) {
         stageStatus = 'partial'
+        // 「19/20」是阶段条目覆盖率，分子只算本阶段标记 done 的条目。
+        // 补上正文实际落盘数，避免看起来像丢章。
+        const drafted = Object.keys(project.artifacts || {}).filter((key) => /^draft\/[^/]+$/.test(key)).length
         await this.#log(
           live,
-          `${stage.title || stage.id} 仅完成 ${covered}/${allItems.length} 个条目，可再跑该阶段补齐`,
+          `${stage.title || stage.id} 仅完成 ${covered}/${units.length} 个条目，正文已落盘 ${drafted} 章，可再跑该阶段补齐`,
           'warn',
         )
       }
@@ -900,7 +956,7 @@ export class ForgeEngine {
       for (const key of keys) {
         const artifact = live.cache?.get(key)
         try {
-          if (artifact && stage.isStale({ key, artifact }) === true) return false
+          if (artifact && stage.isStale({ key, artifact, project: live.project }) === true) return false
         } catch {
           // 判定函数自己出错时不影响「已完成」的常规判断
         }

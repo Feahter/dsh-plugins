@@ -445,6 +445,29 @@ test('canon：200 条事实挤不掉未回收线索，总长仍 ≤ maxChars', (
   assert.ok(tight.length <= 1200, `1200 额度下总长 ${tight.length}`)
 })
 
+test('canon：故事核与主题先保底，紧预算下也不被事实与高分注记挤掉', () => {
+  const { facts, threads } = crowdedSlice()
+  const brief = [
+    { id: 'n0001', text: '故事核：守夜人查父亲的死因。', tags: ['brief'] },
+    { id: 'n0002', text: '主题：执念能否换回真相？', tags: ['brief'] },
+  ]
+  const notes = [...brief, ...Array.from({ length: 60 }, (_, i) => ({
+    id: `n${i + 3}`, text: `守夜人的第 ${i + 1} 条注记`, chapter: 'ch0200', tags: [],
+  }))]
+  const slice = queryCanon({ ...emptyCanon(), facts, threads, notes }, {
+    keywords: ['守夜人'], atChapter: 'ch0200', limit: 50,
+  })
+  assert.equal(slice.facts.length, 50)
+  assert.equal(slice.notes.length, 50)
+  const exact = formatCanon({ notes: brief })
+  for (const maxChars of [exact.length, 1200]) {
+    const text = formatCanon(slice, { maxChars })
+    assert.match(text, /故事核：守夜人查父亲的死因。/)
+    assert.match(text, /主题：执念能否换回真相？/)
+    assert.ok(text.length <= maxChars, `总长 ${text.length} 超出 ${maxChars}`)
+  }
+})
+
 test('canon：没有未回收线索时不出现线索标题，短切片输出与旧格式一致', () => {
   const { facts } = crowdedSlice()
   const text = formatCanon({ facts }, { maxChars: 3200 })
@@ -511,4 +534,31 @@ test('queryCanon：atChapter 之前看不到后面才确立的事实 / 线索 / 
   // 章号缺失/写不清的条目一律保留，宁可多给也不误删。
   canon.facts.push({ s: '陈婆', p: '身份', o: '守夜人' })
   assert.ok(queryCanon(canon, { atChapter: 'ch005' }).facts.some(f => f.s === '陈婆'), '没有章号的事实应保留')
+})
+
+// 2026-11-24 回归：长自由描述不是互斥枚举；单章审校不重复报旧章冲突。
+test('canon：同一 s|p 的长自由文本（状态快照）不算 canon-conflict', () => {
+  const canon = mergeCanon(emptyCanon(), {
+    facts: [
+      { s: '周砚舟', p: '状态', o: '记忆已被回溯覆盖，行为模式与档案不符，仍在观察', chapter: 'ch0010' },
+      { s: '周砚舟', p: '状态', o: '当日在库区三号位称重，签字笔迹与底册一致', chapter: 'ch0012' },
+    ],
+  })
+  assert.equal(canonProblems(canon).filter((finding) => finding.kind === 'canon-conflict').length, 0)
+})
+
+test('canon：chapterOnly 只报本章新事实引发的冲突，不复述旧章冲突', () => {
+  const canon = mergeCanon(emptyCanon(), {
+    facts: [
+      { s: '林砚', p: '阵营', o: '捕快', chapter: 'ch0003' },
+      { s: '林砚', p: '阵营', o: '盗匪', chapter: 'ch0005' },
+      { s: '沈砚', p: '阵营', o: '捕快', chapter: 'ch0006' },
+      { s: '沈砚', p: '阵营', o: '盗匪', chapter: 'ch0006' },
+    ],
+  })
+  const at5 = canonProblems(canon, { atChapter: 5, chapterOnly: true }).filter((f) => f.kind === 'canon-conflict')
+  assert.equal(at5.length, 1, '第 5 章只该看到林砚这一条')
+  assert.equal(at5[0].where, '林砚|阵营')
+  const at6 = canonProblems(canon, { atChapter: 6, chapterOnly: true }).filter((f) => f.kind === 'canon-conflict')
+  assert.deepEqual(at6.map((f) => f.where), ['沈砚|阵营'], '同一章内的矛盾仍然要报')
 })

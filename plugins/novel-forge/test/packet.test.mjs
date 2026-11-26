@@ -217,10 +217,11 @@ test('SLICE_SPEC：严格匹配 §5.2 的 cap/priority/required', () => {
       ['cast', 1500, 4, false],
       ['next', 300, 5, false],
       ['style', 1200, 6, false],
-      // v0.3：世界设定摘要（bible 前 600 字，含力量与规则）与商业定位。
+      // v0.3：世界设定摘要（bible 前 600 字）与商业定位。
       // 只在数组尾部追加：装配按 priority 排序，插中间会改变同优先级分片的先后。
       ['world', 600, 2, false],
       ['pitch', 300, 5, false],
+      ['genre', 220, 1, false],
     ],
   )
 })
@@ -235,6 +236,24 @@ test('buildPacket：任意 budget（4000/8000/12000/20000）都硬性不超预�
     assert.equal(report.budget, budget)
     assert.equal(accountingHolds(report), true)
   }
+})
+
+test('buildPacket：类型锚有文本才装配，并排在细纲之前', () => {
+  const genreText = '类型：悬疑\n核心设定：死者能回答三个问题。'
+  const packet = buildPacket({ genreText, beats: '查案' })
+  assert.ok(packet.report.slices.find((slice) => slice.name === 'genre')?.allocated > 0)
+  assert.equal(packet.sections.genre, `## 类型锚\n${genreText}`)
+  assert.match(packet.text, /## 类型锚\n[\s\S]+\n\n## 本章细纲/)
+  assert.ok(packet.text.includes(packet.sections.genre))
+  const withoutGenre = buildPacket({ beats: '查案' })
+  assert.ok(!withoutGenre.report.slices.some((slice) => slice.name === 'genre'))
+  assert.ok(!withoutGenre.text.includes('## 类型锚'))
+})
+
+test('buildPacket：世界片标题为世界设定', () => {
+  const { text } = buildPacket({ worldBrief: '死者头七能回来，只能回答三个问题。' })
+  assert.match(text, /## 世界设定\n/)
+  assert.doesNotMatch(text, /## 世界规则/)
 })
 
 test('buildPacket({}) 不崩，只保留必需的写作要求分片', () => {

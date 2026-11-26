@@ -694,3 +694,43 @@ test('bline：无 B 线标记 → 完全静默；中点后已合流 → 不报',
   merged.chapters[7].turn = 'B线与主线合流，沈砚交出账本'
   assert.deepEqual(ofKind(audit({ outline: merged }), 'bline-unmerged'), [])
 })
+
+// 2026-11-24 回归：状态文本里的「锁死」不是死亡；日常名词不是人名。
+test('dead-character：「锁死」只是物理描述，不能把活人判死', () => {
+  const canon = baseCanon({
+    entities: { 陆承: { kind: 'character' } },
+    facts: [
+      {
+        s: '陆承',
+        p: '状态',
+        o: '三级图层可用时限四分钟，锁死后该区域不可分辨',
+        chapter: 'ch0011',
+        status: 'canon',
+      },
+    ],
+  })
+  const findings = checkChapter({
+    text: '陆承推门。陆承坐下。陆承看表。',
+    canon,
+    chapter: { id: 'ch0012', cast: ['陆承'] },
+  })
+  assert.deepEqual(ofKind(findings, 'dead-character'), [])
+})
+
+test('name-drift：高频日常名词（九点/复核/档案/推车）不报人名', () => {
+  const findings = checkChapter({
+    text: '九点十四分复核档案。九点二十复核记录。九点四十复核签名。推车停在门口。',
+    canon: baseCanon(),
+    chapter: { id: 'ch0003', cast: [] },
+  })
+  assert.deepEqual(ofKind(findings, 'name-drift'), [])
+})
+
+test('name-drift：首字不是姓氏的高频词不当人名', () => {
+  const findings = checkChapter({
+    text: '册子翻开。册子合上。册子放回。底册也翻开。底册合上。底册放回。',
+    canon: baseCanon(),
+    chapter: { id: 'ch0003', cast: [] },
+  })
+  assert.deepEqual(ofKind(findings, 'name-drift'), [])
+})

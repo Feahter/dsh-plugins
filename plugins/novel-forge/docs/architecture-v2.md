@@ -149,6 +149,22 @@ export function isDead(canon, name)                            // 死亡判定�
 ```
 `chapter` 由调用方传入（当前章 id），patch 里不接受 `chapter` 字段覆盖。所有字段可缺省；空 patch 视为无变更。
 
+### 人物分级（C4/C3/C2/C1/C0）
+
+| 层 | 含义 | 登记位置 |
+| --- | --- | --- |
+| C4 | 全书核心，保留欲望、口吻和 `need/wound/lie/exit` 四件套 | `characters` 开局写 3–4 人，全书上限 10 |
+| C3 | 阶段人物，简卡保留 `want/pressure/relations/recognitionTag` | `characters` 写首卷 3 人。卷纲按卷展开时可用 `outline.volumes[].newCharacters` 登记 `{name, role, want, pressure}` |
+| C2 | 反复出场的功能人物，用短标签帮助认回 | 本轮随正文核验出场登记到 `canon` |
+| C1 | 具名的小角色，速查只需定位和短标签 | 本轮随正文核验出场登记到 `canon` |
+| C0 | 只承担当前场景的功能，无需人物弧或完整档案 | 正文中需要具名且列在本章 cast 或 beats 时才随出场登记 |
+
+`cast[].tier` 用 `core`、`major`、`minor` 对应 C4、C3、C2 及以下。档案可带最多 3 个 `aliases`、最多 20 字的 `recognitionTag` 和首次登场卷号 `firstVolume`。生成时按 role 补缺失的 tier，主角、对手、反派、女主为 `core`，其他为 `major`。已落盘的无 tier 旧卡按 C4 读取。C2 及以下的简卡应写再识别标签，本轮未提供的标签在提示里用旧事兜底。卷纲候选随 `outline` 保存。
+
+正典实体原键保存身份，`displayName` 保存首选本名，唯一已登记的别名可用于回写。草稿、修订和审校均从本章章纲 cast 和 beats 点名取人物速查，按 C4、C3、登记人物排序。卷纲只补本卷简卡。缺档保留动作和功能提示。单人卡上限分别为 180、100、60 字，总预算内先压登记人物，再压阶段人物。
+
+提交正文时只为 cast 或 beats 点名且在正文中命中的人物记录 `appearances`，按追加顺序去重，并从记录更新 `firstSeen` 与 `lastSeen`。再登场取早于本章的最近一次核验出场，章号差达到 6 时，提示用旧标签或旧事帮助读者认回。`characters.md` 合并档案和正典人物，按核心、阶段、登记三节展示。
+
 ## 5. 预算与上下文包
 
 ### 5.1 `src/forge/budget.js`（通用，零小说词汇）
@@ -189,6 +205,7 @@ export function buildPacket(input)   // input 见下；返回 { text, report, se
   previousSummary,           // 上一章摘要文本
   recentSummaries,           // 最近 3 章 [{id, text}]（不含上一章）
   volumeDigest,              // 本卷已写部分的压缩摘要（脚本从 summary 拼，≤1200 字）
+  genreText,                 // 类型锚（可选）
   canonText,                 // formatCanon(queryCanon(...)) 已格式化文本（packet 不 import canon）
   castBrief,                  // characterBrief(...) 文本
   styleSample,               // 最近 2 章首尾各 200 字样本
@@ -211,11 +228,12 @@ export function buildPacket(input)   // input 见下；返回 { text, report, se
 | `cast` | 1500 | 4 | | 本章出场者速查 |
 | `next` | 300 | 5 | | 下一章目标 |
 | `style` | 1200 | 6 | | styleGuide + 风格样本 |
-| `world` | 600 | 2 | | v0.3：bible 前 600 字（含第二段「力量与规则」） |
+| `world` | 600 | 2 | | 世界设定：bible 前 600 字（第二段为「核心设定与约束」） |
 | `pitch` | 300 | 5 | | v0.3：频道/标签/卖点/金手指压成清单 |
+| `genre` | 220 | 1 | | 类型承诺＋核心设定＋一条硬要求 |
 | `dueThreads` | 600 | 2 | | 已到期（`dueIn ≤ 本章号`）未关闭的线索清单，独立于 `SLICE_SPEC`（同 `revision`，追加会改严格快照） |
 
-`contextBudget` 默认 12000，上表 cap 合计 13500 → 允许 2 片被压缩，但**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。`cap` 记在**渲染后的整块**上（含 `## 标题\n`），所以分片正文按 `cap − 标题开销` 生成。
+`contextBudget` 默认 12000。`SLICE_SPEC` 的 cap 合计 13720，另有到期线索片 600 字。按优先级裁剪，**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。`cap` 记在**渲染后的整块**上（含 `## 标题\n`），所以分片正文按 `cap − 标题开销` 生成。
 
 `buildPacket` 的 `report` 在 `assemble` 的字段之外多一个 `overBudget`（`hardTruncated || 有分片 dropped/truncated`）：index.js 的两条「材料超出 contextBudget，已按优先级裁剪」提示读的就是它，别只加字段不接线。
 
@@ -258,7 +276,7 @@ export function checkChapter({ read, params, outline, chapterId, text })
 - `commitChapter` 返回 `artifacts` 由调用方落盘（引擎 stage 写 store，agent 工具写 store），模块本身不写。
 - `text` 为空或只含占位符 → 抛 `ForgeError('LLM_PARSE')`；`summary` 缺失时用确定性摘要（正文首 240 字）并记 `findings` 一条 note。
 - 内联协议解析函数一并导出，供流水线复用：`splitInline(text)` → `{ body, summary, canonPatch, hadSummary, hadCanon }`（`<<<SUMMARY>>>` / `<<<CANON>>>`，`CANON` 里允许 JSON 数组或对象）。
-- `prepareChapter` 中，`packet.canonText` 来自 `formatCanon(queryCanon(...), {maxChars:3200})`；`castBrief` 复用人物档案；`volumeDigest` 由本卷已写章节摘要拼接后截断 1000 字。
+- `prepareChapter` 用 `formatCanon(queryCanon(...))` 生成正典正文，预算为正典分片 cap 3200 减去标题开销。`castBrief` 复用人物档案。`volumeDigest` 由本卷已写章节摘要拼接后截断到 1000 字。
 - `ensureVolume` 幂等：同一卷调用两次只产生 1 次模型调用，且第二次返回 `created:false`。
 - 只允许 import：`./packet.js` `./canon.js` `./consistency.js` `./craft.js` `./plan.js` `./outline.js` `../../forge/errors.js`。
 

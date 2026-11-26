@@ -4,12 +4,12 @@
 // 每章的工作量是固定的：细纲 1 + 草稿 1 + 摘要/正典摊 0.5 + 审校 1 + 修订摊薄 = 3.5 次调用。
 import { z } from 'zod'
 import { createPrompts, SUMMARY_MARKER, sexOf } from './prompts/zh.js'
-import { defaultCraft, severityRank, countCjk } from './craft.js'
+import { defaultCraft, draftVerdict, severityRank, countCjk, editRate } from './craft.js'
 import { countUnquotedFindings, validateFindingQuotes } from './consistency.js'
 import { chaptersOf } from './outline.js'
-import { characterBrief } from './ledger.js'
-import { buildPacket } from './packet.js'
+import { buildPacket, sliceBodyCap, sliceOf } from './packet.js'
 import {
+  continuationNote,
   continuationSpec,
   generateWithContinuation,
   joinProse,
@@ -238,6 +238,10 @@ const relationSchema = z.object({ to: soft, kind: soft })
 const castSchema = z.object({
   name: z.string().min(1),
   role: soft,
+  tier: soft.transform((value) => value.trim().toLowerCase()),
+  aliases: softList.transform((values) => [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, 3)),
+  recognitionTag: shortLabel(20).catch(undefined),
+  firstVolume: z.number().nullish().catch(undefined),
   // 性别决定后文用「他」还是「她」。软字段：模型漏写不让整份档案作废，
   // 但 characters 阶段会记一条 warn，提示后文可能混用代词。
   gender: soft,
@@ -775,7 +779,7 @@ const EMPTY_TRUNCATE_NOTE = [
   '这一枪不要列提纲、不要分析、不要复述要求，直接写正文第一句，边写边想。',
 ].join('\n')
 
-async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, temperature, targetChars = 0 } = {}) {
+async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, temperature, targetChars = 0, continueFrom = '', label } = {}) {
   const spec = promptSpec(ctx, promptFn, stage)
   const base = {
     system: spec.system,
@@ -785,6 +789,14 @@ async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, tempe
     stage,
     reasoningEffort: PROSE_REASONING_EFFORT,
   }
+  // 贴着已有正文的结尾补写，而不是重跑整章：字数不足时的一次补写靠它。
+  const fromTail = (text) =>
+    continuationNote({
+      tail: tailOfProse(text),
+      chars: countCjk(text),
+      remaining: targetChars > 0 ? Math.max(0, targetChars - countCjk(text)) : 0,
+    })
+  const firstUser = continueFrom ? `${base.user}\n\n${fromTail(continueFrom)}` : base.user
   const once = async (user) => {
     const { text, parts } = await generateWithContinuation({
       spec: { ...base, user },
@@ -798,7 +810,7 @@ async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, tempe
           temperature: next.temperature,
           json: false,
           phase: phase ?? stage,
-          label: stage,
+          label: label ?? stage,
           // 正文阶段关思考，把输出预算留给正文（见 PROSE_REASONING_EFFORT）。
           reasoningEffort: next.reasoningEffort ?? PROSE_REASONING_EFFORT,
           // 长章正文由 continuation 负责「接着写」，不让网关再整篇重生成一遍。
@@ -815,14 +827,14 @@ async function callTextContinued(ctx, stage, promptFn, { phase, maxTokens, tempe
 
   let outcome
   try {
-    outcome = await once(base.user)
+    outcome = await once(firstUser)
   } catch (err) {
     // 幂等重跑一次：上一枪一个字都没吐（预算全烧在推理上），没有半截稿可续，
     // 只能把「别分析了，直接写」讲明白再要一次。
     const empty = err?.code === 'LLM_TRUNCATED' && !String(err?.detail?.text ?? '').trim()
     if (!empty) throw err
     if (typeof ctx.warn === 'function') ctx.warn('这一枪连正文都没吐出来（推理吃光了预算），换成「直接开写」再要一次')
-    outcome = await once(`${base.user}\n${EMPTY_TRUNCATE_NOTE}`)
+    outcome = await once(`${firstUser}\n${EMPTY_TRUNCATE_NOTE}`)
   }
   if (outcome.parts > 1 && typeof ctx.warn === 'function') ctx.warn(`${stage} 分 ${outcome.parts} 段续写完成`)
   return outcome.text
@@ -1292,6 +1304,12 @@ function normalizeFinding(raw, { model = false } = {}) {
  * 兜底拼包：prepareChapter 没给 packet 时用；revise 永远自己拼（mode:'revise'）。
  * 返回 buildPacket 的 {text,report,sections}，text 就是 draft/revise 的 user。
  */
+function castBriefForContext(ctx, chapter, volume, beats, canon) {
+  return requireChapter().chapterCastBrief({
+    characters: jsonOr(ctx, 'characters', {}), chapter, volume, beats, canon, maxChars: sliceBodyCap(sliceOf('cast')),
+  })
+}
+
 function assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads = '', mode = 'draft', revisionFindings = [] }) {
   const params = ctx.params ?? {}
   const outline = currentOutline(ctx) ?? { chapters: [] }
@@ -1308,9 +1326,10 @@ function assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads = '', m
     previousSummary: previous ? textOf(ctx, `summary/${previous.id}`) : '',
     recentSummaries: recentSummaries(outline, ctx, id),
     volumeDigest: volumeDigest(outline, ctx, id),
-    canonText: canonTextFor(canon, names, id),
+    genreText: requireChapter().genreTextOf(params, readerOf(ctx)),
+    canonText: canonTextFor(canon, names, id, sliceBodyCap(sliceOf('canon'))),
     dueThreads,
-    castBrief: characterBrief(jsonOr(ctx, 'characters', {})?.cast ?? [], names, 1500),
+    castBrief: castBriefForContext(ctx, chapter, volume, beats, canon),
     styleSample: fit(ctx, params.styleGuide ?? '', 1200),
     nextChapterGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
     revisionFindings,
@@ -1423,9 +1442,27 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           const message = `人物档案缺少性别：${missing.map((member) => member.name).join('、')}——正文可能混用代词，建议在人物档案里补 gender`
           if (typeof warn === 'function') await warn.call(ctx, message)
         }
+        const counts = { core: 0, major: 0, minor: 0 }
+        const nearNames = []
+        for (const [index, member] of cast.entries()) {
+          if (!Object.hasOwn(counts, member.tier)) {
+            member.tier = /主角|对手|反派|女主/.test(member.role) ? 'core' : 'major'
+          }
+          counts[member.tier] += 1
+          for (const other of cast.slice(0, index)) {
+            const left = Array.from(member.name.normalize('NFKC'))
+            const right = Array.from(other.name.normalize('NFKC'))
+            if (left.length === right.length && left.filter((char, i) => char !== right[i]).length <= (left.length > 1 ? 1 : 0)) {
+              nearNames.push(`${other.name}／${member.name}`)
+            }
+          }
+        }
+        if (nearNames.length && typeof warn === 'function') {
+          await warn.call(ctx, `人物名字接近：${nearNames.join('、')}，同章安排出场时请区分称呼`)
+        }
         return {
           artifacts: { characters: { kind: 'json', content: data } },
-          note: `人物档案：${cast.length} 人${notes.length ? `（${notes.join('；')}）` : ''}`,
+          note: `人物档案：${cast.length} 人（核心 ${counts.core}、阶段 ${counts.major}、登记 ${counts.minor}）${notes.length ? `（${notes.join('；')}）` : ''}`,
         }
       },
     },
@@ -1621,7 +1658,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           targetChars: chapterTargetChars(params),
         })
         const inline = unit.splitInline(raw)
-        const body = normalizeProse(inline?.body ?? '', { no: chapterNoOf(ctx, chapter), title: chapter.title ?? item.title })
+        let body = normalizeProse(inline?.body ?? '', { no: chapterNoOf(ctx, chapter), title: chapter.title ?? item.title })
         if (!body) throw parseError('draft', '草稿正文为空', raw)
 
         // 内联摘要/正典补丁缺省时补小调用；补不出来只 warn，不阻断这一章。
@@ -1658,6 +1695,34 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           }
         }
 
+        // 字数验收：低于目标 0.8 先贴着正文结尾补写一次；补不齐也照样落盘，由 craft 的 length finding 如实提示。
+        const target = chapterTargetChars(params)
+        const floor = Math.round(target * 0.8)
+        if (countCjk(body) < floor) {
+          const before = countCjk(body)
+          try {
+            const extra = await callTextContinued(promptCtx, 'draft', prompts.draft, {
+              // 单独标 phase：这是补写，不是本章第一次成稿（调用计数/成本核算要能分开看）。
+              phase: 'topup',
+              maxTokens: draftMaxTokens(params) + 400,
+              targetChars: target,
+              continueFrom: body,
+              label: 'continue',
+            })
+            const appended = continuationBody(unit, extra)
+            if (appended) {
+              const merged = joinProse(body, appended)
+              if (countCjk(merged) > before) body = merged
+            }
+          } catch (err) {
+            if (err?.code === 'LLM_ABORTED') throw err
+            ctx.warn(`${id} 字数不足（${before}/${target} 字），补写失败：${err?.message ?? err}`)
+          }
+          if (countCjk(body) < floor) {
+            ctx.warn(`${id} 补写后仍不足 ${floor} 字（${countCjk(body)}/${target}），保留 length 告警`)
+          }
+        }
+
         // commit 时 canon 可能还没落盘（首次运行由 outline stage 种下），beats 也可能刚在本轮生成：
         // 用内存覆盖喂给它，避免 commitChapter 退回空正典后把已有 canon 写小。
         const commitRead = readerOf(ctx, {
@@ -1679,6 +1744,11 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         if (expanded) artifacts.outline = { kind: 'json', content: outline }
         const cjk = Number(committed?.stats?.cjk) || countCjk(draft)
         const counts = committed?.counts ?? countSeverities(committed?.findings ?? [])
+        // draft 阶段已经算过的检查结果不能丢：审校前也要能看见这些问题。
+        artifacts[`check/${id}`] = {
+          kind: 'json',
+          content: { findings: committed?.findings ?? [], counts, verdict: committed?.verdict ?? null },
+        }
         return {
           artifacts,
           note: `第 ${chapterNoOf(ctx, chapter)} 章草稿完成：${cjk} 字${counts.block ? `（block ${counts.block}）` : ''}`,
@@ -1692,6 +1762,16 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       produces: ['review/*'],
       review: (project) => project?.params?.reviewGate === true,
       skip: skipAutoReview,
+      // 正文被 draft 阶段重写后，旧 review 是对旧稿的判决：让这一章重新审校。
+      // 只认 draft 阶段的重写，不认 revise 的回写（否则每次修订都会把审校打回未完成，来回打转）。
+      isStale: ({ key, artifact, project }) => {
+        const id = String(key).slice('review/'.length)
+        const draft = project?.artifacts?.[`draft/${id}`]
+        if (!draft || draft.by?.stage !== 'draft') return false
+        const reviewAt = Date.parse(artifact?.meta?.updatedAt ?? project?.artifacts?.[key]?.updatedAt ?? '') || 0
+        const draftAt = Date.parse(draft.updatedAt ?? '') || 0
+        return reviewAt < draftAt
+      },
       onItemError: 'continue',
       async run(ctx) {
         const unit = requireChapter()
@@ -1700,7 +1780,8 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         const id = String(item.id)
         const source = draftOf(ctx, id)
         // 占位稿不是正文：审它只会产生假问题，还可能触发一次无意义的修订。
-        if (!source || isPlaceholderText(source)) return { artifacts: {}, note: `${id} 还没有正文，跳过审校` }
+        // skipped：不是完成。以前只返回空产物，引擎会记 done——10 章正文就配出 50 章「审校完成」。
+        if (!source || isPlaceholderText(source)) return { artifacts: {}, skipped: true, note: `${id} 还没有正文，跳过审校` }
 
         const outline = currentOutline(ctx) ?? { chapters: [item] }
         // 审校也要看到最新正典：canon 还没落盘时先种一份，避免写回时把已有内容截短。
@@ -1711,9 +1792,12 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         const beats = jsonOr(ctx, `beats/${id}`, null)
         const previous = siblingChapter(outline, id, -1)
         const next = siblingChapter(outline, id, 1)
+        const reviewChapter = (outline.chapters ?? []).find((row) => row?.id === id) ?? item
+        const volume = plan.volumeOfChapter(outline, id) ?? plan.volumeById(outline, reviewChapter.volume)
         const promptCtx = withPromptContext(ctx, {
-          chapter: item,
+          chapter: reviewChapter,
           beats,
+          castBrief: castBriefForContext(ctx, reviewChapter, volume, beats, canon),
           draft: source,
           draftText: source,
           canonText: canonTextFor(canon, castNamesFor(beats, item), id),
@@ -1748,7 +1832,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
         const counts = countSeverities(findings)
         const unquotedFindings = countUnquotedFindings(modelFindings)
-        const verdict = counts.block > 0 || counts.warn >= 3 ? 'revise' : 'pass'
+        const verdict = draftVerdict(findings)
         const patch = data.canonPatch ?? data.ledgerPatch ?? null
         const artifacts = {
           [`review/${id}`]: {
@@ -1782,14 +1866,31 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         const item = ctx.item ?? {}
         const id = String(item.id)
         // 先看有没有审校意见：没有意见就没有修订的目标，哪怕正文在也一样。
+        // 这两种「还没轮到」都记 skipped（不是 done），否则续跑会把它们当已完成永久跳过。
         const review = jsonOr(ctx, `review/${id}`, null)
-        if (!review) return { artifacts: {}, note: `${id} 尚未审校，跳过修订` }
+        if (!review) return { artifacts: {}, skipped: true, note: `${id} 尚未审校，跳过修订` }
+        if (review.verdict !== 'revise') {
+          const note = review.verdict === 'pass'
+            ? '审校通过，未覆盖正文；剩余 warn 可人工润色'
+            : '审校缺少有效修订判定，未覆盖正文'
+          return { artifacts: {}, skipped: true, note: `${id} ${note}，跳过修订` }
+        }
         const source = draftOf(ctx, id)
         // 同 review：占位稿不能被当成正文再改一遍（v0.1 的保护保留）。
-        if (!source || isPlaceholderText(source)) return { artifacts: {}, note: `${id} 还没有正文，跳过修订` }
+        if (!source || isPlaceholderText(source)) {
+          return { artifacts: {}, skipped: true, note: `${id} 还没有正文，跳过修订` }
+        }
         // alwaysRun 只保证「有新的审校意见时会覆盖」；已经在审校之后改过的章节，续跑时不再改一遍。
         const draftArtifact = typeof ctx.read === 'function' ? ctx.read(`draft/${id}`) : null
         const reviewArtifact = typeof ctx.read === 'function' ? ctx.read(`review/${id}`) : null
+        const reviewVersion = reviewArtifact?.meta?.version ?? ctx.project?.artifacts?.[`review/${id}`]?.version ?? 1
+        if (reviewVersion >= 3) {
+          return { artifacts: {}, skipped: true, note: `${id} 已到第 ${reviewVersion} 次审校，停止自动修订，请人工介入` }
+        }
+        // 引擎把 stage 的 result.meta 持久化到产物的 meta.by；新正文替换时标记自然清除。
+        if (draftArtifact?.meta?.by?.stopAutoRevision === true) {
+          return { artifacts: {}, skipped: true, note: `${id} 上次改动不足 5%，停止自动修订，请人工介入` }
+        }
         const draftedAt = String(draftArtifact?.meta?.updatedAt ?? '')
         const reviewedAt = String(reviewArtifact?.meta?.updatedAt ?? '')
         if (draftedAt && reviewedAt && draftedAt >= reviewedAt) {
@@ -1854,12 +1955,14 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           }
         }
 
+        const stopAutoRevision = editRate(continuationBody(unit, source), continuationBody(unit, text)) < 0.05
         return {
           artifacts: {
             [`draft/${id}`]: { kind: 'md', content: text },
             [`summary/${id}`]: { kind: 'md', content: summary },
           },
-          note: `${id} 已修订（${actionable.length} 条 block/warn）`,
+          ...(stopAutoRevision ? { meta: { stopAutoRevision } } : {}),
+          note: `${id} 已修订（${actionable.length} 条 block/warn）${stopAutoRevision ? '；改动不足 5%，停止自动修订' : ''}`,
         }
       },
     },
@@ -2053,6 +2156,44 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         })
       }
       return { chapterId, beforeChars, afterChars, truncated, text }
+    },
+
+    /**
+     * 校正历史脏状态：v0.7.0 及以前，review/revise 对还没有正文的章返回空产物，引擎把它记成 done，
+     * 于是 10 章正文能配出「审校 50 章、修订 47 章」。这里按「这一阶段必须为该章产出过东西」回收假 done：
+     * review 认 review/<id>；revise 认 review/<id> 且 draft/<id>（修订因没有 block/warn 而零产物是合法的，不能只认产物）。
+     * 只回收 done，error/skipped 保留原样。返回改动条数，0 表示不需要落盘。
+     */
+    reconcile(project) {
+      const stages = project?.stages ?? {}
+      const artifacts = project?.artifacts ?? {}
+      const has = (key) => Boolean(artifacts[key])
+      const stamp = (key) => Date.parse(artifacts[key]?.updatedAt ?? '') || 0
+      // 正文被 draft 阶段重写后，旧 review 是对旧稿的判决：引文对不上、问题清单也不适用。
+      // 只认 draft 阶段的重写，不认 revise 的回写——否则每次修订都会把审校再次打成未完成，来回打转。
+      const reviewedAfterDraft = (id) => {
+        if (!has(`review/${id}`)) return false
+        const draft = artifacts[`draft/${id}`]
+        if (!draft || draft.by?.stage !== 'draft') return true
+        return stamp(`review/${id}`) >= stamp(`draft/${id}`)
+      }
+      let changed = 0
+      const sweep = (stageId, keep) => {
+        const entry = stages[stageId]
+        if (!entry?.items) return
+        let touched = 0
+        for (const [id, status] of Object.entries(entry.items)) {
+          // 只纠正假 done：skipped 是「现在做不了」，本来就是诚实的中间态。
+          if (status !== 'done' || keep(id)) continue
+          entry.items[id] = 'pending'
+          touched += 1
+        }
+        if (touched > 0 && entry.status === 'done') entry.status = 'partial'
+        changed += touched
+      }
+      sweep('review', (id) => reviewedAfterDraft(id))
+      sweep('revise', (id) => has(`review/${id}`) && has(`draft/${id}`))
+      return changed
     },
 
     /** 领域统计：已写章节/字数/卷进度，供引擎写进 project.stats、UI 展示。 */

@@ -60,6 +60,26 @@ test('premise：读者诊断、三种读法、故事核、核心物件都进了 
   assert.ok(out.user.includes('alternates'), 'premise user 契约缺 alternates 字段')
 })
 
+test('bible：核心设定与约束排第二，升级阶梯只用于力量体系类型', () => {
+  const prompts = createPrompts()
+  for (const genre of ['科幻', '悬疑', '都市', '言情', '历史', '恐怖', '通用', '奇幻', '武侠', '玄幻', '仙侠']) {
+    const ctx = createFakeCtx()
+    ctx.params = { ...ctx.params, genre }
+    const { system, user } = prompts.bible(ctx)
+    assert.match(system, /一句话世界→核心设定与约束/)
+    assert.match(user, /## 一句话世界[^\n]*\n## 核心设定与约束/)
+    assert.ok(system.length <= SYSTEM_LIMIT)
+    if (['奇幻', '武侠', '玄幻', '仙侠'].includes(genre)) {
+      assert.match(system, /3–5 级升级阶梯/)
+      assert.match(user, /获得方式、规则边界、代价、3–5 级升级阶梯/)
+    } else {
+      assert.doesNotMatch(system, /升级阶梯/)
+      assert.doesNotMatch(user, /升级阶梯/)
+      assert.match(system, /这个设定能做什么、代价是什么、在什么条件下失效、三条不可违背的硬约束/)
+    }
+  }
+})
+
 test('draft：预期三段式、落点三选一、一个场景一设定都在；且不出现「不是…而是」', () => {
   const prompts = createPrompts()
   const out = prompts.draft(createFakeCtx())
@@ -69,6 +89,18 @@ test('draft：预期三段式、落点三选一、一个场景一设定都在；
   }
 
   assert.ok(!out.system.includes('不是…而是'), 'draft system 里出现了它自己要禁的「不是…而是」')
+})
+
+test('draft 和 review 对齐落差、五维及利害的单章契约', () => {
+  const prompts = createPrompts()
+  const draft = prompts.draft(createFakeCtx()).system
+  for (const text of ['500–800', '两句内', '五维', '谁失去什么', '转场显式标时空']) {
+    assert.ok(draft.includes(text), text)
+  }
+  const review = prompts.review(createFakeCtx()).system
+  for (const text of ['五维', '任取 500 字', '缺 ≥3 维记 warn', '谁失去什么', '70–85%', '高唤醒点 >2 只作 note']) {
+    assert.ok(review.includes(text), text)
+  }
 })
 
 test('review：三闸、机器读数与修复动作都在 system 里', () => {
@@ -118,6 +150,19 @@ test('review：机器读数按 ctx.craftStats 渲染成读者可用的数字', (
     '活跃人名 2.3 个/1500 字',
   ]) {
     assert.ok(out.user.includes(expected), `review user 未渲染「${expected}」`)
+  }
+})
+
+test('review：中文体检逐项抽句并显示四个读数', () => {
+  const ctx = createFakeCtx()
+  ctx.craftStats = { dePer100: 6, beiPer100: 1.5, short8Per200: 2, nominalPer1k: 30 }
+  const { system, user } = createPrompts().review(ctx)
+  assert.match(system, /中文体检逐项抽句.*须引原句/)
+  for (const symptom of ['抽象名词作主语', '弱动词＋抽象名词', '被动滥用', '的的不休', '长定语前置', '连接词冗余', '伪术语']) {
+    assert.ok(system.includes(symptom), symptom)
+  }
+  for (const reading of ['「的」密度 6/百字', '「被」密度 1.5/百字', '短句（≤8 字）2 句/200 字', '名词化密度 30/千字']) {
+    assert.ok(user.includes(reading), reading)
   }
 })
 

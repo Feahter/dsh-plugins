@@ -484,7 +484,7 @@ export function Workbench({ projectId, onBack, notify }) {
     setRunError('')
     setSettling(false)
     try {
-      const created = await startRun(projectId, { ...options, window: 10 })
+      const created = await startRun(projectId, { window: 10, ...options })
       refreshRun(created)
       setChapter(null)
       notify(message, 'ok')
@@ -505,8 +505,20 @@ export function Workbench({ projectId, onBack, notify }) {
   const onRerun = () => {
     // 正典不是 stage，没有可重跑的阶段。
     if (selected === 'overview' || selected === 'canon') return
-    begin({ from: selected, to: selected, force: true, autoApprove: !project?.params?.reviewGate },
-      `重跑「${STAGE_BY_ID[selected]?.title ?? selected}」`)
+    // 重跑 = 重做「已经有的产物」，不是从第一章重新铺开。
+    // 以前固定带 window:10 + force，窗口永远落在 ch001–ch010：
+    // 20 章的书每次只重写前 10 章，第 11 章还会被 defer 打回 pending（2026-11-24 事故）。
+    const prefix = selected === 'revise' ? 'draft' : selected
+    const ids = Object.keys(project?.artifacts ?? {})
+      .filter((key) => key.startsWith(`${prefix}/`))
+      .map((key) => key.slice(prefix.length + 1))
+      .filter((id) => id && !id.includes('/'))
+    const options = { from: selected, to: selected, force: true, autoApprove: !project?.params?.reviewGate }
+    if (ids.length) {
+      options.items = ids
+      options.window = Math.min(200, Math.max(10, ids.length))
+    }
+    begin(options, `重跑「${STAGE_BY_ID[selected]?.title ?? selected}」`)
   }
 
   const onContinueReview = async () => {

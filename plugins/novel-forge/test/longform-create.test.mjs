@@ -80,7 +80,7 @@ test('A4 packet：world 片含「力量与规则」，pitch 片进材料，总�
     worldBrief: '## 力量与规则\n死者头七能回来，但只能回答三个问题，每次回答都要用活人的记忆交换。',
     pitchText: '频道：男频\n卖点：给死人守夜的人，靠头七的规矩活命。\n金手指：听得见死者最后一句话',
   })
-  assert.match(packet.text, /## 世界规则/)
+  assert.match(packet.text, /## 世界设定/)
   assert.ok(packet.sections.world.includes('## 力量与规则'))
   assert.ok(packet.sections.pitch.includes('头七的规矩'))
   assert.ok(packet.text.length <= 4000)

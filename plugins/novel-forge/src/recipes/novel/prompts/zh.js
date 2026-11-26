@@ -170,24 +170,24 @@ const ADDENDA = {
 - ending：只写落点和代价，不写过程；必须回答主题，并让主角失去不可逆的东西。
 - 书名：先在草稿里拟 5 个候选（意象／冲突／人称／时间／反讽各一），按"有画面、不剧透、能记住"挑一个写进 title，不要在 JSON 里新增候选字段。`,
 
-  bible: `【本阶段：世界设定】
-你不是在写百科，是在造一套"会咬人"的规则。每条设定都要回答：让谁得利、让谁受害、逼人物做什么选择。写不进冲突的设定，一律不写。
-- 只写这本书会反复用到的：三条硬规则、三到六个地点、时代日常（钱／交通／通信／权力／时间怎么过）、禁忌与代价、反复出现的意象与物件。
-- 七段顺序固定，不得调换：一句话世界→力量与规则→硬规则→地点→时代与日常→禁忌与代价→意象与物件。「力量与规则」必须紧跟「一句话世界」，因为材料包只取前 600 字。
-- 力量与规则四要素缺一不可：获得方式、规则边界、代价、3–5 级升级阶梯（每级：能做什么／要付什么）。缺一项就重写。
-- 规则必须有边界和代价；越强的设定，限制越具体。
+  bible: (hardTitle, elements) => `【本阶段：世界设定】
+你不是在写百科，是在造一套会影响人物选择的设定。每条设定都要回答：让谁得利、让谁受害、逼人物做什么选择。写不进冲突的设定，一律不写。
+- 只写这本书会反复用到的：三条${hardTitle}、三到六个地点、时代日常（钱／交通／通信／权力／时间怎么过）、禁忌与代价、反复出现的意象与物件。
+- 七段顺序固定，不得调换：一句话世界→核心设定与约束→${hardTitle}→地点→时代与日常→禁忌与代价→意象与物件。「核心设定与约束」必须紧跟「一句话世界」，因为材料包只取前 600 字。
+- 核心设定与约束四要素缺一不可：${elements}。缺一项就重写。
+- 设定必须有边界和代价；越强的设定，限制越具体。
 - 地点要有感官锚点（气味／声音／光线／温度）和"谁的地盘"；同一地点在不同章节要能变味。
-- 每条规则后面用一句话写"它会逼出什么冲突"。
+- 每条${hardTitle}后面用一句话写"它会逼出什么冲突"。
 - 禁止"这是一个充满魔法的大陆"式空话；禁止罗列历史年表；禁止解释读者在正文里能自己看到的东西。`,
 
   characters: `【本阶段：人物】
-人物是"在压力下会怎么做"的模型：每人必须有 want、fear、secret、voice、arc，缺一不可。
+人物是「在压力下会怎么做」的模型。C4 核心写全重卡，C3 阶段只写本卷行动所需的简卡。
 - want 与 fear 互相拉扯，主角想要的至少有一方反对；secret 必须中段爆炸；arc 由事件逼出来，不是顿悟。
 - voice 写两句：第一句说话方式（句长／用词／口头禅／沉默时做什么），第二句行为底线（他会……；绝不会……）。
-- 主角与对手另填 need／wound／lie／exit：need 与 want 相反，lie 由 wound 长出，exit 是退场方式；配角不填。
+- C4 核心另填 need／wound／lie／exit：need 与 want 相反，lie 由 wound 长出，exit 是退场方式。
 - 关系要不对称：A 以为是朋友，B 只在利用 A；relations 写"谁对谁"，不写"互为好友"。
 - 配角也要有自己想要的东西；没有欲望的人不许出场。
-- 人数：主角 1、对手 1、关键配角 4–6，不建连名字都记不住的名单。
+- 开局只写 C4 核心 3–4 人和首卷 C3 阶段 3 人。其余人物由卷纲与章节登记。避免同章出场者名字音形相近。
 - 主角必须给 power（起点能力／资源）、growth（成长轴）、cost（代价）；反派必须给 pressure（怎么施压）。四样都要能落进事件，不许写成标签。`,
 
   spine: `【本阶段：故事脊柱】
@@ -236,21 +236,21 @@ const ADDENDA = {
 - 不要在细纲里写对白全文，只写"这场戏要争什么"。`,
 
   draft: `【本章写作契约】
-你是这本书的作者，不是助手。读者要的是这一章，不是关于这一章的说明。
-- 直接写正文，第一行必须是「## 第N章 标题」，段落之间空一行。
-- 不写前言、总结、解释、小标题、列表、作者按。
-- 连续性：只用【材料包】里的人物、设定、前情与正典；包里没有的不许自造，不新增有名有姓的人物或规则。
+- 你是本书作者，直写正文。首行「## 第N章 标题」，段间空一行。
+- 禁写前言、总结、解释、小标题、列表和作者按。
+- 人物、设定、前情和正典取自【材料包】，不新增具名人物或规则。
+- 本章至少一次让【类型锚】的核心设定以代价／后果显形，别只写物件、手续和编号。
 - 细纲是骨架，可为更强偏离，但必须兑现本章转折与结尾钩子。
 - 语感：动词承担画面，少用形容词和比喻；不用现成的感受词。
 - 换词：同一实词或二字组本段出现第二次就换说法；换不出就换个观察角度，别用「缓缓／一点点」凑节奏。
 - 对话要有暗流：每轮都在争一样东西（立场、信息或面子）；两人都同意的句子删掉，用动作接。
 - 段落中位 20–80 字，长短交错；不许连续三段同长。
-- 预期三段式：每章至少一处「建立模式→打破→200 字内给可理解的解释」；只破不解释＝事故。
+- 预期三段式：每 500–800 字一次局部落差，建立模式→打破→两句内给可理解的锚点；只破不锚＝事故，别每段都惊喜。
+- 场景五维：谁、何时、何地、为何、结果至少落地三维，转场显式标时空。
 - 一个场景只引入一个新设定或人物；新名字一次给全，不要挤在一段。
-- 落点三选一（落在钩子指向处）：动作收＝一个动作就停／画面收＝停在一个意象／回环收＝回到开头的物件或话，但意义已变。禁止总结主题、点名言志、反问升华。
-- 章末停在动作或画面，不写总结或感悟；最后 3 行必须落在钩子上。
+- 落点三选一：章末停在动作或画面，或回到意义已变的开头物件或话。末 3 行落在钩子上，禁写总结、感悟、点名言志或反问升华。
 - 每 800 字至少一次进展：信息、能力、关系至少变一样；原地打转的段落删掉。
-- 爽点靠「选择＋代价」兑现：他放弃了什么、谁因此受损；不许用旁白宣布"他赢了"。
+- 爽点靠选择＋代价：关键选择要能指出谁失去什么、谁因此受损；禁用旁白宣布胜负。
 
 【反 AI 腔：命中左边，就换成右边】
 仿佛／似乎／宛如 → 具体观察或身体反应（后颈汗毛立起来）
@@ -284,11 +284,14 @@ const ADDENDA = {
   review: `【本阶段：连续性审校】
 你是这本书的责任编辑，不是夸奖者。只报可验证的问题，每条必须能指到具体段落或原句；指认不了的"感觉"不要写。同时参考【正典】：正典是这本书的既成事实，正文与它冲突就是硬错。
 - quote 必须从【本章正文】逐字复制 8–120 字，不改标点、不加省略号、不拼接两处；找不到可引原句就不写这条意见。
-先读【机器读数】再判：读数已越界的项直接写成 finding，不要重复描述；读数正常的项，不许凭感觉报同类问题。
+先读【机器读数】再核对：越界只是线索，不凭读数重复报项或升为 block。中文体检读数只作 note。
+中文体检逐项抽句：抽象名词作主语、弱动词＋抽象名词、被动滥用、的的不休、长定语前置、连接词冗余、伪术语。每项报问题都须引原句。
 按顺序过三闸，前闸不过不写后闸：
 1. 认知负荷：读者此刻能否回答「谁想要什么、卡在哪」；1500 字内主要人名是否超过 5 个。
-2. 预期：标出建立模式与打破模式的位置；打破后 200 字内有没有可理解的解释。
-3. 自我嵌入：这个冲突对应读者的什么处境／恐惧／没被满足的渴望；只用来判断，不写进正文。
+2. 预期：标出建立模式与打破的位置，打破后两句内应有可理解的锚点。
+   五维抽查：任取 500 字，标出谁／何时／何地／为何／结果中缺了哪些，缺 ≥3 维记 warn。
+   利害抽查：指出本章最强的一次「谁失去什么」与主峰位置（约 70–85%），指不出记 warn；高唤醒点 >2 只作 note。
+3. 自我嵌入：用上述利害判断读者能否代入处境，只用于审校。
 再按连续性对账：
 1. 事实：与正典／前文矛盾的人名、物件、伤势、钱、地点、天气、规则。
 2. 时间线：本章内部的时间推进、与上一章的时间衔接、路程与耗时是否可能。
@@ -299,7 +302,7 @@ const ADDENDA = {
 7. 对话：台词是否只在交换信息、是否人人说一样的话、有没有潜台词。
 severity 标准：block＝读者会出戏／前后矛盾／关键信息错；warn＝明显削弱体验；note＝可改可不改。
 fix 必须写成"改成什么"：替换成哪个动作／删掉哪句／补哪个物；写"加强描写"不算 fix。
-verdict：有 block，或 warn ≥3 → revise；否则 pass。不要输出 ledgerPatch，正典由本章自己的 canon patch 维护。`,
+verdict：有 block，或 warn ≥3 且涉及词频之外的问题 → revise；否则 pass。不要输出 ledgerPatch，正典由本章自己的 canon patch 维护。`,
 
   revise: `【本阶段：修订】
 你是外科医生，不是重写者。只动【需修正】点名的位置；没被点名的段落尽量原样保留，包括你认为可以更好的地方。
@@ -463,7 +466,7 @@ function section(label, body, fallback) {
   return `【${label}】\n${text}`
 }
 
-function genrePromise(genre) {
+export function genrePromise(genre) {
   return GENRE_PROMISE[str(genre)] || GENRE_PROMISE['通用']
 }
 
@@ -778,9 +781,9 @@ function castBrief(ctx, names, max) {
   return fit(ctx, lines.join('\n'), max)
 }
 
-/** stage ctx 直接给了 castBrief 文本就用它（chapter.prepareChapter 算好的那一份）。 */
+/** 章工作单元已按共用预算渲染。独立调用 prompt 时仍可用原来的档案兜底。 */
 function castBriefOf(ctx, names, max) {
-  return fit(ctx, str(ctx && ctx.castBrief), max) || castBrief(ctx, names, max)
+  return typeof ctx?.castBrief === 'string' ? ctx.castBrief : castBrief(ctx, names, max)
 }
 
 /* --- 正典 / 细纲 / 审校 --------------------------------------------- */
@@ -1205,19 +1208,24 @@ function biblePrompt(ctx) {
   const p = paramsOf(ctx)
   const seed = str(p.seed)
   const golden = goldenFingerText(pitchOf(ctx).goldenFinger || p.goldenFinger)
+  const powerSystem = ['奇幻', '武侠', '玄幻', '仙侠'].includes(str(p.genre))
+  const hardTitle = powerSystem ? '硬规则' : '硬约束'
+  const elements = powerSystem
+    ? '获得方式、规则边界、代价、3–5 级升级阶梯（每级：能做什么／要付什么）'
+    : '这个设定能做什么、代价是什么、在什么条件下失效、三条不可违背的硬约束（第三段列明）'
   const user = [
     projectHeader(ctx),
-    section('故事核心', prettyArtifact(ctx, 'brief', BUDGET.bible.brief), '（缺失：先按故事种子判断这本书需要哪三条硬规则。）'),
+    section('故事核心', prettyArtifact(ctx, 'brief', BUDGET.bible.brief), `（缺失：先按故事种子判断这本书需要哪三条${hardTitle}。）`),
     seed ? section('灵感与母题', seed) : '',
     section('类型承诺', genrePromise(p.genre)),
     golden ? section('金手指（必须与 pitch 一致）', golden) : '',
-    section('写作边界', '只写会反复用到的设定；每条规则都要有代价和冲突出口；不写百科条目、不写年表、不解释正文能自己展示的东西。'),
+    section('写作边界', `只写会反复用到的设定；每条${hardTitle}都要有代价和冲突出口；不写百科条目、不写年表、不解释正文能自己展示的东西。`),
     section('文风与尺度', styleText(ctx, BUDGET.bible.style), '（未指定：冷、具体、少形容词。）'),
     mdContract(`# 世界设定
 
 ## 一句话世界（≤40 字）
-## 力量与规则（第二小标题，不得后移；金手指／超自然体系：获得方式、规则边界、代价、3–5 级升级阶梯，每级写"能做什么／要付什么"）
-## 硬规则（3 条；每条：规则／边界／代价／会逼出什么冲突）
+## 核心设定与约束（第二小标题，不得后移；${elements}）
+## ${hardTitle}（3 条；每条：内容／边界／代价／会逼出什么冲突）
 ## 地点（3–6 个；每个：感官锚点／谁的地盘／暗藏的危险）
 ## 时代与日常（钱、交通、通信、权力、时间怎么过）
 ## 禁忌与代价（违反会发生什么；谁知道这条禁忌）
@@ -1226,7 +1234,7 @@ function biblePrompt(ctx) {
     .filter(Boolean)
     .join('\n\n')
   return {
-    system: `${CRAFT}\n\n${ADDENDA.bible}`,
+    system: `${CRAFT}\n\n${ADDENDA.bible(hardTitle, elements)}`,
     user: hardCap(ctx, user, BUDGET.bible.user),
     maxTokens: 3000,
     temperature: TEMPERATURE.bible,
@@ -1249,7 +1257,7 @@ function charactersPrompt(ctx) {
     section('类型承诺', genrePromise(p.genre)),
     section(
       '人物数量',
-      '主角 1、对手 1、关键配角 4–6。每个配角都要有自己想要的东西；没有欲望的人不许出场。关系写成"谁对谁"，不要写"互为好友"。输出 cast 必须 6–8 人；示例只列 1 人，是形状示范。'
+      'C4 核心 3–4 人（全书核心上限 10），写满四件套。首卷 C3 阶段 3 人，写 want、pressure、relations、recognitionTag。其余人物不在此处生成，由卷纲与章节登记。示例只展示重卡形状。'
     ),
     section(
       '性别与代词（必须先定，后文不得再改）',
@@ -1264,23 +1272,27 @@ function charactersPrompt(ctx) {
     ),
     jsonContract(
       [
-        '- cast：array，6–8 人',
+        '- cast：array，C4 核心 3–4 人与首卷 C3 阶段 3 人',
+        '- cast[].tier：C4 用 core，C3 用 major。以下 fear、secret、voice、arc、need、wound、lie、exit 仅 C4 填写',
+        '- cast[].aliases：可选，去重后的别名数组，最多 3 个',
+        '- cast[].recognitionTag：不超过 20 字的再识别标签，C3 必填，后续登记的 C2 及以下也须给标签',
+        '- cast[].firstVolume：首次登场卷号，数字或 null',
         '- cast[].name：string，2–4 字，全书唯一',
         '- cast[].role：string，如"主角""对手""关键配角"',
         '- cast[].power：string，≤30 字，主角必填；起点能力／资源',
         '- cast[].growth：string，≤40 字，主角必填；成长轴（从能做什么，到能做什么）',
         '- cast[].cost：string，≤30 字，主角必填；每次用能力要付的代价',
-        '- cast[].pressure：string，≤30 字，反派必填；他靠什么施压',
+        '- cast[].pressure：string，≤30 字，C3 及反派必填；角色受什么压力或如何施压',
         "- cast[].gender：string，'男' 或 '女'；必填，决定后文用「他」还是「她」",
         '- cast[].want：string，≤40 字，当下最想要的东西',
         '- cast[].fear：string，≤40 字，不敢面对的东西',
         '- cast[].secret：string，≤50 字，不能让人知道、且中段会爆炸的事',
         '- cast[].voice：string，两句话——第一句说话方式（句长／用词／口头禅／沉默时做什么），第二句行为底线（他会……；绝不会……）',
         '- cast[].arc：string，≤50 字，从……到……，必须由事件逼出来',
-        '- cast[].need：string，≤30 字，主角与对手必填；他真正需要的（常与 want 相反）',
-        '- cast[].wound：string，≤30 字，主角与对手必填；旧伤',
-        '- cast[].lie：string，≤30 字，主角与对手必填；他相信的错误认知',
-        '- cast[].exit：string，≤30 字，主角与对手必填；退场方式',
+        '- cast[].need：string，≤30 字，C4 必填；他真正需要的（常与 want 相反）',
+        '- cast[].wound：string，≤30 字，C4 必填；旧伤',
+        '- cast[].lie：string，≤30 字，C4 必填；他相信的错误认知',
+        '- cast[].exit：string，≤30 字，C4 必填；退场方式',
         '- cast[].relations：array，每项 {to, kind}；to 是已有人物名，kind 写不对称的关系',
       ],
       {
@@ -1288,6 +1300,7 @@ function charactersPrompt(ctx) {
           {
             name: '沈砚',
             role: '主角',
+            tier: 'core',
             gender: '女',
             want: '查清母亲真正的死因',
             fear: '自己也会在头七看见不该看见的东西',
@@ -1312,7 +1325,7 @@ function charactersPrompt(ctx) {
   return {
     system: `${CRAFT}\n\n${ADDENDA.characters}`,
     user: hardCap(ctx, user, BUDGET.characters.user),
-    maxTokens: 3200,
+    maxTokens: 4096,
     temperature: TEMPERATURE.characters,
   }
 }
@@ -1689,6 +1702,7 @@ function volumeChaptersPrompt(ctx) {
     jsonContract(
       [
         `- chapters：array，必须恰好 ${range.target} 条；第 1 条＝第 ${range.start} 章，最后一条＝第 ${range.end} 章`,
+        '- newCharacters：可选，本批新登场的本卷 C3 阶段人物，数组 [{name, role, want, pressure}]；没有则 []',
         '- chapters[].title：string，≤16 字，有画面，不剧透结局',
         '- chapters[].goal：string，≤40 字，本章谁想要什么',
         '- chapters[].conflict：string，≤40 字，什么挡着',
@@ -1697,7 +1711,7 @@ function volumeChaptersPrompt(ctx) {
         '- chapters[].pov：string，与项目视角一致',
         '- chapters[].when：string，≤20 字',
         '- chapters[].where：string，≤20 字',
-        '- chapters[].cast：string[]，1–4 个已有人物名',
+        '- chapters[].cast：string[]，1–4 个已有人物或本卷 newCharacters 已登记的名字',
         '- chapters[].hookType：string，六类之一：悬念／危机／反转／期待／情感／信息差',
         '- chapters[].hookStrength：number，1–5',
         '- chapters[].payoff：object，{level: small|medium|large, text≤40}；没有就 level 写 none、text 写空串',
@@ -1803,6 +1817,7 @@ function beatsPrompt(ctx) {
   const user = [
     projectHeader(ctx),
     section('本章任务', chapterCard(ch, n), '（缺失：按项目规模与上一章钩子自行确定本章目标与转折。）'),
+    section('类型承诺', genrePromise(p.genre)),
     openerChapter ? section('开篇约定（本批前三章，必须兑现）', openerChapter, '') : '',
     section(
       '所属卷',
@@ -1900,7 +1915,7 @@ function draftPrompt(ctx) {
     CRAFT,
     [
       ADDENDA.draft,
-      `- 本章 ${words} 字（可接受 ${Math.round(words * 0.9)}–${Math.round(words * 1.15)} 字），视角 ${pov}；宁少勿注水，一段只推进一个意思。`,
+      `- 本章 ${words} 字（${Math.round(words * 0.9)}–${Math.round(words * 1.15)} 字），视角 ${pov}；别注水。`,
     ].join('\n'),
     inlineProtocolBlock(),
   ].join('\n\n')
@@ -2016,6 +2031,10 @@ function craftStatsText(ctx) {
     num('avgSentenceLen') == null ? '' : `平均句长 ${num('avgSentenceLen')} 字`,
     num('maxSentenceLen') == null ? '' : `最长句 ${num('maxSentenceLen')} 字`,
     num('shortSentenceRatio') == null ? '' : `短句（≤12 字）占比 ${num('shortSentenceRatio')}%`,
+    num('short8Per200') == null ? '' : `短句（≤8 字）${num('short8Per200')} 句/200 字`,
+    num('dePer100') == null ? '' : `「的」密度 ${num('dePer100')}/百字`,
+    num('beiPer100') == null ? '' : `「被」密度 ${num('beiPer100')}/百字`,
+    num('nominalPer1k') == null ? '' : `名词化密度 ${num('nominalPer1k')}/千字`,
     ratio == null ? '' : `对话比 ${Math.round((ratio <= 1 ? ratio * 100 : ratio) * 10) / 10}%`,
     num('sensoryPer1k') == null ? '' : `感官密度 ${num('sensoryPer1k')}/千字`,
     num('bigramTtr') == null ? '' : `二字组多样性 ${num('bigramTtr')}`,
@@ -2064,7 +2083,7 @@ function reviewPrompt(ctx) {
         '- findings[].quote：string，必填，从【本章正文】逐字复制 8–120 字',
         '- findings[].issue：string，≤60 字，说清哪里错、为什么错',
         '- findings[].fix：string，≤60 字，怎么改：删哪句／换成什么动作／补什么细节',
-        "- verdict：'pass' | 'revise'；有 block 或 warn ≥3 时为 revise",
+        "- verdict：'pass' | 'revise'；有 block 或 warn ≥3 且涉及词频之外的问题时为 revise",
         '- 不要输出 ledgerPatch；正典由本章自己的 canon patch 维护',
       ],
       {

@@ -581,8 +581,8 @@ test('packet 分片账：chars/cap/allocated/dropped 齐全且 used ≤ budget�
   const names = report.slices.map((slice) => slice.name)
   assert.deepEqual(
     names,
-    ['brief', 'beats', 'previous', 'recent', 'digest', 'canon', 'cast', 'next', 'style'],
-    `draft 模式应有 9 个分片，实际 ${names.join(',')}`,
+    ['brief', 'genre', 'beats', 'previous', 'recent', 'digest', 'canon', 'cast', 'next', 'style'],
+    `draft 模式应有 10 个分片，实际 ${names.join(',')}`,
   )
   for (const slice of report.slices) {
     assert.equal(typeof slice.chars, 'number', `${slice.name}.chars 应是数字，实际 ${typeof slice.chars}`)
