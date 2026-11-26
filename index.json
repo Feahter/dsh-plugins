@@ -165,8 +165,8 @@
         "zh": "语音看板娘"
       },
       "description": {
-        "zh": "语音看板娘 0.6：设置面板收成「语音管家设置」一页，形象、声音、主题分组可改；挂断会中止本次通话的 /turn 请求，人声打断后把触发停播的那 220 毫秒语音交给识别，麦克风意外断开时结束当前通话并提示重连。形象仍是自研的 3D 发光核（单文件 WebGL，不依赖 three.js、不加载贴图），五套状态调色板、87 个样式 token 可改，跟模型说一句就能换主题并存成自己的。面板只做两件事：语音输入（通话逐句朗读、输入框听写、按住热键说话）与派活给 DSH。",
-        "en": "Voice companion 0.6: the settings panel is one sheet with grouped appearance, voice and theme sections. Hanging up aborts the call in-flight /turn request, a spoken interruption hands the 220 ms that stopped playback to recognition, and an unexpected microphone disconnect ends the call with a reconnect hint. The mascot is still an original 3D surface (one WebGL file, no three.js, no textures) with five state palettes and 87 style tokens; say one sentence to restyle it and save your own theme. The panel keeps two jobs: voice input (call-mode speech, composer dictation, hold-to-talk) and handing work to DSH."
+        "zh": "语音看板娘 0.6：设置面板收成「语音管家设置」一页，形象、声音、主题分组可改；挂断会中止本次通话的 /turn 请求，人声打断后把触发停播的那 220 毫秒语音交给识别，麦克风意外断开时结束当前通话并提示重连。形象仍是自研的 3D 发光核（单文件 WebGL，不依赖 three.js、不加载贴图），五套状态调色板、87 个样式 token 可改，跟模型说一句就能换主题并存成自己的。面板只做两件事：语音输入（通话逐句朗读、输入框听写、按住热键说话）与派活给 DSH。 0.7 加任务视图：面板右上 ▦ 打开全屏画布，把一次语音派活画成节点链（听到 → 派活(权限/推理/会话) → 每一步工具与回复 → 交付），运行中每 1.6 秒刷新并高亮当前节点，任务结束后节点链冻结成快照、不受会话日志裁剪影响；左栏切历史任务，点节点看全文，画布可拖动缩放。新增 GET /tasks 读任务列表与节点链。",
+        "en": "Voice companion 0.6: the settings panel is one sheet with grouped appearance, voice and theme sections. Hanging up aborts the call in-flight /turn request, a spoken interruption hands the 220 ms that stopped playback to recognition, and an unexpected microphone disconnect ends the call with a reconnect hint. The mascot is still an original 3D surface (one WebGL file, no three.js, no textures) with five state palettes and 87 style tokens; say one sentence to restyle it and save your own theme. The panel keeps two jobs: voice input (call-mode speech, composer dictation, hold-to-talk) and handing work to DSH. 0.7 adds a task view: the ▦ button opens a full-screen canvas that draws one spoken task as a node chain (heard → dispatched with permissions, reasoning and session setup → each tool call and reply → delivered), refreshing every 1.6 s and highlighting the running node; when a task ends the chain freezes into a snapshot that survives session-log trimming. A left rail switches between past tasks, clicking a node shows its full text, and the canvas pans and zooms. A new GET /tasks serves the task list and node chains."
       },
       "icon": "plugins/voice-companion/icon.svg",
       "author": "Feahter",
@@ -192,10 +192,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795091455
+          "updated": 1795676476
         }
       },
       "versions": [
+        {
+          "version": "0.7.0",
+          "publishTimestamp": 1795676476,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "27d741d61fa63a072159de9049e411fc3696da80",
+            "path": "plugins/voice-companion"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.6.0",
           "publishTimestamp": 1795091455,
@@ -976,8 +990,8 @@
         "zh": "墨炉 · 小说炼炉"
       },
       "description": {
-        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。0.3 按长篇网文的真实规模重做：卷 → 章两级大纲，卷纲由脚本建骨架、不烧模型；首轮先出「黄金三章」开篇包，世界观与卖点压成固定分片进每章上下文；craft 质检与 story-craft 的 11 项量化指标同口径（句长、感官密度、抽象情绪、副词、AI 套话、人物密度、对话占比），超容差直接列 finding；novel_* 工具按会话开关，不写小说时 0 常驻 token；另带「一句话改写故事核 / 提炼文风 / 起标题」的写作助手与新建向导。0.4 再往前一步：拆书（把现成小说纯文本拆成章节骨架与文风指纹，全本地确定性解析，不调模型）、一键续写本章（接着已有正文的断点往下写，撞输出上限也不丢已写部分）、编辑视角审稿单导出（md + csv 共 14 列）、材料包新增「到期待收线索」独立分片；体检再加词汇重复、对话张力、爽点兑现三类，共单章 30 类、全书 18 类；宿主层在落盘前挡掉缺参写入与非法导出格式，不会再出现一次缺参把整篇产物写成 null。 0.6 加可选的市场坐标：按年份或按标签匹配月票榜参考，默认关闭。0.7 修真实事故：推理模型把 max_tokens 同时算「思考 + 正文」，4500 字的章还没开写就撞上限、连续 0 字——现在空正文截断先关思考重试一次，正文阶段（draft / revise / continue）默认不思考，JSON/细纲补枪同样关思考，错误信息区分「思考吃光预算」与「章太长」并带上 reasoningChars；每本书还生成可在编辑器阅读的 book/ Markdown 快照（本地 Git 记录阶段与逐章变化），工作台书稿目录卡片可直接打开目录或复制路径，已有项目可用回填脚本补建。",
-        "en": "A full novel pipeline behind one sentence: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages resume per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. Gender is canon, so pronoun tables are injected into every writing prompt and a deterministic check flags drift. 0.3 rebuilds the pipeline for web-novel scale: volume-to-chapter outlines whose volume skeletons are built by script instead of model calls, a golden-three-chapters opening pack on the first turn, and world/pitch slices pinned into every draft packet. Craft review now reports the same 11 metrics as story-craft (sentence length, sensory density, abstract emotion, adverbs, AI clichés, name density, dialogue ratio) and turns over-tolerance readings into findings. novel_* tools activate per session, so a session that is not writing a novel carries 0 resident tokens; a writing assistant polishes the premise, extracts the tone and names chapters, and a wizard creates the project. 0.4 adds local deconstruction of an existing novel into its chapter skeleton and style fingerprint (fully deterministic, no model calls), one-click continue of the current chapter from where its prose stops (a truncated reply keeps whatever was written), an editor-review export as Markdown plus a 14-column CSV, a dedicated due-threads packet slice, and three more check families (vocabulary repetition, dialogue tension, payoff pacing) for 30 single-chapter and 18 book-level checks; a missing write payload or an unknown export format is now rejected before anything lands on disk. 0.6 adds an optional market coordinate — yearly or tag-matched reference to a monthly-ticket leaderboard, off by default. 0.7 fixes a real incident: reasoning models count thinking and prose inside the same max_tokens, so a 4,500-character chapter hit the ceiling before writing a word and produced empty drafts; an empty-body truncation now retries once with thinking off, prose stages (draft / revise / continue) default to no thinking, JSON and beat retries do the same, and errors distinguish 'thinking ate the budget' from 'chapter too long' with reasoningChars attached. Each book also gets a reader-friendly book/ Markdown snapshot recorded in local Git, the workbench card opens that folder or copies its path, and existing projects can backfill it with a script."
+        "zh": "一句话故事核 → 设定 → 人物 → 情感脊柱 → 大纲 → 细纲 → 正文 → 连续性审校 → 修订 → 导出 Markdown/EPUB 的全流程小说流水线。通用阶段引擎（src/forge 里不出现「小说」字样）驱动小说 recipe：按条目断点续跑，审校结果读不出契约时抢救而不是整段丢弃，运行结束报告真实调用量与 token 消耗；主角性别是硬设定，每章写作/审校/修订 prompt 都带代词对照，另有确定性检查兜住「他/她」漂移。0.3 按长篇网文的真实规模重做：卷 → 章两级大纲，卷纲由脚本建骨架、不烧模型；首轮先出「黄金三章」开篇包，世界观与卖点压成固定分片进每章上下文；craft 质检与 story-craft 的 11 项量化指标同口径（句长、感官密度、抽象情绪、副词、AI 套话、人物密度、对话占比），超容差直接列 finding；novel_* 工具按会话开关，不写小说时 0 常驻 token；另带「一句话改写故事核 / 提炼文风 / 起标题」的写作助手与新建向导。0.4 再往前一步：拆书（把现成小说纯文本拆成章节骨架与文风指纹，全本地确定性解析，不调模型）、一键续写本章（接着已有正文的断点往下写，撞输出上限也不丢已写部分）、编辑视角审稿单导出（md + csv 共 14 列）、材料包新增「到期待收线索」独立分片；体检再加词汇重复、对话张力、爽点兑现三类，共单章 30 类、全书 18 类；宿主层在落盘前挡掉缺参写入与非法导出格式，不会再出现一次缺参把整篇产物写成 null。 0.6 加可选的市场坐标：按年份或按标签匹配月票榜参考，默认关闭。0.7 修真实事故：推理模型把 max_tokens 同时算「思考 + 正文」，4500 字的章还没开写就撞上限、连续 0 字——现在空正文截断先关思考重试一次，正文阶段（draft / revise / continue）默认不思考，JSON/细纲补枪同样关思考，错误信息区分「思考吃光预算」与「章太长」并带上 reasoningChars；每本书还生成可在编辑器阅读的 book/ Markdown 快照（本地 Git 记录阶段与逐章变化），工作台书稿目录卡片可直接打开目录或复制路径，已有项目可用回填脚本补建。 0.8 收拢真实事故与审校升级：人物档案分核心、阶段、登记三层，正典按已登记别名合并身份，间隔 6 章以上再出场时提示用旧标签认回，characters.md 按层展示；审校通过时保留正文，自动修订最多两轮、单轮改动不足 5% 提前停，新增中文体检、局部落差、场景五维与具体利害抽查；三处误报源修掉（锁死≠死亡、日常名词≠人名、长文本≠正典冲突），单章 253 条误报降到个位数；重跑不再把已完成的章降级，正文重写后旧审校自动收回待审，可用 scripts/style-baseline.mjs 比对历史章节风格读数。",
+        "en": "A full novel pipeline behind one sentence: premise, world bible, characters, emotional spine, outline, per-chapter beats, prose, continuity review, revision and Markdown/EPUB export. A generic stage engine (src/forge, knows nothing about novels) drives a novel recipe; stages resume per item, review findings are salvaged instead of discarded, and a run reports its real model-call/token cost. Gender is canon, so pronoun tables are injected into every writing prompt and a deterministic check flags drift. 0.3 rebuilds the pipeline for web-novel scale: volume-to-chapter outlines whose volume skeletons are built by script instead of model calls, a golden-three-chapters opening pack on the first turn, and world/pitch slices pinned into every draft packet. Craft review now reports the same 11 metrics as story-craft (sentence length, sensory density, abstract emotion, adverbs, AI clichés, name density, dialogue ratio) and turns over-tolerance readings into findings. novel_* tools activate per session, so a session that is not writing a novel carries 0 resident tokens; a writing assistant polishes the premise, extracts the tone and names chapters, and a wizard creates the project. 0.4 adds local deconstruction of an existing novel into its chapter skeleton and style fingerprint (fully deterministic, no model calls), one-click continue of the current chapter from where its prose stops (a truncated reply keeps whatever was written), an editor-review export as Markdown plus a 14-column CSV, a dedicated due-threads packet slice, and three more check families (vocabulary repetition, dialogue tension, payoff pacing) for 30 single-chapter and 18 book-level checks; a missing write payload or an unknown export format is now rejected before anything lands on disk. 0.6 adds an optional market coordinate — yearly or tag-matched reference to a monthly-ticket leaderboard, off by default. 0.7 fixes a real incident: reasoning models count thinking and prose inside the same max_tokens, so a 4,500-character chapter hit the ceiling before writing a word and produced empty drafts; an empty-body truncation now retries once with thinking off, prose stages (draft / revise / continue) default to no thinking, JSON and beat retries do the same, and errors distinguish 'thinking ate the budget' from 'chapter too long' with reasoningChars attached. Each book also gets a reader-friendly book/ Markdown snapshot recorded in local Git, the workbench card opens that folder or copies its path, and existing projects can backfill it with a script. 0.8 collects the real incidents and the review upgrade: character sheets are split into core, stage and registered tiers, canon merges identities by registered aliases, a character returning after 6+ chapters gets an \"old label\" reminder, and characters.md is layered accordingly. A review that passes keeps the prose, auto-revision stops after two rounds or when a round changes under 5%, and review adds Chinese-prose checks, local-drop, five scene dimensions and concrete-stakes spot checks. Three false-positive sources are fixed (locked shut is not dead, ordinary nouns are not names, long free text is not a canon conflict), cutting 253 single-chapter false alarms to single digits. Re-runs no longer downgrade finished chapters, stale reviews reopen after prose is rewritten, and scripts/style-baseline.mjs compares a chapter's style readings against history."
       },
       "icon": "plugins/novel-forge/icon.svg",
       "author": "Feahter",
@@ -1003,10 +1017,24 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795362408
+          "updated": 1795676476
         }
       },
       "versions": [
+        {
+          "version": "0.8.0",
+          "publishTimestamp": 1795676476,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "05c30f98975e8b38c5b59b820bde7d4a4fd2e8f1",
+            "path": "plugins/novel-forge"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        },
         {
           "version": "0.7.0",
           "publishTimestamp": 1795362408,
