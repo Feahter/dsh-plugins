@@ -667,7 +667,14 @@ export function createTools(engine) {
             { chapter: chapterId },
           )
         }
-        await read.load([`beats/${chapterId}`])
+        const beatsKey = `beats/${chapterId}`
+        await read.load([beatsKey])
+        const beats = read(beatsKey)
+        const hasScenes = Array.isArray(beats?.scenes) && beats.scenes.length > 0
+        const hasBeats = Array.isArray(beats?.beats) && beats.beats.length > 0
+        if (!beats || typeof beats !== 'object' || Array.isArray(beats) || (!hasScenes && !hasBeats)) {
+          throw httpError(409, 'MISSING_BEATS', `第 ${chapterId} 章缺少有效细纲；先跑 novel_context 生成细纲再提交。`, { chapter: chapterId })
+        }
 
         const result = commitChapter({
           read,

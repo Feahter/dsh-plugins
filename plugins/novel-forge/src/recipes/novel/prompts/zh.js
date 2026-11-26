@@ -300,6 +300,7 @@ const ADDENDA = {
 5. AI 腔：抽象情绪、成对形容词、三连排比、"不是 A 而是 B"、章末议论、解释主题。
 6. 节奏：连续多段无对话／无动作、单段过长、场景原地打转、该慢的地方一笔带过。
 7. 对话：台词是否只在交换信息、是否人人说一样的话、有没有潜台词。
+逐项核对【本章对读者的承诺】是否在正文兑现。未兑现或只在章纲层兑现时，以「节奏」记 warn，issue 注明「章卡承诺未兑现」及具体承诺；正文给出充分的延后理由时可记 note。引用正文中最相关的段落，章末钩子核对正文结尾。
 severity 标准：block＝读者会出戏／前后矛盾／关键信息错；warn＝明显削弱体验；note＝可改可不改。
 fix 必须写成"改成什么"：替换成哪个动作／删掉哪句／补哪个物；写"加强描写"不算 fix。
 verdict：有 block，或 warn ≥3 且涉及词频之外的问题 → revise；否则 pass。不要输出 ledgerPatch，正典由本章自己的 canon patch 维护。`,
@@ -2059,9 +2060,21 @@ function reviewPrompt(ctx) {
   const draft = str(ctx && ctx.draft) || readText(ctx, `draft/${chId}`)
   const prevSummary = str(ctx && ctx.previousSummary) || readText(ctx, `summary/${prevId}`, BUDGET.review.prev)
   const nextLine = str(ctx && ctx.nextGoal) || nextChapterLine(ctx)
+  const promises = [
+    ['章目标', ch.goal],
+    ['冲突', ch.conflict],
+    ['章末钩子类型', ch.hookType],
+    ['章末钩子内容', ch.hookText],
+    ['章末钩子强度', Number(ch.hookStrength) > 0 ? ch.hookStrength : null],
+  ]
+    .map(([label, value]) => [label, str(value)])
+    .filter(([, value]) => value)
+    .map(([label, value]) => `- ${label}：${value}`)
+    .join('\n')
   const user = [
     projectHeader(ctx),
     section('审校对象', `第 ${n} 章${ch.title ? `《${ch.title}》` : ''}（${chId}）`, ''),
+    section('本章对读者的承诺', promises, '（章卡未填写承诺，跳过此项核对。）'),
     section('机器读数', craftStatsText(ctx), '（无机器读数：按正文自行判断，不要编造读数。）'),
     section(
       '本章正文',

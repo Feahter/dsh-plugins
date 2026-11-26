@@ -125,7 +125,36 @@ test('trimOverlap：重叠 12 字以上才切，太短不动', () => {
 // ---- 集成：走真实 draft 阶段，第一枪截断后续写，整章不该失败 ----
 
 import { createNovelRecipe } from '../src/recipes/novel/index.js'
-import { createScriptedPrompts, createFakeCtx, sampleOutlineV2, sampleBeats, SAMPLE_PARAMS } from './fixtures/novel-fixtures.mjs'
+import { createScriptedPrompts, createFakeCtx, jsonOut, sampleOutlineV2, sampleBeats, SAMPLE_PARAMS } from './fixtures/novel-fixtures.mjs'
+
+test('draft 阶段：补写成功后按合并稿重建摘要和正典', async () => {
+  const outline = sampleOutlineV2({ chapters: 3 })
+  const item = outline.chapters[0]
+  const first = '他推开门，只看到一张空桌。'
+  const extra = '桌下的抽屉里，沈砚找到一把铜钥匙。'
+  const summary = '沈砚推门查看空桌，在抽屉里找到一把铜钥匙。'
+  const prompts = createScriptedPrompts()
+  const ctx = createFakeCtx({
+    item,
+    params: { ...SAMPLE_PARAMS, wordsPerChapter: 1600 },
+    artifacts: { outline, [`beats/${item.id}`]: sampleBeats(item.id) },
+    outputs: [
+      { text: `${first}\n<<<SUMMARY>>>\n无钥匙。\n<<<CANON>>>\n{"facts":[{"s":"沈砚","p":"持有","o":"无钥匙"}]}` },
+      { text: extra },
+      { text: summary },
+      jsonOut({ facts: [{ s: '沈砚', p: '持有', o: '铜钥匙' }] }),
+    ],
+  })
+  const stage = createNovelRecipe({ prompts }).stages.find(({ id }) => id === 'draft')
+  const { artifacts } = await stage.run(ctx)
+  assert.deepEqual(ctx.calls.map(({ label }) => label), ['draft', 'continue', 'summary', 'canonPatch'])
+  const draft = artifacts[`draft/${item.id}`].content
+  assert.ok(draft.endsWith(`${first}\n\n${extra}`))
+  assert.equal(prompts.calls.find(({ id }) => id === 'summary').ctx.draft, draft)
+  assert.equal(prompts.calls.find(({ id }) => id === 'canonPatch').ctx.summary, summary)
+  assert.equal(artifacts[`summary/${item.id}`].content, summary)
+  assert.deepEqual(artifacts.canon.content.facts.map(({ o }) => o), ['铜钥匙'])
+})
 
 test('draft 阶段：第一枪被截断时续写拼接，不整章失败', async () => {
   const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })

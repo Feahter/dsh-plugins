@@ -467,7 +467,7 @@ test('novel_commit：落 draft / summary / canon，正典增长，verdict=pass',
     { facts: [{ s: '林砚', p: '状态', o: '活着', chapter: 'ch01' }] },
     { chapter: 'ch01' },
   )
-  const { engine, files, calls } = makeHarness({ outline: plannedOutline(), canon })
+  const { engine, files, calls } = makeHarness({ outline: plannedOutline(), canon, beats: { ch02: beatsPayload } })
   const text = `${cleanProse()}\n\n<<<SUMMARY>>>\n他进了殡仪馆，陈婆警告他别住西厢。\n<<<CANON>>>\n[{"s":"林砚","p":"位置","o":"殡仪馆"}]`
   const { value, text: rendered } = await run(engine, 'novel_commit', { chapter: 'ch02', text })
 
@@ -484,6 +484,37 @@ test('novel_commit：落 draft / summary / canon，正典增长，verdict=pass',
 
   for (const entry of calls.writeArtifact) assert.equal(entry.by.stage, 'agent')
   assert.ok(value.nextActions.some(item => item.action === 'write'))
+})
+
+for (const [label, beats] of [
+  ['缺失', {}],
+  ['不是对象', { ch02: '无效细纲' }],
+  ['场次和节拍都为空', { ch02: { scenes: [], beats: [] } }],
+]) {
+  test(`novel_commit：细纲${label} → 409 MISSING_BEATS，不落盘`, async () => {
+    const { engine, files, calls } = makeHarness({ outline: plannedOutline(), beats })
+    const originalFiles = [...files.keys()]
+    await assert.rejects(
+      () => run(engine, 'novel_commit', { chapter: 'ch02', text: cleanProse() }),
+      error =>
+        error.code === 'MISSING_BEATS' &&
+        error.status === 409 &&
+        error.detail?.chapter === 'ch02' &&
+        /先跑 novel_context 生成细纲再提交/.test(error.message),
+    )
+    assert.equal(calls.writeArtifact.length, 0)
+    assert.deepEqual([...files.keys()], originalFiles)
+  })
+}
+
+test('novel_commit：细纲只有 beats 时也可以提交', async () => {
+  const { engine, files } = makeHarness({
+    outline: plannedOutline(),
+    beats: { ch02: { scenes: [], beats: ['陈婆警告他别住西厢'] } },
+  })
+  const { value } = await run(engine, 'novel_commit', { chapter: 'ch02', text: cleanProse() })
+  assert.equal(value.ok, true)
+  for (const key of ['draft/ch02', 'summary/ch02', 'canon']) assert.ok(files.has(key), key)
 })
 
 test('novel_commit：空正文 → 400 EMPTY_TEXT，且不解析项目', async () => {

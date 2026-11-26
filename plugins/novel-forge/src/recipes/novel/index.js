@@ -1662,42 +1662,47 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         if (!body) throw parseError('draft', '草稿正文为空', raw)
 
         // 内联摘要/正典补丁缺省时补小调用；补不出来只 warn，不阻断这一章。
-        let summary = inline?.summary ?? ''
-        if (!summary) {
-          try {
-            summary = normalizeSummary(
-              await callText(withPromptContext(ctx, { chapter, draft: body, beats }), 'summary', prompts.summary, {
-                phase: 'summary',
-                maxTokens: 800,
-              }),
-            )
-          } catch (err) {
-            if (err?.code === 'LLM_ABORTED') throw err
-            ctx.warn(`${id} 摘要生成失败：${err?.message ?? err}`)
-            summary = rescueSummary(ctx, item, body, '摘要调用失败')
+        const buildMemory = async (prose, blocks) => {
+          let summary = blocks?.summary ?? ''
+          if (!summary) {
+            try {
+              summary = normalizeSummary(
+                await callText(withPromptContext(ctx, { chapter, draft: prose, beats }), 'summary', prompts.summary, {
+                  phase: 'summary',
+                  maxTokens: 800,
+                }),
+              )
+            } catch (err) {
+              if (err?.code === 'LLM_ABORTED') throw err
+              ctx.warn(`${id} 摘要生成失败：${err?.message ?? err}`)
+              summary = rescueSummary(ctx, item, prose, '摘要调用失败')
+            }
           }
-        }
 
-        let canonPatch = inline?.canonPatch ?? null
-        if (!hasPatch(canonPatch) && typeof prompts.canonPatch === 'function') {
-          try {
-            canonPatch = await callJson(
-              withPromptContext(ctx, { chapter, summary, beats, canonText: canonTextFor(canon, castNamesFor(beats, chapter, volume), id) }),
-              'canonPatch',
-              prompts.canonPatch,
-              canonPatchSchema,
-              { phase: 'canonPatch' },
-            )
-          } catch (err) {
-            if (err?.code === 'LLM_ABORTED') throw err
-            ctx.warn(`${id} 正典补丁生成失败：${err?.message ?? err}`)
-            canonPatch = null
+          let canonPatch = blocks?.canonPatch ?? null
+          if (!hasPatch(canonPatch) && typeof prompts.canonPatch === 'function') {
+            try {
+              canonPatch = await callJson(
+                withPromptContext(ctx, { chapter, summary, beats, canonText: canonTextFor(canon, castNamesFor(beats, chapter, volume), id) }),
+                'canonPatch',
+                prompts.canonPatch,
+                canonPatchSchema,
+                { phase: 'canonPatch' },
+              )
+            } catch (err) {
+              if (err?.code === 'LLM_ABORTED') throw err
+              ctx.warn(`${id} 正典补丁生成失败：${err?.message ?? err}`)
+              canonPatch = null
+            }
           }
+          return { summary, canonPatch }
         }
+        let memory = await buildMemory(body, inline)
 
         // 字数验收：低于目标 0.8 先贴着正文结尾补写一次；补不齐也照样落盘，由 craft 的 length finding 如实提示。
         const target = chapterTargetChars(params)
         const floor = Math.round(target * 0.8)
+        let toppedUp = false
         if (countCjk(body) < floor) {
           const before = countCjk(body)
           try {
@@ -1712,7 +1717,10 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
             const appended = continuationBody(unit, extra)
             if (appended) {
               const merged = joinProse(body, appended)
-              if (countCjk(merged) > before) body = merged
+              if (countCjk(merged) > before) {
+                body = merged
+                toppedUp = true
+              }
             }
           } catch (err) {
             if (err?.code === 'LLM_ABORTED') throw err
@@ -1722,6 +1730,10 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
             ctx.warn(`${id} 补写后仍不足 ${floor} 字（${countCjk(body)}/${target}），保留 length 告警`)
           }
         }
+
+        // 补写增长后，第一次成稿的摘要和正典补丁全部作废。
+        if (toppedUp) memory = await buildMemory(body)
+        const { summary, canonPatch } = memory
 
         // commit 时 canon 可能还没落盘（首次运行由 outline stage 种下），beats 也可能刚在本轮生成：
         // 用内存覆盖喂给它，避免 commitChapter 退回空正典后把已有 canon 写小。
@@ -1955,14 +1967,18 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           }
         }
 
+        const read = readerOf(ctx, { outline, canon })
+        const { findings, counts, verdict } = unit.checkChapter({ read, params, outline, chapterId: id, text })
+        const residual = counts.block || counts.warn ? `；修订后仍有 ${counts.block} 条 block/${counts.warn} 条 warn` : ''
         const stopAutoRevision = editRate(continuationBody(unit, source), continuationBody(unit, text)) < 0.05
         return {
           artifacts: {
             [`draft/${id}`]: { kind: 'md', content: text },
             [`summary/${id}`]: { kind: 'md', content: summary },
+            [`check/${id}`]: { kind: 'json', content: { findings, counts, verdict } },
           },
           ...(stopAutoRevision ? { meta: { stopAutoRevision } } : {}),
-          note: `${id} 已修订（${actionable.length} 条 block/warn）${stopAutoRevision ? '；改动不足 5%，停止自动修订' : ''}`,
+          note: `${id} 已修订（${actionable.length} 条 block/warn）${stopAutoRevision ? '；改动不足 5%，停止自动修订' : ''}${residual}`,
         }
       },
     },

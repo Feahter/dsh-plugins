@@ -118,6 +118,32 @@ test('review：三闸、机器读数与修复动作都在 system 里', () => {
   assert.match(out.user, /"quote"\s*:\s*"[^"\n]+"/)
 })
 
+test('review：逐项核对本章对读者的承诺', () => {
+  const prompts = createPrompts()
+  const item = {
+    id: 'ch01',
+    goal: '夺回账册',
+    conflict: '守门人认出了她',
+    hookType: '反转',
+    hookText: '反杀前夜',
+    hookStrength: 4,
+  }
+  const { system, user } = prompts.review(createFakeCtx({ item }))
+  assert.match(user, /【本章对读者的承诺】/)
+  for (const expected of ['章目标：夺回账册', '冲突：守门人认出了她', '章末钩子类型：反转', '章末钩子内容：反杀前夜', '章末钩子强度：4']) {
+    assert.ok(user.includes(expected), expected)
+  }
+  assert.match(system, /逐项核对【本章对读者的承诺】.*只在章纲层兑现.*记 warn.*章卡承诺未兑现.*延后理由.*记 note/)
+  const partial = prompts.review(createFakeCtx({ item: { hookText: item.hookText } })).user
+  assert.match(partial, /章末钩子内容：反杀前夜/)
+  assert.doesNotMatch(partial, /章目标：|冲突：|章末钩子强度：/)
+  for (const empty of [{}, { hookStrength: 0 }]) {
+    const emptyUser = prompts.review(createFakeCtx({ item: empty })).user
+    assert.match(emptyUser, /【本章对读者的承诺】\s*（章卡未填写承诺，跳过此项核对。）/)
+    assert.doesNotMatch(emptyUser, /\b(?:undefined|null)\b/)
+  }
+})
+
 test('review：机器读数按 ctx.craftStats 渲染成读者可用的数字', () => {
   const prompts = createPrompts()
   const ctx = createFakeCtx()

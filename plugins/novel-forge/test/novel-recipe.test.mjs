@@ -1682,6 +1682,58 @@ test('revise stage：有 block 时重写 draft + summary，findings 传入 promp
   assert.ok(revisePrompt.ctx.draftText.includes('旧正文'))
 })
 
+test('revise stage：按修订稿刷新确定性校验，不覆盖 review', async () => {
+  const outline = sampleOutlineV2({ chapters: 3 })
+  const item = { ...outline.chapters[1], cast: [] }
+  outline.chapters[1] = item
+  const clean = [
+    '雨停的时候，巷口的灯刚亮。',
+    '「你来晚了。」沈砚把门推开一条缝。',
+    '他侧身挤进去，闻到很重的香灰味。',
+    '堂屋正中摆着一张旧桌。',
+    '桌上压着一本没有封皮的账册。',
+    '「别碰。」沈砚的声音从背后追上来。',
+    '他停住手，指尖离纸页只差一寸。',
+    '纸页边缘有烧过的痕迹。',
+    '窗外有人拖着铁链走过。',
+    '沈砚忽然压低嗓子说：「今晚别住西厢。」',
+    '「为什么？」他问。',
+    '西厢的门在风里轻轻响了一声。',
+    '「我记住了。」他说。',
+    '灯芯爆了一下，屋里暗了半寸。',
+    '账册自己翻到了最后一页。',
+  ].join('\n\n')
+  const blocked = clean.replaceAll('沈砚', '陈婆')
+  const id = item.id
+  const recipe = createNovelRecipe({ prompts: createScriptedPrompts() })
+  for (const [source, revised, hasBlock] of [[clean, blocked, true], [blocked, clean, false]]) {
+    const ctx = createFakeCtx({
+      item,
+      params: { ...SAMPLE_PARAMS, wordsPerChapter: 175 },
+      artifacts: {
+        outline,
+        canon: { version: 2, facts: [{ s: '陈婆', p: '状态', o: '死亡', chapter: 'ch01', status: 'canon' }] },
+        [`draft/${id}`]: source,
+        [`review/${id}`]: { verdict: 'revise', findings: [{ severity: 'block', issue: '核对人物' }] },
+      },
+      outputs: [textOut(`${revised}\n<<<SUMMARY>>>\n修订后的摘要。`)],
+    })
+    const { artifacts, note } = await stageOf(recipe, 'revise').run(ctx)
+    const { kind, content: { findings, counts, verdict } } = artifacts[`check/${id}`]
+    assert.equal(kind, 'json')
+    assert.equal(verdict, hasBlock ? 'revise' : 'pass')
+    assert.equal(findings.some(({ kind, severity }) => kind === 'dead-character' && severity === 'block'), hasBlock)
+    assert.equal(Object.hasOwn(artifacts, `review/${id}`), false)
+    if (hasBlock) {
+      assert.equal(counts.block, 1)
+      assert.ok(note.includes(`修订后仍有 ${counts.block} 条 block/${counts.warn} 条 warn`))
+    } else {
+      assert.equal(counts.block + counts.warn, 0, JSON.stringify(findings))
+      assert.doesNotMatch(note, /修订后仍有/)
+    }
+  }
+})
+
 test('revise stage：修订稿长度异常时抛 LLM_PARSE，不覆盖原正文', async () => {
   const prompts = createScriptedPrompts()
   const recipe = createNovelRecipe({ prompts })
