@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dsh-plugins — eleven open-source plugins for DeepSeek Harness (dsh)</title>
+<title>dsh-plugins — eleven plugins for DeepSeek Harness (dsh)</title>
 <meta name="description" content="Eleven open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub triage, session archiving, health checks, mind maps and a task ledger.">
 <link rel="canonical" href="https://feahter.github.io/dsh-plugins/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1116'/%3E%3Ctext x='16' y='23' font-family='Helvetica,Arial' font-size='17' font-weight='700' fill='%2393b2ff' text-anchor='middle'%3Ed%3C/text%3E%3C/svg%3E">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="dsh-plugins">
-<meta property="og:locale" content="en">
-<meta property="og:title" content="dsh-plugins — eleven open-source plugins for DeepSeek Harness (dsh)">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="dsh-plugins — eleven plugins for DeepSeek Harness (dsh)">
 <meta property="og:description" content="A self-hosted plugin market index and eleven MIT-licensed plugins for DeepSeek Harness: voice, GitHub, session archiving, health checks, mind maps, a context library, a task ledger and a novel pipeline.">
 <meta property="og:url" content="https://feahter.github.io/dsh-plugins/">
 <meta name="twitter:card" content="summary_large_image">
@@ -116,8 +117,9 @@
     display: grid; gap: .4rem 1.5rem;
     grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
   }
-  .toc a { text-decoration: none; }
-  .toc a:hover { text-decoration: underline; }
+  .toc a { text-decoration: underline; text-decoration-color: var(--line); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  .toc a:hover { text-decoration-color: currentColor; }
   .toc .cn { color: var(--muted); font-size: .88em; }
   section.plugin {
     background: var(--card); border: 1px solid var(--line);
@@ -201,7 +203,7 @@
       <pre><code>https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json</code></pre>
       <p class="note">From the command line, install a pinned release (this example is Voice companion 0.7.0):</p>
       <pre><code>dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#27d741d61fa63a072159de9049e411fc3696da80&amp;path:/plugins/voice-companion"</code></pre>
-      <p class="note">The commit after <code>#</code> is the one recorded for that version in <code>index.json</code>; swap it for the version you want. Every plugin requires DSH 0.2.1-rc.4 or newer.</p>
+      <p class="note">The commit after <code>#</code> is the one recorded for that version in <code>index.json</code>; swap it for the version you want. Every plugin requires DSH <code>&gt;=0.2.1-rc.4 &lt;0.3.0-0</code> — the exact range each package declares in its <code>engines</code> field.</p>
     </div>
   </div>
 
@@ -238,6 +240,7 @@
       <span><b>Version</b> <code>0.4.0</code></span>
       <span><b>Data</b> browser <code>localStorage</code> key <code>dsh.realtime-voice.settings.v2</code>; no on-disk data directory</span>
       <span><b>Status</b> superseded by Voice companion ≥0.4.0</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice">plugins/realtime-voice</a></span>
     </p>
   </section>
 
@@ -249,12 +252,13 @@
       <li>Call mode runs energy VAD with sentence splitting, speaks each reply sentence by sentence, and reads task progress back.</li>
       <li>A global <code>Ctrl+Shift+Space</code> hold-to-talk hotkey works while the DSH window has focus; if the combination is rejected it tries modifier-added candidates and falls back to an on-panel button.</li>
       <li>The panel drags anywhere, remembers its position, and folds into a pill when it is in the way.</li>
-      <li>Mascots are original inline SVG characters you can switch, and you can use your own image as the avatar (resized to 512 px and stored in the browser) with one of three voice slots.</li>
+      <li>The stage defaults to a self-drawn 3D core (SDF ray-marched WebGL2, GLSL, no three.js, no textures, no network), with two original inline-SVG mascots (whale, chibi) still switchable; you can also use your own image as the avatar (resized to 512 px, stored in the browser) with one of three voice slots.</li>
       <li>A task view draws one spoken task as a node chain — heard, dispatched, every tool call and reply, delivered — refreshing every 1.6 s and freezing into a snapshot when the task ends.</li>
     </ul>
     <p class="meta">
       <span><b>Version</b> <code>0.7.0</code></span>
       <span><b>Data</b> browser <code>localStorage</code> (<code>dsh.voice-companion.themes</code>, <code>.face</code>, <code>.pos</code>, <code>.hotkey</code>); task records live in Host memory and clear on restart</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion">plugins/voice-companion</a></span>
     </p>
   </section>
 
@@ -274,6 +278,7 @@
     <p class="meta">
       <span><b>Version</b> <code>0.2.0</code></span>
       <span><b>Data</b> hotkey override in <code>localStorage['dsh.voice-control.hotkey']</code>; no on-disk data directory</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control">plugins/voice-control</a></span>
     </p>
   </section>
 
@@ -291,6 +296,7 @@
     <p class="meta">
       <span><b>Version</b> <code>1.2.0</code></span>
       <span><b>Data</b> no data directory — credentials come from <code>gh auth login</code> or <code>GH_TOKEN</code> / <code>GITHUB_TOKEN</code></span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/github-manager">plugins/github-manager</a></span>
     </p>
   </section>
 
@@ -310,6 +316,7 @@
       <span><b>Version</b> <code>0.5.0</code></span>
       <span><b>Data</b> <code>~/.dsh/archive-rsi/</code></span>
       <span><b>Requires</b> Node ≥ 22.15</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/archive-rsi">plugins/archive-rsi</a></span>
     </p>
   </section>
 
@@ -328,6 +335,7 @@
       <span><b>Version</b> <code>0.3.0</code></span>
       <span><b>Data</b> <code>~/.dsh/dsh-360/</code> (backups, reports, state, cache)</span>
       <span><b>Requires</b> Node ≥ 22.15</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/dsh-360">plugins/dsh-360</a></span>
     </p>
   </section>
 
@@ -346,6 +354,7 @@
     <p class="meta">
       <span><b>Version</b> <code>0.4.0</code></span>
       <span><b>Data</b> <code>~/.dsh/mind-canvas/state.json</code></span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/mind-canvas">plugins/mind-canvas</a></span>
     </p>
   </section>
 
@@ -365,6 +374,7 @@
       <span><b>Version</b> <code>0.3.1</code></span>
       <span><b>Data</b> <code>~/.dsh/context-lib/</code> (index.json, notes, blobs, cached thumbnails)</span>
       <span><b>Requires</b> macOS for previews</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/context-lib">plugins/context-lib</a></span>
     </p>
   </section>
 
@@ -383,6 +393,7 @@
     <p class="meta">
       <span><b>Version</b> <code>1.1.0</code></span>
       <span><b>Data</b> <code>~/.dsh/task-ledger/</code> (state.json, task.json, JSONL logs)</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/task-ledger">plugins/task-ledger</a></span>
     </p>
   </section>
 
@@ -400,6 +411,7 @@
     <p class="meta">
       <span><b>Version</b> <code>0.2.0</code></span>
       <span><b>Data</b> no data directory — reads the app bundle and your configured update feed</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check">plugins/update-check</a></span>
     </p>
   </section>
 
@@ -419,6 +431,7 @@
       <span><b>Version</b> <code>0.8.0</code></span>
       <span><b>Data</b> <code>~/.dsh/novel-forge/</code>; projects export to Markdown or EPUB</span>
       <span><b>Requires</b> a configured model</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/novel-forge">plugins/novel-forge</a></span>
     </p>
   </section>
 
@@ -443,7 +456,7 @@
     </div>
     <div class="qa">
       <h3>Do the plugins send my data anywhere?</h3>
-      <p>Almost never. Recognition, session analysis, scoring, indexing and the ledger all run locally. The exceptions are the sentence text in translation mode, reply text sent to your TTS provider, model calls for novel-forge and the mind-canvas AI branch, and GitHub API calls made with your token.</p>
+      <p>Almost never. Recognition, session analysis, scoring, indexing and the ledger all run locally. The exceptions are: the sentence text in realtime-voice translation mode; reply text sent to your TTS provider; model calls for novel-forge, the mind-canvas AI branch and the voice-companion theme designer (one sentence goes out, a sanitized theme patch comes back); GitHub API calls made with your token; and the update-check version request to the desktop app's own update feed.</p>
     </div>
     <div class="qa">
       <h3>Do I need an API key?</h3>
@@ -459,23 +472,36 @@
     </div>
     <div class="qa">
       <h3>Which plugins need Node 22.15 or newer?</h3>
-      <p><code>archive-rsi</code> and <code>dsh-360</code>, because they decode concatenated-zstd session logs through <code>node:zlib</code>. macOS is required only for the <code>context-lib</code> document previews.</p>
+      <p>All eleven packages declare <code>node &gt;=22.15</code> in their <code>engines</code> field, so that is the supported runtime for every plugin; <code>archive-rsi</code> and <code>dsh-360</code> need it because they decode concatenated-zstd session logs through <code>node:zlib</code>. macOS is required only for the <code>context-lib</code> document previews.</p>
     </div>
     <div class="qa">
       <h3>Can I run two voice plugins at the same time?</h3>
       <p>No. <code>voice-companion</code> and <code>voice-control</code> both bind <code>Ctrl+Shift+Space</code>, so enable one of the two. The dictation half of <code>realtime-voice</code> and the hotkey of <code>voice-control</code> already live inside <code>voice-companion</code>.</p>
     </div>
+    <div class="qa">
+      <h3>Does it work offline?</h3>
+      <p>Yes for everything that stays on the machine: speech recognition (SenseVoice ONNX int8), sentence cleanup, session analysis, scoring, indexing and the task ledger. Features that call a model or a TTS provider — novel-forge, the mind-canvas AI branch, theme design, translation and speech output — need network access and a configured provider.</p>
+    </div>
+    <div class="qa">
+      <h3>Is it free?</h3>
+      <p>Yes. All eleven plugins and the market index are MIT licensed, so there is no price, no account and no telemetry. Model calls made by a plugin are billed by whichever provider you configured in DSH, not by this repository.</p>
+    </div>
+    <div class="qa">
+      <h3>Which platforms does it run on?</h3>
+      <p>Wherever DSH runs: the plugins are Node packages plus Web-client panels, with no native build step. macOS is required only for the <code>context-lib</code> document previews; everything else makes no platform-specific call.</p>
+    </div>
 
-    <div class="cite">
-      <h2>Citation</h2>
-      <pre><code>@misc{dsh-plugins2026,
+  </section>
+
+  <section class="cite" aria-labelledby="citation">
+    <h2 id="citation">Citation</h2>
+    <pre><code>@misc{dsh-plugins2026,
   title  = {dsh-plugins: open-source plugins and a market index for DeepSeek Harness},
   author = {Feahter},
   year   = {2026},
   url    = {https://github.com/Feahter/dsh-plugins}
 }</code></pre>
-      <p class="note">The repository also ships <code>llms.txt</code> for retrieval-augmented agents and a <code>CITATION.cff</code> for GitHub's "Cite this repository" button.</p>
-    </div>
+    <p class="note">The repository also ships <code>llms.txt</code> for retrieval-augmented agents and a <code>CITATION.cff</code> for GitHub's "Cite this repository" button.</p>
   </section>
 </main>
 
@@ -496,14 +522,14 @@
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
+  "@type": ["SoftwareApplication", "CollectionPage"],
   "name": "dsh-plugins",
   "alternateName": "Feahter's DSH plugins",
   "applicationCategory": "DeveloperApplication",
   "applicationSubCategory": "AI agent harness plugin collection",
   "operatingSystem": "macOS, Windows, Linux",
   "url": "https://feahter.github.io/dsh-plugins/",
-  "description": "A collection of eleven open-source plugins for DeepSeek Harness (dsh), plus a self-hosted format-1 plugin market index. The plugins cover local voice input and speech output, GitHub project management, session archiving with a PDCA self-improvement loop, skill and agent-instruction health checks, mind mapping, a local context library, an external task ledger, version update checks and a novel-writing pipeline.",
+  "description": "A collection of eleven open-source plugins for DeepSeek Harness (dsh), plus a self-hosted format-1 plugin market index. Nine are actively maintained; voice-control is retired and realtime-voice is superseded by voice-companion. The plugins cover local voice input and speech output, GitHub project management, session archiving with a PDCA self-improvement loop, skill and agent-instruction health checks, mind mapping, a local context library, an external task ledger, version update checks and a novel-writing pipeline.",
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
   "author": {
@@ -511,9 +537,13 @@
     "name": "Feahter",
     "url": "https://github.com/Feahter"
   },
-  "codeRepository": "https://github.com/Feahter/dsh-plugins",
+  "sameAs": "https://github.com/Feahter/dsh-plugins",
   "isBasedOn": "https://github.com/deepseek-ai/deepseek-harness",
-  "softwareRequirements": "DSH 0.2.1-rc.4 or newer; Node 22.15 or newer for archive-rsi and dsh-360",
+  "image": "https://feahter.github.io/dsh-plugins/og.png",
+  "inLanguage": ["en", "zh-CN"],
+  "dateModified": "2026-11-26",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD", "availability": "https://schema.org/InStock"},
+  "softwareRequirements": "DSH >=0.2.1-rc.4 <0.3.0-0; Node >=22.15",
   "keywords": "DeepSeek Harness, dsh, dsh plugins, DSH plugin market, agent harness plugins, voice input, task ledger, context engineering"
 }
 </script>
@@ -523,12 +553,13 @@
   "@context": "https://schema.org",
   "@type": "ItemList",
   "name": "dsh-plugins plugin catalog",
-  "description": "The eleven plugins in dsh-plugins, in catalog order.",
+  "description": "The eleven plugins in dsh-plugins.",
   "numberOfItems": 11,
+  "itemListOrder": "https://schema.org/ItemListOrderAscending",
   "itemListElement": [
-    {"@type": "ListItem", "position": 1, "name": "Realtime voice input", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice"},
+    {"@type": "ListItem", "position": 1, "name": "Realtime voice input", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice", "description": "Superseded by Voice companion 0.4.0, which absorbed its dictation; kept for existing installs."},
     {"@type": "ListItem", "position": 2, "name": "Voice companion", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-companion"},
-    {"@type": "ListItem", "position": 3, "name": "Voice control", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control"},
+    {"@type": "ListItem", "position": 3, "name": "Voice control", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/voice-control", "description": "Retired — superseded by Voice companion 0.4.0; kept for existing installs."},
     {"@type": "ListItem", "position": 4, "name": "GitHub project manager", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/github-manager"},
     {"@type": "ListItem", "position": 5, "name": "Session archive + PDCA alchemy", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/archive-rsi"},
     {"@type": "ListItem", "position": 6, "name": "dsh-360", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/dsh-360"},
@@ -550,12 +581,15 @@
     {"@type": "Question", "name": "What is dsh-plugins?", "acceptedAnswer": {"@type": "Answer", "text": "A repository of eleven DSH plugins plus a self-hosted format-1 plugin market index (index.json). Adding the index URL in DSH Discover makes all eleven installable from one place."}},
     {"@type": "Question", "name": "Are these official DeepSeek plugins?", "acceptedAnswer": {"@type": "Answer", "text": "No. dsh-plugins is an independent community project maintained by Feahter. It targets the public DSH plugin API and is not published or endorsed by DeepSeek."}},
     {"@type": "Question", "name": "How do I install a plugin?", "acceptedAnswer": {"@type": "Answer", "text": "Open Plugins → Discover in DSH, add https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json, then search for the market title. Command-line installs use dsh plugin install with the commit recorded in index.json for that version."}},
-    {"@type": "Question", "name": "Do the plugins send my data anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Almost never. Recognition, session analysis, scoring, indexing and the ledger all run locally. The exceptions are the sentence text in translation mode, reply text sent to your TTS provider, model calls for novel-forge and the mind-canvas AI branch, and GitHub API calls made with your token."}},
+    {"@type": "Question", "name": "Do the plugins send my data anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Almost never. Recognition, session analysis, scoring, indexing and the ledger all run locally. The exceptions are: the sentence text in realtime-voice translation mode; reply text sent to your TTS provider; model calls for novel-forge, the mind-canvas AI branch and the voice-companion theme designer (one sentence goes out, a sanitized theme patch comes back); GitHub API calls made with your token; and the update-check version request to the desktop app's own update feed."}},
     {"@type": "Question", "name": "Do I need an API key?", "acceptedAnswer": {"@type": "Answer", "text": "Only for the features that call a model: novel-forge, the mind-canvas AI branch, realtime-voice translation and voice-companion speech output. Everything else runs without one."}},
     {"@type": "Question", "name": "Which plugin should I install first?", "acceptedAnswer": {"@type": "Answer", "text": "If you want to stop typing, start with Realtime voice input. If you want the agent's state to survive sessions, start with Task ledger."}},
     {"@type": "Question", "name": "Where is plugin data stored?", "acceptedAnswer": {"@type": "Answer", "text": "Under ~/.dsh/<plugin>/ for the plugins that keep a directory; the voice plugins keep settings in browser localStorage. Nothing is written into the DSH app bundle, and original session files are never modified, moved or deleted."}},
-    {"@type": "Question", "name": "Which plugins need Node 22.15 or newer?", "acceptedAnswer": {"@type": "Answer", "text": "archive-rsi and dsh-360, because they decode concatenated-zstd session logs through node:zlib. macOS is required only for the context-lib document previews."}},
-    {"@type": "Question", "name": "Can I run two voice plugins at the same time?", "acceptedAnswer": {"@type": "Answer", "text": "No. voice-companion and voice-control both bind Ctrl+Shift+Space, so enable one of the two. The dictation half of realtime-voice and the hotkey of voice-control already live inside voice-companion."}}
+    {"@type": "Question", "name": "Which plugins need Node 22.15 or newer?", "acceptedAnswer": {"@type": "Answer", "text": "All eleven packages declare node >=22.15 in their engines field, so that is the supported runtime for every plugin; archive-rsi and dsh-360 need it because they decode concatenated-zstd session logs through node:zlib. macOS is required only for the context-lib document previews."}},
+    {"@type": "Question", "name": "Can I run two voice plugins at the same time?", "acceptedAnswer": {"@type": "Answer", "text": "No. voice-companion and voice-control both bind Ctrl+Shift+Space, so enable one of the two. The dictation half of realtime-voice and the hotkey of voice-control already live inside voice-companion."}},
+    {"@type": "Question", "name": "Does it work offline?", "acceptedAnswer": {"@type": "Answer", "text": "Yes for everything that stays on the machine: speech recognition (SenseVoice ONNX int8), sentence cleanup, session analysis, scoring, indexing and the task ledger. Features that call a model or a TTS provider — novel-forge, the mind-canvas AI branch, theme design, translation and speech output — need network access and a configured provider."}},
+    {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. All eleven plugins and the market index are MIT licensed, so there is no price, no account and no telemetry. Model calls made by a plugin are billed by whichever provider you configured in DSH, not by this repository."}},
+    {"@type": "Question", "name": "Which platforms does it run on?", "acceptedAnswer": {"@type": "Answer", "text": "Wherever DSH runs: the plugins are Node packages plus Web-client panels, with no native build step. macOS is required only for the context-lib document previews; everything else makes no platform-specific call."}}
   ]
 }
 </script>

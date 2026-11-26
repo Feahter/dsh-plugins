@@ -15,7 +15,7 @@
 - **本地优先。** 识别、扫描、评分、账本都在本机完成；少数必须外发的功能全部列在「隐私与数据」一节。
 - **MIT 许可。** 十一个插件与索引格式都在这个仓库里。
 
-**文档站：** <https://feahter.github.io/dsh-plugins/> —— 同一份目录的静态落地页，每个插件一个锚点（`#novel-forge`、`#voice-companion` 等），带安装代码与常见问答。页面由 `index.json` 生成，不会出现市场里没有的插件。
+**文档站：** <https://feahter.github.io/dsh-plugins/> —— 同一份目录的静态落地页，每个插件一个锚点（`#novel-forge`、`#voice-companion` 等），带安装代码与常见问答。页面的插件清单、锚点与版本号由 `docs/verify-readme.mjs` 对照 `index.json` 校验，不会出现市场里没有的插件。
 
 ## 目录
 
@@ -67,8 +67,8 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 ### 环境要求一览
 
-- DSH **0.2.1-rc.4** 或更新版本（开发者预览期，版本之间可能有破坏性变更）。
-- Node **22.15** 或更新版本——仅两个需要解码会话日志的插件（`archive-rsi`、`dsh-360`）要求。
+- DSH **`>=0.2.1-rc.4 <0.3.0-0`**——十一个包都在 `engines.dsh` 里声明这个区间（开发者预览期，版本之间可能有破坏性变更）。
+- Node **22.15** 或更新版本——十一个包都声明了这个下限；`archive-rsi` 与 `dsh-360` 靠它解码拼接的 zstd 会话日志。
 - macOS 用于 `context-lib` 的文档预览（`textutil`、`qlmanage`），该插件其余功能跨平台。
 - 实验性的 **Voice input** bundle、一个麦克风，以及 Host 端的 TTS 服务，用于两个语音插件。
 - 已配置模型，用于 `novel-forge` 与 `mind-canvas` 的 **AI 分支**。
@@ -112,12 +112,12 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 一个面板覆盖所有语音交互：**通话模式**（能量 VAD 加断句，回复逐句朗读，任务进度也会念出来）、**输入框听写**（润色语气词后写入输入框）、**全局热键**（`Ctrl+Shift+Space`：按住说话，松开规划并发送）。
 
-- **是形象，不是状态条。** 原创内联 SVG 角色——一只鲸鱼和一个二次元替身——可在面板切换；面板可拖到任意位置，挡路时折叠成一颗胶囊。
+- **是舞台，不是状态条。** 默认形象是自研的 3D 核心（SDF 光线步进，WebGL2/GLSL，不依赖 three.js、无贴图、不联网），仍可在面板切回两个原创内联 SVG 形象（鲸鱼 / 二次元看板娘）；面板可拖到任意位置，挡路时折叠成一颗胶囊。
 - **音色跟着语气走。** TTS 音色与语气按角色、按每句的情绪选择，道歉听起来轻，好消息听起来亮。
 - **自定义形象与音色。** 用自己的图片当角色，从三个音色槽里挑，调整语速，不用改配置文件。
 - **吞并了两个旧插件。** `dsh-realtime-voice` 的听写半边与 `dsh-voice-control` 的热键，现在都在这里。
 
-*要求：* DSH ≥ 0.2.1-rc.4 且启用实验性的 **Voice input** bundle、一个麦克风，以及 Host 端供 `/speak` 使用的 TTS 服务。路由：均在 `/api/voice-companion` 下：`GET /health`、`/characters`、`/events`；`POST /turn`、`/speak`、`/dispatch`、`/transcribe`、`/plan`、`/send`。
+*要求：* DSH ≥ 0.2.1-rc.4 且启用实验性的 **Voice input** bundle、一个麦克风，以及 Host 端供 `/speak` 使用的 TTS 服务。路由：均在 `/api/voice-companion` 下：`GET /health`、`/characters`、`/events`；`POST /turn`、`/speak`、`/dispatch`、`/transcribe`、`/plan`、`/send`、`/theme/design`。
 
 ### [GitHub 项目管理](./plugins/github-manager)
 
@@ -225,7 +225,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 | 插件 | 离开本机的东西 |
 | --- | --- |
 | 实时语音输入 | 默认什么都不发。只有 `translate` 模式会把该句文本发往你的翻译服务。 |
-| 语音看板娘 | 语音识别本地完成；`/speak` 时把回复文本发往你的 TTS 服务。 |
+| 语音看板娘 | 语音识别本地完成；`/speak` 时把回复文本发往你的 TTS 服务，主题设计器会把一句话发给你的模型（`POST /theme/design`）。 |
 | GitHub 项目管理 | 只有 GitHub API 调用，由 Host 端带你的 token 发出。 |
 | 归档会话与 PDCA 炼金 | 无。所有指标都由会话日志在本地算出。 |
 | dsh-360 | 无。信号全部从本地会话日志读取。 |
@@ -239,11 +239,11 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 ## 兼容性
 
-- **DSH 版本。** 十一个插件都要求 DSH `0.2.1-rc.4` 或更新。DSH 处于开发者预览期，请钉住你安装的版本，升级前先读发行说明。
-- **Node。** `archive-rsi` 与 `dsh-360` 需要 Node `22.15+` 来解码拼接 zstd 会话日志。
-- **平台。** 只有 `context-lib` 的预览需要 macOS，其余十个插件没有平台相关调用。
+- **DSH 版本。** 十一个插件都要求 DSH `>=0.2.1-rc.4 <0.3.0-0`；要跟进新的大版本，需要先改 `engines` 并发版。DSH 处于开发者预览期，请钉住你安装的版本，升级前先读发行说明。
+- **Node。** 十一个包都声明 `22.15+`；`archive-rsi` 与 `dsh-360` 靠它解码拼接 zstd 会话日志。
+- **平台。** 只有 `context-lib` 的预览需要 macOS，其余插件没有平台相关调用。
 - **可选能力。** 两个语音插件需要实验性 Voice input bundle 与麦克风；`voice-companion` 与 `novel-forge` 分别需要 TTS 服务与已配置模型。
-- **被取代的包。** 独立的 `realtime-voice` 听写已并入 `voice-companion`；`skills-360` 与 `agents-360` 已并入 `dsh-360`。`voice-control` 现在重新作为独立插件发布（0.1.0），专做「一句话该去哪个会话」的路由；它和 `voice-companion` 都占用 `Ctrl+Shift+Space`，两者只启用一个。
+- **已退役 / 被取代的包。** 独立的 `realtime-voice` 听写已并入 `voice-companion`；`skills-360` 与 `agents-360` 已并入 `dsh-360`；`voice-control` 的热键与按会话路由也已并入 `voice-companion ≥0.4.0`，它保留在索引里只为老安装，不再加新功能。它和 `voice-companion` 都占用 `Ctrl+Shift+Space`，两者只启用一个。
 
 ## 常见问题
 

@@ -243,7 +243,8 @@ if (!existsSync(join(root, LANDING))) {
   const types = [];
   for (const [i, raw] of lds.entries()) {
     try {
-      types.push(JSON.parse(raw)["@type"]);
+      const t = JSON.parse(raw)["@type"];
+      types.push(...(Array.isArray(t) ? t : [t]));
     } catch {
       bad(`${LANDING}: 第 ${i + 1} 段 JSON-LD 不是合法 JSON`);
     }
@@ -269,6 +270,50 @@ if (!existsSync(join(root, LANDING))) {
     if (qs < 8) bad(`${LANDING}: FAQPage 只有 ${qs} 问（要求 ≥ 8）`);
     else if (visible < qs) bad(`${LANDING}: FAQPage 有 ${qs} 问，页面上只有 ${visible} 个 <h3> 问答标题`);
     else ok(`${LANDING}: FAQPage ${qs} 问`);
+  }
+
+  // FAQPage 与页面上可见的问答逐条比对（文案漂移必须红）
+  if (types.includes("FAQPage")) {
+    const faq = lds.map((x) => JSON.parse(x)).find((x) => x["@type"] === "FAQPage");
+    const decode = (t) =>
+      t
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+    const visible = [...html.matchAll(/<h3>(.*?)<\/h3>\s*<p>(.*?)<\/p>/gs)].map((m) => ({
+      name: decode(m[1]),
+      text: decode(m[2]),
+    }));
+    const structured = (faq.mainEntity ?? []).map((q) => ({
+      name: q.name,
+      text: q.acceptedAnswer?.text ?? "",
+    }));
+    if (visible.length !== structured.length)
+      bad(`${LANDING}: 可见 FAQ ${visible.length} 组，FAQPage ${structured.length} 组`);
+    else {
+      const drift = visible
+        .map((v, i) => ({ v, s: structured[i] }))
+        .filter(({ v, s }) => v.name !== s.name || v.text !== s.text)
+        .map(({ v }) => v.name);
+      if (drift.length) bad(`${LANDING}: FAQ 文本与 FAQPage 不一致：${drift.join(" / ")}`);
+      else ok(`${LANDING}: ${visible.length} 组 FAQ 文本与 FAQPage 逐字一致`);
+    }
+  }
+
+  // 结构化数据的关键字段
+  if (types.includes("SoftwareApplication")) {
+    const has = (o, t) => (Array.isArray(o?.["@type"]) ? o["@type"] : [o?.["@type"]]).includes(t);
+    const app = lds.map((x) => JSON.parse(x)).find((o) => has(o, "SoftwareApplication"));
+    const missing = ["image", "inLanguage", "dateModified", "offers", "softwareRequirements"].filter(
+      (k) => app?.[k] == null,
+    );
+    if (missing.length) bad(`${LANDING}: SoftwareApplication 缺 ${missing.join(", ")}`);
+    else ok(`${LANDING}: SoftwareApplication 关键字段齐全`);
   }
 
   // 规范 URL、description、语言

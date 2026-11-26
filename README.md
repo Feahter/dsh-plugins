@@ -15,7 +15,7 @@ The plugins cover voice input and speech output, GitHub project management, sess
 - **Local first.** Recognition, scanning, scoring and ledger data stay on the machine; the few features that call out are listed under [Privacy and data](#privacy-and-data).
 - **MIT licensed.** Every plugin, including the index format, is in this repository.
 
-**Docs site:** <https://feahter.github.io/dsh-plugins/> — the same catalog as a static landing page, with one anchor per plugin (`#novel-forge`, `#voice-companion`, …), an install block and an FAQ. It is built from `index.json`, so it never lists a plugin the market does not have.
+**Docs site:** <https://feahter.github.io/dsh-plugins/> — the same catalog as a static landing page, with one anchor per plugin (`#novel-forge`, `#voice-companion`, …), an install block and an FAQ. Its plugin list, anchors and versions are checked against `index.json` by `docs/verify-readme.mjs`, so it never lists a plugin the market does not have.
 
 ## 中文导读
 
@@ -77,8 +77,8 @@ Replace `<commit>` with the commit recorded for the version you want in [`index.
 
 ### Requirements at a glance
 
-- DSH **0.2.1-rc.4** or newer (developer preview; breaking changes can happen between releases).
-- Node **22.15** or newer for the two plugins that decode session logs (`archive-rsi`, `dsh-360`).
+- DSH **`>=0.2.1-rc.4 <0.3.0-0`** — every plugin declares that exact range in `engines.dsh` (developer preview; breaking changes can happen between releases).
+- Node **22.15** or newer — declared by all eleven packages; `archive-rsi` and `dsh-360` need it to decode concatenated-zstd session logs.
 - macOS for the `context-lib` document previews (`textutil`, `qlmanage`); everything else on that plugin is cross-platform.
 - The experimental **Voice input** bundle, a microphone, and a TTS provider on the Host for the two voice plugins.
 - A configured model for `novel-forge` and for `mind-canvas`'s **AI branch**.
@@ -86,7 +86,7 @@ Replace `<commit>` with the commit recorded for the version you want in [`index.
 
 ## Plugin catalog
 
-Eleven maintained plugins, grouped by what they are for. The market title in brackets is the name shown in DSH Discover.
+Eleven plugins, grouped by what they are for. Nine are actively maintained; `voice-control` is retired and `realtime-voice` is superseded by Voice companion. The market title in brackets is the name shown in DSH Discover.
 
 | Plugin | Category | What it does |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ Continuous dictation for the composer. Click the microphone once, speak, and eac
 
 One panel that covers the whole voice surface: **call mode** (energy VAD plus sentence splitting; replies are spoken sentence by sentence and task progress is read back), **composer dictation** (filler words polished, written into the input box), and a **global hotkey** (`Ctrl+Shift+Space`: hold to talk, release to plan and send).
 
-- **A mascot, not a status bar.** Original inline SVG characters — a whale and an anime stand-in — switchable from the panel; the panel drags anywhere and folds into a pill when it is in the way.
+- **A stage, not a status bar.** The default is a self-drawn 3D core (SDF ray-marched WebGL2/GLSL, no three.js, no textures, no network), with two original inline-SVG mascots (a whale and an anime stand-in) still switchable; the panel drags anywhere and folds into a pill when it is in the way.
 - **Voice that matches the sentence.** TTS voice and tone are chosen per character and per sentence mood, so an apology comes out soft and good news comes out bright.
 - **Custom avatar and voice.** Use your own image as the character, pick from three voice slots, and adjust speaking rate without editing config files.
 - **Absorbs two earlier plugins.** The dictation half of `dsh-realtime-voice` and the hotkey of `dsh-voice-control` now live here.
@@ -235,7 +235,7 @@ Everything that can run locally does. This table is the complete list of excepti
 | Plugin | Leaves the machine |
 | --- | --- |
 | Realtime voice input | Nothing by default. Only `translate` mode sends that sentence's text to your translation provider. |
-| Voice companion | Speech recognition is local; the reply text goes to your TTS provider for `/speak`. |
+| Voice companion | Speech recognition is local; the reply text goes to your TTS provider for `/speak`, and the theme designer sends one sentence to your model (`POST /theme/design`). |
 | GitHub project manager | GitHub API calls only, made from the Host with your token. |
 | Session archive + PDCA alchemy | Nothing. All metrics are computed locally from session logs. |
 | dsh-360 | Nothing. Signals are read from local session logs. |
@@ -249,7 +249,7 @@ Original session files and scanned documents are never modified, moved or delete
 
 ## Compatibility
 
-- **DSH version.** All eleven plugins require DSH `0.2.1-rc.4` or newer. DSH is in developer preview, so pin the version you install and read the release notes before upgrading.
+- **DSH version.** All eleven plugins require DSH `>=0.2.1-rc.4 <0.3.0-0`; a newer major line needs its own `engines` update and release. DSH is in developer preview, so pin the version you install and read the release notes before upgrading.
 - **Node.** `archive-rsi` and `dsh-360` need Node `22.15+` to decode concatenated-zstd session logs.
 - **Platform.** macOS is required only for `context-lib` previews; the other ten plugins make no platform-specific calls.
 - **Optional capabilities.** The voice plugins need the experimental Voice input bundle and a microphone; `voice-companion` and `novel-forge` need a TTS provider or a configured model respectively.

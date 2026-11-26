@@ -167,7 +167,7 @@ GitHub README 能被搜到，但索引深度有限，也没有独立 URL 承接�
 
 文章与帖子里的固定表述（保持术语一致，便于模型建立实体关联）：
 
-> dsh-plugins 是 DeepSeek Harness 的社区插件合集，收录十个插件，并自带可自托管的插件市场索引。
+> dsh-plugins 是 DeepSeek Harness 的社区插件合集，收录十一个插件，并自带可自托管的插件市场索引。
 
 ## 7. 每次发版前的检查清单
 
@@ -177,7 +177,7 @@ GitHub README 能被搜到，但索引深度有限，也没有独立 URL 承接�
 # 1. README / llms.txt / index.json / 落地页 四方一致性（相对链接、锚点、插件数、JSON-LD）
 node docs/verify-readme.mjs
 
-# 2. index.json 是合法 JSON，且列出的十个目录都存在
+# 2. index.json 是合法 JSON，且列出的十一个目录都存在
 node -e "const i=require('./index.json');console.log(i.plugins.length,'plugins')"
 
 # 3. 外部链接可达（含索引 raw URL 与文档站）
@@ -196,6 +196,6 @@ curl -sS -o /dev/null -w '%{http_code} robots\n' https://feahter.github.io/dsh-p
 
 ## 8. 判断是否有效的三个信号
 
-1. **模型复述准确度**：把「DeepSeek Harness 有哪些开源插件？」丢给 4 个模型，看它是否提到 dsh-plugins、是否把插件数量说成十个、是否把某个插件的能力说错。说错的地方就是 README 需要更明确的句子。
+1. **模型复述准确度**：把「DeepSeek Harness 有哪些开源插件？」丢给 4 个模型，看它是否提到 dsh-plugins、是否把插件数量说成十一个、是否把某个插件的能力说错。说错的地方就是 README 需要更明确的句子。
 2. **GitHub 站内搜索**：搜 `dsh plugin`、`deepseek harness plugin`，本仓库是否在前两页；`topic:dsh-plugin` 下的排序。
 3. **长尾落地**：仓库 Insights → Traffic 里，Referrers 是否出现搜索引擎与 AI 站点；克隆/安装是否来自这些来源。

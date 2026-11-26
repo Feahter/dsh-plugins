@@ -14,7 +14,7 @@ authors:
   - given-names: Feahter
     alias: Feahter
 repository-code: "https://github.com/Feahter/dsh-plugins"
-url: "https://feahter.github.io/dsh-plugins/"
+url: "https://github.com/Feahter/dsh-plugins"
 license: MIT
 type: software
 date-released: 2026-11-26
