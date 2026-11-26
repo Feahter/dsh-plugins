@@ -2,7 +2,7 @@
 // 契约：docs/architecture-v2.md §5.2。
 // 本模块不读盘、不调模型、不 import canon：canonText 由调用方格式化后传入。
 import { assemble } from '../../forge/budget.js'
-import { truncate } from '../../forge/text.js'
+import { TRUNCATE_MARK, truncate } from '../../forge/text.js'
 
 const DEFAULT_BUDGET = 12000
 const DEFAULT_WORDS = 3000
@@ -63,6 +63,54 @@ const REVISION_SPEC = { name: 'revision', title: '需修正', cap: 1500, priorit
 // 不写进 SLICE_SPEC：那份数组是 §5.2 的固定契约，追加会改变它的严格快照。
 // 文本由 chapter.js 从 canon.threads 筛好后传入，packet 不反解析 canonText。
 export const DUE_THREADS_SPEC = { name: 'dueThreads', title: '到期待收线索', cap: 600, priority: 2, required: false }
+
+export const LORE_SPEC = { name: 'lore', title: '世界书', cap: 600, priority: 2, required: false }
+
+const foldAscii = value => value.replace(/[A-Z]/g, letter => letter.toLowerCase())
+
+export function loreHaystack(chapter, beats) {
+  return [chapter?.title ?? '', chapter?.goal ?? '', JSON.stringify(beats ?? null)].join('\n')
+}
+
+export function loreTextOf(entries, haystack) {
+  if (!Array.isArray(entries)) return ''
+  const folded = foldAscii(haystack)
+  const cap = sliceBodyCap(LORE_SPEC)
+  const blocks = []
+  let remaining = cap
+  for (const entry of entries) {
+    if (typeof entry?.title !== 'string' || typeof entry.text !== 'string' || !entry.text) continue
+    const keywordHit = Array.isArray(entry.keywords) && entry.keywords.some(
+      key => typeof key === 'string' && key.trim() && folded.includes(foldAscii(key)),
+    )
+    if (entry.constant !== true && !keywordHit) {
+      if (typeof entry.regex !== 'string' || !entry.regex) continue
+      try {
+        if (!new RegExp(entry.regex).test(haystack)) continue
+      } catch {
+        continue
+      }
+    }
+    const title = `【${entry.title}】`
+    const separatorCost = blocks.length ? 2 : 0
+    const room = remaining - separatorCost
+    const block = title + entry.text
+    if (block.length <= room) {
+      blocks.push(block)
+      remaining -= block.length + separatorCost
+      continue
+    }
+    if (room >= title.length + TRUNCATE_MARK.length) {
+      blocks.push(title + truncate(entry.text, room - title.length))
+    } else {
+      // 给截断标记留空间，避免在分片末尾出现半个条目标题。
+      if (room >= TRUNCATE_MARK.length) blocks.push(TRUNCATE_MARK)
+      else if (remaining >= TRUNCATE_MARK.length) return blocks.join('\n\n') + TRUNCATE_MARK
+    }
+    break
+  }
+  return blocks.join('\n\n')
+}
 
 function textOf(value) {
   if (value === undefined || value === null) return ''
@@ -298,7 +346,14 @@ export function buildPacket(input = {}) {
     })
   }
 
-  push(sliceOf('brief'), renderBrief({ params, chapter, volume, mode }))
+  const loreText = textOf(source.loreText).trim()
+  const loreSize = loreText ? Math.min(LORE_SPEC.cap, render({ ...LORE_SPEC, text: loreText }).length) : 0
+  // 满额写作要求与世界书加分隔符共 1502 字。紧预算时让出至多两字。
+  const brief = sliceOf('brief')
+  const briefCap = budget >= 1500 && mode === 'draft' && loreSize
+    ? Math.min(brief.cap, Math.floor(budget) - loreSize - 2)
+    : brief.cap
+  push({ ...brief, cap: briefCap }, renderBrief({ params, chapter, volume, mode }))
   if (mode === 'revise') {
     const findings = formatFindings(source.revisionFindings)
     if (findings) push(REVISION_SPEC, findings)
@@ -308,6 +363,7 @@ export function buildPacket(input = {}) {
   push(sliceOf('previous'), renderPrevious(source.previous, source.previousSummary))
   push(sliceOf('recent'), renderRecent(source.recentSummaries))
   if (source.dueThreads) push(DUE_THREADS_SPEC, textOf(source.dueThreads))
+  push(LORE_SPEC, loreText)
   if (source.worldBrief) push(sliceOf('world'), textOf(source.worldBrief))
   if (source.volumeDigest) push(sliceOf('digest'), textOf(source.volumeDigest))
   if (source.canonText) push(sliceOf('canon'), textOf(source.canonText))
@@ -316,7 +372,21 @@ export function buildPacket(input = {}) {
   if (source.pitchText) push(sliceOf('pitch'), textOf(source.pitchText))
   push(sliceOf('style'), renderStyle(params, source.styleSample))
 
-  const { text, report } = assemble({ slices, budget })
+  const required = slices.filter(slice => slice.required)
+  const roomForLore = budget - required.reduce((used, slice) => used + render(slice).length + 2, 0)
+  // 空间足够时先锁定世界书的预算，输出位置仍由 slices 的顺序决定。
+  const allocatedSlices = loreSize && loreSize <= roomForLore
+    ? slices.map(slice => slice.name === LORE_SPEC.name ? { ...slice, required: true } : slice)
+    : slices
+  let { text, report } = assemble({ slices: allocatedSlices, budget })
+  const loreRow = report.slices.find(slice => slice.name === LORE_SPEC.name)
+  if (loreRow?.truncated) {
+    // 比硬预算还紧时整块让出，避免正文中出现半个标题或半条世界书。
+    ;({ text, report } = assemble({ slices: slices.filter(slice => slice.name !== LORE_SPEC.name), budget }))
+    report.slices.splice(slices.findIndex(slice => slice.name === LORE_SPEC.name), 0, {
+      ...loreRow, chars: 0, allocated: 0, truncated: false, dropped: true,
+    })
+  }
 
   // 超预算被裁的判据：分片被整片丢掉，或整块被预算（而不是自己的 cap）截短。
   // index.js 的两条 warn 读的就是这个字段——在此之前它从没被生产过，那两条提示是死的。

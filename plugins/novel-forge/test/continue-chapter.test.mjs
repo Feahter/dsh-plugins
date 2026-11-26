@@ -26,13 +26,15 @@ function proseChars(text) {
   return String(text ?? '').replace(/\s+/g, '').length
 }
 
-/** 真实引擎 + 假模型：outputs 按调用顺序取，元素可以是字符串或抛错的函数。 */
+/** outputs 只控制续写正文，记忆交给固定的假模型响应。 */
 async function setup({ outputs = [], params = {}, draft = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'forge-continue-'))
   const calls = []
   const llm = {
     calls,
     async generate(options) {
+      if (options.phase === 'summary') return { text: '有人在门里叫他的名字。' }
+      if (options.phase === 'canonPatch') return { text: '{}' }
       calls.push(options)
       const next = outputs[Math.min(calls.length - 1, outputs.length - 1)]
       if (typeof next === 'function') return next(options)

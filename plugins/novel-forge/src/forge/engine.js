@@ -1299,7 +1299,7 @@ export class ForgeEngine {
     }
 
     const outcome = await recipe.continueChapter(ctx, { chapterId: String(chapterId ?? '') })
-    const result = outcome && typeof outcome === 'object' ? { ...outcome } : {}
+    const { artifacts, ...result } = outcome && typeof outcome === 'object' ? outcome : {}
     result.chapterId = String(result.chapterId ?? chapterId ?? '')
     result.warnings = warnings
     if (result.skipped === true) {
@@ -1317,10 +1317,14 @@ export class ForgeEngine {
       { stage: 'continue' },
     )
     result.version = written?.meta?.version ?? null
+    cache.set(key, written)
+    for (const [artifactKey, spec] of Object.entries(artifacts ?? {})) {
+      const artifact = await this.store.writeArtifact(project.id, artifactKey, spec, { stage: 'continue' })
+      cache.set(artifactKey, artifact)
+    }
 
     // 正文已经换了，统计要跟着：复用 recipe.stats，再把本次调用记到 calls/tokens。
     const fresh = await this.store.readProject(project.id)
-    cache.set(key, { key, kind: 'md', content: String(result.text), meta: written?.meta })
     let domain = {}
     try {
       if (typeof recipe.stats === 'function') domain = recipe.stats(fresh, this.#readApi(cache)) || {}

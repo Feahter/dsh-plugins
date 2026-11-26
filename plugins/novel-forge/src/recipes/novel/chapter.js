@@ -8,7 +8,7 @@
 // 五个入口与 §6 一字不差：
 //   inspectChapter / ensureVolume / prepareChapter / commitChapter / checkChapter
 // 外加内联协议解析 splitInline（§12）。
-import { buildPacket, DUE_THREADS_SPEC, sliceBodyCap, sliceOf } from './packet.js'
+import { buildPacket, DUE_THREADS_SPEC, loreHaystack, loreTextOf, sliceBodyCap, sliceOf } from './packet.js'
 import {
   emptyCanon,
   mergeCanon,
@@ -1217,6 +1217,7 @@ export async function prepareChapter({ outline, params = {}, chapterId, read, ll
     volumeDigest: volumeDigestOf(read, current, chapter),
     canonText,
     dueThreads: dueThreadsText(canon, chapter),
+    loreText: loreTextOf(readJson(read, 'lorebook')?.entries, loreHaystack(chapter, beats)),
     castBrief: chapterCastBrief({ characters, chapter, volume, beats, canon, maxChars: sliceBodyCap(sliceOf('cast')) }),
     worldBrief: worldBriefOf(read),
     genreText: genreTextOf(params, read),

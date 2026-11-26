@@ -25,12 +25,12 @@ function fakeTools() {
 const fakeEngine = {}
 const modelInfo = () => ({ available: true, provider: 'deepseek', model: 'deepseek-v4' })
 
-test('registerNovelTools：15 个工具全部带 options.when', () => {
+test('registerNovelTools：16 个工具全部带 options.when', () => {
   const activation = createActivation()
   const tools = fakeTools()
   registerNovelTools(tools, fakeEngine, { activation })
 
-  assert.equal(tools.calls.length, 15)
+  assert.equal(tools.calls.length, 16)
   for (const call of tools.calls) {
     assert.equal(call.argCount, 2)
     assert.equal(typeof call.options?.when, 'function')
@@ -91,7 +91,7 @@ test('老宿主兼容：不传 activation 时 register 只收到一个参数', (
   const tools = fakeTools()
   registerNovelTools(tools, fakeEngine)
 
-  assert.equal(tools.calls.length, 15)
+  assert.equal(tools.calls.length, 16)
   for (const call of tools.calls) {
     assert.equal(call.argCount, 1)
     assert.equal(call.options, undefined)

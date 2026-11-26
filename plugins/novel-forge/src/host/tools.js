@@ -13,14 +13,14 @@ import { chapterRequirements } from '../recipes/novel/packet.js'
 import { migrateOutline, nextActions, volumeOfChapter } from '../recipes/novel/plan.js'
 import { checkOpeningContract } from '../recipes/novel/outline.js'
 import { commitChapter, ensureVolume, prepareChapter } from '../recipes/novel/chapter.js'
-import { paramsSchema } from '../recipes/novel/index.js'
+import { paramsSchema, reviewPredatesDraft } from '../recipes/novel/index.js'
 import { deconstruct } from '../recipes/novel/deconstruct.js'
 
 // 需要按 JSON 存的产物 key。ledger 保留：v1 项目还有账本，读的时候要能迁移。
-const JSON_KEYS = new Set(['brief', 'pitch', 'opener', 'characters', 'spine', 'outline', 'canon', 'ledger', 'blurb'])
+const JSON_KEYS = new Set(['brief', 'pitch', 'opener', 'characters', 'spine', 'outline', 'canon', 'ledger', 'lorebook', 'blurb'])
 
 // chapter.js 只接受同步 read：tools 层先把这些产物并发读进内存。
-const BASE_KEYS = ['brief', 'pitch', 'opener', 'bible', 'characters', 'spine', 'outline', 'canon', 'ledger']
+const BASE_KEYS = ['brief', 'pitch', 'opener', 'bible', 'characters', 'spine', 'outline', 'canon', 'ledger', 'lorebook']
 const CHAPTER_PREFIXES = ['beats', 'summary', 'draft', 'review']
 
 const STAGE_ORDER = ['premise', 'bible', 'characters', 'spine', 'outline', 'draft', 'review', 'revise', 'blurb']
@@ -160,6 +160,48 @@ const projectParam = {
   description: '项目 id、id 前缀或书名的一部分。省略时用最近更新的项目。',
 }
 
+const loreFields = {
+  id: { type: 'string', minLength: 1, maxLength: 40 },
+  title: { type: 'string', maxLength: 60 },
+  text: { type: 'string', minLength: 1, maxLength: 2000 },
+  keywords: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 40 } },
+  regex: { type: 'string', maxLength: 200 },
+  constant: { type: 'boolean' },
+}
+
+const badLore = message => httpError(400, 'BAD_PARAMS', message)
+const validLoreId = id => typeof id === 'string' && id.trim() && Array.from(id).length <= 40
+
+function validateLorebook(book) {
+  if (!Array.isArray(book?.entries) || book.entries.length > 200) throw badLore('世界书 entries 必须是数组，最多 200 条')
+  const ids = new Set()
+  for (const entry of book.entries) {
+    if (!validLoreId(entry?.id) || ids.has(entry.id)) throw badLore('世界书 id 必须非空、唯一且不超过 40 字')
+    ids.add(entry.id)
+    for (const [field, schema] of Object.entries(loreFields)) {
+      const value = entry[field]
+      if (value === undefined && ['keywords', 'regex', 'constant'].includes(field)) continue
+      if (schema.type === 'string') {
+        const length = typeof value === 'string' ? Array.from(value).length : -1
+        if (length < (schema.minLength ?? 0) || length > schema.maxLength) throw badLore(`世界书 ${field} 不符合长度或类型要求`)
+      } else if (schema.type === 'array') {
+        if (!Array.isArray(value) || value.length > schema.maxItems || value.some(
+          key => typeof key !== 'string' || Array.from(key).length > schema.items.maxLength,
+        )) throw badLore('世界书 keywords 最多 20 个，每个不超过 40 字')
+      } else if (typeof value !== 'boolean') {
+        throw badLore('世界书 constant 必须是布尔值')
+      }
+    }
+    if (entry.regex !== undefined) {
+      try {
+        new RegExp(entry.regex)
+      } catch {
+        throw badLore('世界书 regex 无法编译')
+      }
+    }
+  }
+}
+
 async function resolve(engine, hint) {
   return engine.resolveProject(hint || 'active')
 }
@@ -222,6 +264,11 @@ function chapterIdsIn(project, prefix, extra = []) {
   for (const raw of Object.keys(project.stages?.[prefix]?.items ?? {})) {
     const id = raw.includes('/') ? raw.slice(raw.indexOf('/') + 1) : raw
     if (/^ch\d+$/.test(id)) ids.add(id)
+  }
+  if (prefix === 'review') {
+    for (const id of ids) {
+      if (reviewPredatesDraft(project, id)) ids.delete(id)
+    }
   }
   return ids
 }
@@ -1030,6 +1077,7 @@ export function createTools(engine) {
             throw httpError(400, 'BAD_PARAMS', `${args.key} 需要 JSON 字符串`)
           }
         }
+        if (args.key === 'lorebook') validateLorebook(content)
         const artifact = await engine.writeArtifact(project.id, args.key, { kind, content }, { stage: 'manual' })
         return { ok: true, key: args.key, bytes: artifact?.meta?.bytes ?? null, version: artifact?.meta?.version ?? null }
       },
@@ -1139,6 +1187,51 @@ export function createTools(engine) {
             ? `《${value.project}》${value.chapter} 已有 ${fmtNum(value.beforeChars)} 字，达到目标字数，没有再续写。`
             : `已续写《${value.project}》${value.chapter}：${fmtNum(value.beforeChars)} → ${fmtNum(value.afterChars)} 字${value.truncated ? '（仍撞输出上限，已保存写出的部分）' : ''}。`,
         ),
+      },
+    ),
+
+    defineTool(
+      'novel_lorebook',
+      '管理项目世界书。支持常驻、关键词、正则三种触发。命中条目按录入顺序进入材料包，世界书合计 600 字预算。update 只更新给出的字段。',
+      {
+        type: 'object',
+        properties: {
+          project: projectParam,
+          action: { type: 'string', enum: ['list', 'add', 'update', 'remove'] },
+          ...loreFields,
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      async args => {
+        const { action, id } = args
+        if (!['list', 'add', 'update', 'remove'].includes(action)) throw badLore('无效的世界书 action')
+        if (action !== 'list' && !validLoreId(id)) throw badLore('世界书 id 必须非空且不超过 40 字')
+        const project = await resolve(engine, args.project)
+        const load = async () => (await engine.getArtifact(project.id, 'lorebook'))?.content?.entries ?? []
+        if (action === 'list') {
+          const entries = (await load()).map(({ id, title, text, keywords = [], regex = '', constant = false }) => ({
+            id, title, preview: Array.from(text).slice(0, 80).join(''), keywords, regex, constant,
+          }))
+          return { ok: true, entries }
+        }
+        return engine.store.withLock(`lorebook:${project.id}`, async () => {
+          const entries = [...await load()]
+          const index = entries.findIndex(entry => entry.id === id)
+          if (action === 'add' && index >= 0) throw badLore(`世界书 id 已存在：${id}`)
+          if (action !== 'add' && index < 0) throw httpError(404, 'NOT_FOUND', `世界书条目不存在：${id}`)
+          if (action === 'remove') {
+            entries.splice(index, 1)
+          } else {
+            const fields = Object.fromEntries(Object.keys(loreFields).filter(key => args[key] !== undefined).map(key => [key, args[key]]))
+            if (action === 'add') entries.push(fields)
+            else entries[index] = { ...entries[index], ...fields }
+          }
+          const content = { entries }
+          validateLorebook(content)
+          await engine.writeArtifact(project.id, 'lorebook', { kind: 'json', content }, { stage: 'manual' })
+          return { ok: true, entries: entries.length }
+        })
       },
     ),
 

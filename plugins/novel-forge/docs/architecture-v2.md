@@ -232,6 +232,9 @@ export function buildPacket(input)   // input 见下；返回 { text, report, se
 | `pitch` | 300 | 5 | | v0.3：频道/标签/卖点/金手指压成清单 |
 | `genre` | 220 | 1 | | 类型承诺＋核心设定＋一条硬要求 |
 | `dueThreads` | 600 | 2 | | 已到期（`dueIn ≤ 本章号`）未关闭的线索清单，独立于 `SLICE_SPEC`（同 `revision`，追加会改严格快照） |
+| `lore` | 600 | 2 | | `LORE_SPEC` 独立定义，在到期线索之后、正典之前。 |
+
+`novel_lorebook` 维护项目的 JSON 工件 `lorebook`，最多 200 条。匹配使用章标题、章目标和细纲 JSON。常驻条目直接命中，关键词对 ASCII 字母忽略大小写，正则按 JavaScript 的默认规则匹配。命中条目按录入顺序渲染。写作材料包在 1500 字预算下为截断至 600 字以内的世界书预留空间。修订材料包先扣除写作要求和修订意见所需的预算。
 
 `contextBudget` 默认 12000。`SLICE_SPEC` 的 cap 合计 13720，另有到期线索片 600 字。按优先级裁剪，**总长硬性 ≤ budget**。`report.slices[].chars` 必须与 `text` 实际长度一致（集成测试断言）。`cap` 记在**渲染后的整块**上（含 `## 标题\n`），所以分片正文按 `cap − 标题开销` 生成。
 

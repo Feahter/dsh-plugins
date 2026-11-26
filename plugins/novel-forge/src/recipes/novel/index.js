@@ -7,7 +7,7 @@ import { createPrompts, SUMMARY_MARKER, sexOf } from './prompts/zh.js'
 import { defaultCraft, draftVerdict, severityRank, countCjk, editRate } from './craft.js'
 import { countUnquotedFindings, validateFindingQuotes } from './consistency.js'
 import { chaptersOf } from './outline.js'
-import { buildPacket, sliceBodyCap, sliceOf } from './packet.js'
+import { buildPacket, loreHaystack, loreTextOf, sliceBodyCap, sliceOf } from './packet.js'
 import {
   continuationNote,
   continuationSpec,
@@ -1329,6 +1329,7 @@ function assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads = '', m
     genreText: requireChapter().genreTextOf(params, readerOf(ctx)),
     canonText: canonTextFor(canon, names, id, sliceBodyCap(sliceOf('canon'))),
     dueThreads,
+    loreText: loreTextOf(jsonOr(ctx, 'lorebook', null)?.entries, loreHaystack(chapter, beats)),
     castBrief: castBriefForContext(ctx, chapter, volume, beats, canon),
     styleSample: fit(ctx, params.styleGuide ?? '', 1200),
     nextChapterGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
@@ -1340,6 +1341,14 @@ function assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads = '', m
 /** 审查/修订共用：关闭自动审校时跳过，返回值就是事件流里的跳过原因。 */
 function skipAutoReview(project) {
   return project?.params?.autoReview === false ? '未开启自动审校' : false
+}
+
+/** revise 的回写沿用审校结论，draft 和 continue 的新正文需要重新审校。 */
+export function reviewPredatesDraft(project, id, reviewMeta = project?.artifacts?.[`review/${id}`]) {
+  const draft = project?.artifacts?.[`draft/${id}`]
+  if (!['draft', 'continue'].includes(draft?.by?.stage)) return false
+  const stamp = meta => Date.parse(meta?.updatedAt ?? '') || 0
+  return stamp(reviewMeta) < stamp(draft)
 }
 
 // ---------------------------------------------------------------- recipe
@@ -1774,16 +1783,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       produces: ['review/*'],
       review: (project) => project?.params?.reviewGate === true,
       skip: skipAutoReview,
-      // 正文被 draft 阶段重写后，旧 review 是对旧稿的判决：让这一章重新审校。
-      // 只认 draft 阶段的重写，不认 revise 的回写（否则每次修订都会把审校打回未完成，来回打转）。
-      isStale: ({ key, artifact, project }) => {
-        const id = String(key).slice('review/'.length)
-        const draft = project?.artifacts?.[`draft/${id}`]
-        if (!draft || draft.by?.stage !== 'draft') return false
-        const reviewAt = Date.parse(artifact?.meta?.updatedAt ?? project?.artifacts?.[key]?.updatedAt ?? '') || 0
-        const draftAt = Date.parse(draft.updatedAt ?? '') || 0
-        return reviewAt < draftAt
-      },
+      isStale: ({ key, artifact, project }) => reviewPredatesDraft(project, key.slice('review/'.length), artifact?.meta),
       onItemError: 'continue',
       async run(ctx) {
         const unit = requireChapter()
@@ -2030,6 +2030,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       spine: { kind: 'json', title: '情感脊柱（分卷 JSON）' },
       outline: { kind: 'json', title: '卷章大纲' },
       canon: { kind: 'json', title: '连续性正典' },
+      lorebook: { kind: 'json', title: '世界书' },
       blurb: { kind: 'json', title: '封面文案' },
       'beats/*': { kind: 'json', title: '章节细纲' },
       'draft/*': { kind: 'md', title: '章节草稿' },
@@ -2043,7 +2044,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
     /**
      * 「一键续写本章」：从 draft/<chapterId> 的断点接着写，不重写整章、不碰下一章。
      * ctx 与 stage 同形（read/text/json/llm/warn），落盘交给 engine.continueChapter，
-     * 因为 recipe 不应该知道 store/版本滚动。返回 { chapterId, beforeChars, afterChars, truncated, text }。
+     * 因为 recipe 不应该知道 store/版本滚动。成功续写时同时返回待写入的记忆和检查工件。
      */
     async continueChapter(ctx, arg = {}) {
       const unit = requireChapter()
@@ -2171,7 +2172,29 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
           beforeChars,
         })
       }
-      return { chapterId, beforeChars, afterChars, truncated, text }
+      const commitRead = readerOf(ctx, { outline, canon, [`beats/${chapterId}`]: beats })
+      const input = { read: commitRead, params, outline, chapterId, text }
+      const memoryCtx = withPromptContext(promptCtx, { draft: text, draftText: text })
+      const artifacts = {}
+      let checked
+      let phase = '摘要'
+      try {
+        const summary = normalizeSummary(await callText(memoryCtx, 'summary', prompts.summary, { maxTokens: 800 }))
+        phase = '正典补丁'
+        const canonPatch = await callJson(
+          withPromptContext(memoryCtx, { summary }), 'canonPatch', prompts.canonPatch, canonPatchSchema,
+        )
+        phase = '记忆合并'
+        checked = unit.commitChapter({ ...input, summary, canonPatch })
+        artifacts[`summary/${chapterId}`] = checked.artifacts.summary
+        artifacts.canon = { kind: 'json', content: checked.canon }
+      } catch (err) {
+        ctx.warn?.(`${chapterId} 续写后${phase}失败：${err?.message ?? err}`)
+        checked = unit.checkChapter(input)
+      }
+      const { findings, counts, verdict } = checked
+      artifacts[`check/${chapterId}`] = { kind: 'json', content: { findings, counts, verdict } }
+      return { chapterId, beforeChars, afterChars, truncated, text, artifacts }
     },
 
     /**
@@ -2184,15 +2207,6 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       const stages = project?.stages ?? {}
       const artifacts = project?.artifacts ?? {}
       const has = (key) => Boolean(artifacts[key])
-      const stamp = (key) => Date.parse(artifacts[key]?.updatedAt ?? '') || 0
-      // 正文被 draft 阶段重写后，旧 review 是对旧稿的判决：引文对不上、问题清单也不适用。
-      // 只认 draft 阶段的重写，不认 revise 的回写——否则每次修订都会把审校再次打成未完成，来回打转。
-      const reviewedAfterDraft = (id) => {
-        if (!has(`review/${id}`)) return false
-        const draft = artifacts[`draft/${id}`]
-        if (!draft || draft.by?.stage !== 'draft') return true
-        return stamp(`review/${id}`) >= stamp(`draft/${id}`)
-      }
       let changed = 0
       const sweep = (stageId, keep) => {
         const entry = stages[stageId]
@@ -2207,7 +2221,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
         if (touched > 0 && entry.status === 'done') entry.status = 'partial'
         changed += touched
       }
-      sweep('review', (id) => reviewedAfterDraft(id))
+      sweep('review', (id) => has(`review/${id}`) && !reviewPredatesDraft(project, id))
       sweep('revise', (id) => has(`review/${id}`) && has(`draft/${id}`))
       return changed
     },
