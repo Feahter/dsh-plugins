@@ -316,8 +316,8 @@ test('novel_* 工具齐全，参数必填项正确', () => {
   const tools = createTools(makeFakeEngine())
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
     'novel_audit', 'novel_cancel', 'novel_commit', 'novel_context', 'novel_continue',
-    'novel_create', 'novel_deconstruct', 'novel_export', 'novel_list', 'novel_lorebook', 'novel_next',
-    'novel_plan', 'novel_read', 'novel_run', 'novel_status', 'novel_write',
+    'novel_create', 'novel_deconstruct', 'novel_export', 'novel_list', 'novel_lorebook', 'novel_materials',
+    'novel_next', 'novel_plan', 'novel_read', 'novel_run', 'novel_status', 'novel_write',
   ])
   const create = tools.find(tool => tool.name === 'novel_create')
   assert.deepEqual(create.parameters.required, ['premise'])

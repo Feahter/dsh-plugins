@@ -240,6 +240,12 @@ export function buildPacket(input)   // input 见下；返回 { text, report, se
 
 `buildPacket` 的 `report` 在 `assemble` 的字段之外多一个 `overBudget`（`hardTruncated || 有分片 dropped/truncated`）：index.js 的两条「材料超出 contextBudget，已按优先级裁剪」提示读的就是它，别只加字段不接线。
 
+### 5.2.1 项目素材
+
+`novel_materials` 将跨书库保存在 `<store.root>/materials/<kind>/<id>.json`。`attach` 将选中的 `{id,kind,title,tags,text}` 保存到项目的 JSON 工件 `materials`，并累加库条目的使用次数。重新附加同一 ID 会刷新快照。`detach` 按 ID 移除，也可用 `all:true` 清空。
+
+`MATERIALS_SPEC` 单独定义可选的 `## 素材` 分片，优先级为 2，上限 600 字（含标题）。它显示在世界书之后、世界设定和正典之前。写作和修订都读取项目快照。素材按普通可选分片分配预算。
+
 ### 5.3 集成点
 
 `draft` stage（批量）与 `novel_context`（agent）调用**同一个** `chapter.prepareChapter()`，拿到同一个 `packet.text`。禁止任何一处另拼材料。

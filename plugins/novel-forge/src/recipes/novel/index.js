@@ -7,7 +7,7 @@ import { createPrompts, SUMMARY_MARKER, sexOf } from './prompts/zh.js'
 import { defaultCraft, draftVerdict, severityRank, countCjk, editRate } from './craft.js'
 import { countUnquotedFindings, validateFindingQuotes } from './consistency.js'
 import { chaptersOf } from './outline.js'
-import { buildPacket, loreHaystack, loreTextOf, sliceBodyCap, sliceOf } from './packet.js'
+import { buildPacket, loreHaystack, loreTextOf, materialsTextOf, sliceBodyCap, sliceOf } from './packet.js'
 import {
   continuationNote,
   continuationSpec,
@@ -1330,6 +1330,7 @@ function assemblePacket(ctx, { chapter, volume, beats, canon, dueThreads = '', m
     canonText: canonTextFor(canon, names, id, sliceBodyCap(sliceOf('canon'))),
     dueThreads,
     loreText: loreTextOf(jsonOr(ctx, 'lorebook', null)?.entries, loreHaystack(chapter, beats)),
+    materialsText: materialsTextOf(jsonOr(ctx, 'materials', null)?.entries),
     castBrief: castBriefForContext(ctx, chapter, volume, beats, canon),
     styleSample: fit(ctx, params.styleGuide ?? '', 1200),
     nextChapterGoal: next ? `下一章目标：${next.goal ?? ''}（本章不要提前解决）` : '',
@@ -2031,6 +2032,7 @@ export function createNovelRecipe({ prompts = createPrompts(), craft = defaultCr
       outline: { kind: 'json', title: '卷章大纲' },
       canon: { kind: 'json', title: '连续性正典' },
       lorebook: { kind: 'json', title: '世界书' },
+      materials: { kind: 'json', title: '素材' },
       blurb: { kind: 'json', title: '封面文案' },
       'beats/*': { kind: 'json', title: '章节细纲' },
       'draft/*': { kind: 'md', title: '章节草稿' },

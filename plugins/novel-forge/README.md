@@ -61,6 +61,7 @@ novel_audit  → 全书确定性体检（死亡人物说话、时间倒流、线
 | `novel_read` / `novel_write` | 读 / 手改任意产物（设定、大纲、某章细纲草稿审校） |
 | `novel_continue` | 接着某一章已有正文的断点往下写（不重写整章，撞输出上限自动再续） |
 | `novel_deconstruct` | 拆书：导入一本现成小说的纯文本，本地解析出章节骨架 + 文风指纹（不调模型） |
+| `novel_materials` | 检索和维护跨书素材库，为指定书籍附加或移除素材 |
 | `novel_list` / `novel_cancel` / `novel_export` | 列表 / 取消（已完成章节保留）/ 导出（markdown / epub / 编辑审稿单 md+csv） |
 
 ## 市场坐标（可选）

@@ -2,6 +2,7 @@
 // 契约：docs/architecture-v2.md §5.2。
 // 本模块不读盘、不调模型、不 import canon：canonText 由调用方格式化后传入。
 import { assemble } from '../../forge/budget.js'
+import { KIND } from '../../forge/materials.js'
 import { TRUNCATE_MARK, truncate } from '../../forge/text.js'
 
 const DEFAULT_BUDGET = 12000
@@ -65,6 +66,16 @@ const REVISION_SPEC = { name: 'revision', title: '需修正', cap: 1500, priorit
 export const DUE_THREADS_SPEC = { name: 'dueThreads', title: '到期待收线索', cap: 600, priority: 2, required: false }
 
 export const LORE_SPEC = { name: 'lore', title: '世界书', cap: 600, priority: 2, required: false }
+export const MATERIALS_SPEC = { name: 'materials', title: '素材', cap: 600, priority: 2, required: false }
+
+export function materialsTextOf(entries) {
+  if (!Array.isArray(entries)) return ''
+  return entries
+    .filter(entry => typeof entry?.kind === 'string' && Object.hasOwn(KIND, entry.kind)
+      && typeof entry.title === 'string' && typeof entry.text === 'string' && entry.text.trim())
+    .map(({ kind, title, text }) => `【${KIND[kind]}·${title}】\n${text}`)
+    .join('\n\n')
+}
 
 const foldAscii = value => value.replace(/[A-Z]/g, letter => letter.toLowerCase())
 
@@ -364,6 +375,7 @@ export function buildPacket(input = {}) {
   push(sliceOf('recent'), renderRecent(source.recentSummaries))
   if (source.dueThreads) push(DUE_THREADS_SPEC, textOf(source.dueThreads))
   push(LORE_SPEC, loreText)
+  push(MATERIALS_SPEC, textOf(source.materialsText).trim())
   if (source.worldBrief) push(sliceOf('world'), textOf(source.worldBrief))
   if (source.volumeDigest) push(sliceOf('digest'), textOf(source.volumeDigest))
   if (source.canonText) push(sliceOf('canon'), textOf(source.canonText))

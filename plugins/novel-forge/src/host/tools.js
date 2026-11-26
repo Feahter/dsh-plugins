@@ -7,6 +7,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { httpError } from './json.js'
 import { countCjk } from '../forge/text.js'
+import { KIND, validMaterialId } from '../forge/materials.js'
 import { audit as auditChapters } from '../recipes/novel/consistency.js'
 import { canonProblems, canonStats, emptyCanon, migrateLedger } from '../recipes/novel/canon.js'
 import { chapterRequirements } from '../recipes/novel/packet.js'
@@ -17,10 +18,10 @@ import { paramsSchema, reviewPredatesDraft } from '../recipes/novel/index.js'
 import { deconstruct } from '../recipes/novel/deconstruct.js'
 
 // 需要按 JSON 存的产物 key。ledger 保留：v1 项目还有账本，读的时候要能迁移。
-const JSON_KEYS = new Set(['brief', 'pitch', 'opener', 'characters', 'spine', 'outline', 'canon', 'ledger', 'lorebook', 'blurb'])
+const JSON_KEYS = new Set(['brief', 'pitch', 'opener', 'characters', 'spine', 'outline', 'canon', 'ledger', 'lorebook', 'blurb', 'materials'])
 
 // chapter.js 只接受同步 read：tools 层先把这些产物并发读进内存。
-const BASE_KEYS = ['brief', 'pitch', 'opener', 'bible', 'characters', 'spine', 'outline', 'canon', 'ledger', 'lorebook']
+const BASE_KEYS = ['brief', 'pitch', 'opener', 'bible', 'characters', 'spine', 'outline', 'canon', 'ledger', 'lorebook', 'materials']
 const CHAPTER_PREFIXES = ['beats', 'summary', 'draft', 'review']
 
 const STAGE_ORDER = ['premise', 'bible', 'characters', 'spine', 'outline', 'draft', 'review', 'revise', 'blurb']
@@ -160,6 +161,10 @@ const projectParam = {
   description: '项目 id、id 前缀或书名的一部分。省略时用最近更新的项目。',
 }
 
+const materialActions = ['list', 'get', 'add', 'update', 'remove', 'seed', 'attach', 'detach']
+const materialIdParam = { type: 'string', minLength: 1, maxLength: 40 }
+const materialSources = ['system', 'user', 'community']
+
 const loreFields = {
   id: { type: 'string', minLength: 1, maxLength: 40 },
   title: { type: 'string', maxLength: 60 },
@@ -204,6 +209,41 @@ function validateLorebook(book) {
 
 async function resolve(engine, hint) {
   return engine.resolveProject(hint || 'active')
+}
+
+async function writeMaterialsSnapshot(engine, { action, project: hint, ids, all }) {
+  const detach = action === 'detach'
+  const clear = detach && all === true
+  if (hint !== undefined && (typeof hint !== 'string' || !hint.trim())) {
+    throw httpError(400, 'BAD_PARAMS', 'project 必须是非空字符串')
+  }
+  if (all !== undefined && (!detach || typeof all !== 'boolean')) {
+    throw httpError(400, 'BAD_PARAMS', 'all 仅用于 detach，且必须是布尔值')
+  }
+  if (clear ? ids !== undefined : !Array.isArray(ids) || !ids.length || !Array.from(ids).every(validMaterialId)) {
+    throw httpError(400, 'BAD_PARAMS', '需要非空素材 ids 数组，或用 detach + all:true 清空（两者互斥）')
+  }
+
+  const project = await resolve(engine, hint)
+  return engine.store.withLock(`materials:${project.id}`, async () => {
+    const current = (await engine.getArtifact(project.id, 'materials'))?.content?.entries
+    const snapshots = new Map(Array.isArray(current) ? current.map(entry => [entry.id, entry]) : [])
+    const save = async () => {
+      const content = { entries: [...snapshots.values()], attachedAt: engine.clock().toISOString() }
+      await engine.writeArtifact(project.id, 'materials', { kind: 'json', content }, { stage: 'manual' })
+    }
+    if (detach) {
+      if (clear) snapshots.clear()
+      else for (const id of ids) snapshots.delete(id)
+      await save()
+    } else {
+      await engine.materials.bumpUses(ids, async entries => {
+        for (const { id, kind, title, tags, text } of entries) snapshots.set(id, { id, kind, title, tags, text })
+        await save()
+      })
+    }
+    return { ok: true, attached: snapshots.size }
+  })
 }
 
 /** 引擎注册的导出格式集合（模型/前端都能传错格式）；取不到时是空集合，调用方据此跳过校验。 */
@@ -1232,6 +1272,56 @@ export function createTools(engine) {
           await engine.writeArtifact(project.id, 'lorebook', { kind: 'json', content }, { stage: 'manual' })
           return { ok: true, entries: entries.length }
         })
+      },
+    ),
+
+    defineTool(
+      'novel_materials',
+      `管理跨书素材库。类别：${Object.entries(KIND).map(([key, label]) => `${key}（${label}）`).join('、')}。来源：system（系统）、user（用户）、community（社区）。attach 保存项目快照，库中条目的后续修改不会回溯到已附着的书。`,
+      {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: materialActions },
+          kind: { type: 'string', enum: Object.keys(KIND) },
+          tag: { type: 'string', minLength: 1, maxLength: 20 },
+          source: { type: 'string', enum: materialSources, description: '用于 list 筛选，add 创建用户素材。' },
+          query: { type: 'string' },
+          id: materialIdParam,
+          title: { type: 'string', minLength: 1, maxLength: 60 },
+          tags: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 20 } },
+          text: { type: 'string', minLength: 1, maxLength: 4000 },
+          project: projectParam,
+          ids: { type: 'array', minItems: 1, items: materialIdParam },
+          all: { type: 'boolean', description: 'detach 时用 true 清空项目快照。' },
+        },
+        required: ['action'],
+        additionalProperties: false,
+      },
+      async args => {
+        const { action, id, kind, title, tags, text, tag, source, query } = args
+        const library = engine.materials
+        switch (action) {
+          case 'list': return { ok: true, entries: await library.list({ kind, tag, source, query }) }
+          case 'get': return { ok: true, entry: await library.get(id) }
+          case 'add': {
+            if (source !== undefined) throw httpError(400, 'BAD_PARAMS', 'add 的素材来源固定为 user')
+            await library.add({ kind, id, title, tags, text })
+            return { ok: true, id }
+          }
+          case 'update': {
+            const patch = Object.fromEntries(Object.entries({ title, tags, text }).filter(([, value]) => value !== undefined))
+            const { version } = await library.update(id, patch)
+            return { ok: true, id, version }
+          }
+          case 'remove': {
+            await library.remove(id)
+            return { ok: true, removed: true }
+          }
+          case 'seed': return { ok: true, ...await library.seed() }
+          case 'attach':
+          case 'detach': return writeMaterialsSnapshot(engine, args)
+          default: throw httpError(400, 'BAD_PARAMS', '无效的素材 action')
+        }
       },
     ),
 

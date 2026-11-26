@@ -7,6 +7,7 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { Store } from './store.js'
+import { MaterialsLibrary } from './materials.js'
 import { ForgeError, asForgeError } from './errors.js'
 import { EVENT } from './events.js'
 import {
@@ -98,6 +99,7 @@ export class ForgeEngine {
     this.logger = logger
     this.clock = typeof clock === 'function' ? clock : () => new Date()
     this.store = store instanceof Store ? store : new Store(root)
+    this.materials = new MaterialsLibrary(this.store, this.clock)
     /** @type {Map<string, any>} */
     this.recipes = new Map()
     for (const recipe of recipes) {
