@@ -16,10 +16,11 @@
 | docs/verify-readme.mjs（链接/锚点/插件清单/落地页一致性校验） | ✅ 已推送，11 个插件 × README × README.zh-CN × llms.txt × index.json × docs/index.html 全通过 |
 | About description（下表第 1 条） | ✅ 已改（2026-11-26 更新为 eleven） |
 | Topics 20 个（下表第 2 条） | ✅ 已改（GitHub 上限 20，已满） |
-| Website | ✅ 指向文档站 `https://feahter.github.io/dsh-plugins/` |
-| GitHub Pages 单页（第 4 节） | ✅ `docs/index.html` + `docs/robots.txt` + `docs/sitemap.xml` 已就绪，Pages 源指向 main 的 `/docs` |
+| Website | ✅ 仓库 About 的 Website 已指向 `https://feahter.github.io/dsh-plugins/`（2026-11-26 实测 API 确认） |
+| GitHub Pages 单页（第 4 节） | ✅ 已上线：`https://feahter.github.io/dsh-plugins/`、`/sitemap.xml`、`/robots.txt`、`/og.png` 均返回 200（Pages 源：main 的 `/docs`，HTTPS 强制） |
 | Social preview 图 | ✅ 已生成 `docs/og.png`（1280×630，落地页 `og:image` 引用同一张）；GitHub 仓库卡片仍需在网页 Settings → Social preview 手动上传这张图（`gh` 不支持） |
 | CITATION.cff（机器可读引用，GitHub 显示「引用此仓库」） | ✅ 已加 |
+| 索引 raw URL（市场读取） | ✅ `https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json` 200 |
 
 改任何一项后，跑一次 `node docs/verify-readme.mjs`，它会把 README / llms.txt / index.json / 落地页之间的漂移打出来。
 
