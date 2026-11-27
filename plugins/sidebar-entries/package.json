@@ -1,0 +1,73 @@
+{
+  "name": "dsh-sidebar-entries",
+  "version": "0.1.0",
+  "description": "侧边栏入口设置：给左侧入口列表加一行「入口设置」，可调整上下顺序、隐藏不常用的入口，刷新与重启都保留。",
+  "author": "Feahter",
+  "license": "MIT",
+  "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/sidebar-entries",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Feahter/dsh-plugins.git",
+    "directory": "plugins/sidebar-entries"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "sidebar",
+    "entries",
+    "reorder",
+    "visibility",
+    "settings"
+  ],
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+    "node": ">=22.15"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "market": {
+    "title": {
+      "en": "Sidebar entries",
+      "zh": "侧边栏入口设置"
+    },
+    "description": {
+      "en": "Adds an Entry settings row to the DSH sidebar. Reorder the left-hand entries, hide the ones you rarely open, and keep both choices across reloads and restarts. Hidden entries stay reachable under More, and Plugins can never be hidden, so there is always a way back.",
+      "zh": "给 DSH 左侧入口列表加一行「入口设置」：调整上下顺序、勾选显示或隐藏，刷新与重启都保留。隐藏的入口仍可在「更多」里打开，「插件」是兜底入口、不可隐藏，所以不会出现找不到回来的死路。"
+    },
+    "category": "developer-tools",
+    "keywords": [
+      "sidebar",
+      "entries",
+      "layout",
+      "settings"
+    ],
+    "labels": [
+      "beta"
+    ]
+  }
+}

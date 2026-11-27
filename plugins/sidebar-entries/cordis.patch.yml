@@ -1,0 +1,16 @@
+# Bundle patch for dsh-sidebar-entries.
+#
+# The plugin ships a patched copy of the sidebar client bundle: persisted entry
+# order and visibility (localStorage) plus the 「入口设置」 row and dialog.
+#
+# Two patches are required, in this order:
+#   1. disable the core sidebar row — otherwise two plugins register the single
+#      "sidebar" slot and the client refuses to boot the second one;
+#   2. insert this bundle's own row so its client half is served under this
+#      package name. The bundle layer runs after @deepseek-ai/dsh-web-app has
+#      created `ui-sidebar`, which is why patch 1 finds its target.
+- id: ui-sidebar
+  disabled: true
+- insert:
+    - id: sidebar-entries
+      name: 'dsh-sidebar-entries'
