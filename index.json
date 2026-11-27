@@ -1017,17 +1017,17 @@
           "experimental"
         ],
         "sortKeys": {
-          "updated": 1795677506
+          "updated": 1795755898
         }
       },
       "versions": [
         {
           "version": "0.8.0",
-          "publishTimestamp": 1795677506,
+          "publishTimestamp": 1795755898,
           "source": {
             "type": "git",
             "url": "https://github.com/Feahter/dsh-plugins",
-            "commit": "720160022d6baf06615cd853010b3701e2f3e45a",
+            "commit": "a726bfee80c727c7aeb5131f55f9d90b1c663dac",
             "path": "plugins/novel-forge"
           },
           "engines": {
