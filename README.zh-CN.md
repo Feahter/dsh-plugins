@@ -2,18 +2,18 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-2f9e44.svg)](./LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DSH-0.2.1--rc.4%2B-4c6ef5.svg)](https://github.com/deepseek-ai/deepseek-harness)
-[![Plugins](https://img.shields.io/badge/plugins-11-7048e8.svg)](#插件目录)
+[![Plugins](https://img.shields.io/badge/plugins-12-7048e8.svg)](#插件目录)
 [![Topic](https://img.shields.io/badge/topic-dsh--plugin-1c7ed6.svg)](https://github.com/topics/dsh-plugin)
 
 [English](README.md) · **简体中文**
 
-**dsh-plugins 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（简称 DSH）的开源插件合集，收录十一个插件，并自带一份可自托管、机器可读的插件市场索引。** DSH 是 DeepSeek AI 开源、以「一切皆插件」的 [Cordis](https://github.com/cordiverse/cordis) 架构搭建的 agent 运行框架。
+**dsh-plugins 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（简称 DSH）的开源插件合集，收录十二个插件，并自带一份可自托管、机器可读的插件市场索引。** DSH 是 DeepSeek AI 开源、以「一切皆插件」的 [Cordis](https://github.com/cordiverse/cordis) 架构搭建的 agent 运行框架。
 
-十一个插件覆盖：实时语音输入与语音播报、GitHub 项目管理、会话归档与 PDCA 自我改进、技能与说明书体检、脑图创意画布、本机上下文资源库、外置任务账本、版本更新检查、长篇小说流水线、按会话路由的语音控制。每个插件都是标准 DSH bundle：一个 Host 半边、一个可选的 Web client 半边，以及把它们接入应用的 `cordis.patch.yml`。
+十二个插件覆盖：实时语音输入与语音播报、GitHub 项目管理、会话归档与 PDCA 自我改进、技能与说明书体检、脑图创意画布、本机上下文资源库、外置任务账本、版本更新检查、长篇小说流水线、按会话路由的语音控制。每个插件都是标准 DSH bundle：一个 Host 半边、一个可选的 Web client 半边，以及把它们接入应用的 `cordis.patch.yml`。
 
-- **一个索引地址，无需构建。** 在 DSH 插件市场里添加下面的索引，十一个插件都能装。
+- **一个索引地址，无需构建。** 在 DSH 插件市场里添加下面的索引，十二个插件都能装。
 - **本地优先。** 识别、扫描、评分、账本都在本机完成；少数必须外发的功能全部列在「隐私与数据」一节。
-- **MIT 许可。** 十一个插件与索引格式都在这个仓库里。
+- **MIT 许可。** 十二个插件与索引格式都在这个仓库里。
 
 **文档站：** <https://feahter.github.io/dsh-plugins/> —— 同一份目录的静态落地页，每个插件一个锚点（`#novel-forge`、`#voice-companion` 等），带安装代码与常见问答。页面的插件清单、锚点与版本号由 `docs/verify-readme.mjs` 对照 `index.json` 校验，不会出现市场里没有的插件。
 
@@ -67,8 +67,8 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 ### 环境要求一览
 
-- DSH **`>=0.2.1-rc.4 <0.3.0-0`**——十一个包都在 `engines.dsh` 里声明这个区间（开发者预览期，版本之间可能有破坏性变更）。
-- Node **22.15** 或更新版本——十一个包都声明了这个下限；`archive-rsi` 与 `dsh-360` 靠它解码拼接的 zstd 会话日志。
+- DSH **`>=0.2.1-rc.4 <0.3.0-0`**——十二个包都在 `engines.dsh` 里声明这个区间（开发者预览期，版本之间可能有破坏性变更）。
+- Node **22.15** 或更新版本——十二个包都声明了这个下限；`archive-rsi` 与 `dsh-360` 靠它解码拼接的 zstd 会话日志。
 - macOS 用于 `context-lib` 的文档预览（`textutil`、`qlmanage`），该插件其余功能跨平台。
 - 实验性的 **Voice input** bundle、一个麦克风，以及 Host 端的 TTS 服务，用于两个语音插件。
 - 已配置模型，用于 `novel-forge` 与 `mind-canvas` 的 **AI 分支**。
@@ -76,7 +76,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 ## 插件目录
 
-十一个在维护的插件，按用途分组。括号里是 DSH 发现页显示的市场标题。
+十二个插件，按用途分组；其中十个在维护。括号里是 DSH 发现页显示的市场标题。
 
 | 插件 | 分类 | 作用 |
 | --- | --- | --- |
@@ -90,6 +90,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 | [上下文资源库](./plugins/context-lib) | 上下文工程 | 把本机已有的文档、代码、图片、会话日志索引成一个可检索的库，配九个 `context_lib_*` 工具。 |
 | [任务账本](./plugins/task-ledger) | 上下文工程 | 把目标、决策、证据从对话里搬到外置账本，任务跨会话、跨模型都能接着做。 |
 | [版本更新检查](./plugins/update-check) | 开发者工具 | 显示已装 DSH 版本、更新源上的最新版本，并把升级交给应用内更新器。 |
+| [侧边栏入口设置](./plugins/sidebar-entries) | 开发者工具 | 给左侧入口列表加一行「入口设置」：调整顺序、隐藏不常用入口，刷新与重启都保留。 |
 | [墨炉 · 小说炼炉](./plugins/novel-forge) | 创意 | 从设定到成书：世界观、人物、大纲、节拍、正文、连贯性审校、修订、导出 Markdown/EPUB。 |
 
 `plugins/voice-control` 已退役：它的热键并入了**语音看板娘**，两者不要同时启用。
@@ -203,6 +204,17 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 *要求：* DSH ≥ 0.2.1-rc.4 与已配置的模型——缺 key 时会带着配置提示快速失败，而不是重试三次。数据在 `~/.dsh/novel-forge/`；项目可导出 Markdown 或 EPUB。
 
+### [侧边栏入口设置](./plugins/sidebar-entries)
+
+在 `更多` 下方加一行 **入口设置**：调整左侧入口的上下顺序、隐藏不常用的入口，刷新页面或重启应用都保留。
+
+- **持久化，不是内存态。** 顺序与显隐存在 `localStorage`（`dsh.sidebar.entryPrefs.v1`）；官方侧边栏的 pin 集合只在内存里，刷新即丢。
+- **不会找不到回来。** 隐藏的入口仍在 `更多` 里可以点开，`插件` 是兜底入口、不可隐藏；`恢复默认` 清空顺序并重新显示全部。
+- **一行两套控件。** 对话框每行 = 原图标 + 名称 + 上移/下移 + 显示勾选框；折叠成 rail 时设置行只显示齿轮图标。
+- **它替换核心侧边栏。** 插件自带打过补丁的侧边栏 client bundle，并通过自己的 `cordis.patch.yml` 禁用核心行；卸载后自动回到官方侧边栏。
+
+*要求：* DSH ≥ 0.2.1-rc.4。安装后需要重启应用（client bundle 在 host 启动时读入并缓存）。数据只有一个 `localStorage` key，不写宿主文件。
+
 ## 我该装哪个？
 
 | 你想要…… | 装这个 |
@@ -215,6 +227,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 | 用树状结构思考，并导出到 XMind 或 Markdown | [脑图创意画布](./plugins/mind-canvas) |
 | 让磁盘上已有的文件能被 agent 检索 | [上下文资源库](./plugins/context-lib) |
 | 让一个长任务跨会话、跨模型活下去 | [任务账本](./plugins/task-ledger) |
+| 把侧边栏收短，并按自己的顺序排 | [侧边栏入口设置](./plugins/sidebar-entries) |
 | 知道自己的 DSH 是不是最新版 | [版本更新检查](./plugins/update-check) |
 | 写长篇并做连贯性审校 | [墨炉 · 小说炼炉](./plugins/novel-forge) |
 
@@ -239,8 +252,8 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 
 ## 兼容性
 
-- **DSH 版本。** 十一个插件都要求 DSH `>=0.2.1-rc.4 <0.3.0-0`；要跟进新的大版本，需要先改 `engines` 并发版。DSH 处于开发者预览期，请钉住你安装的版本，升级前先读发行说明。
-- **Node。** 十一个包都声明 `22.15+`；`archive-rsi` 与 `dsh-360` 靠它解码拼接 zstd 会话日志。
+- **DSH 版本。** 十二个插件都要求 DSH `>=0.2.1-rc.4 <0.3.0-0`；要跟进新的大版本，需要先改 `engines` 并发版。DSH 处于开发者预览期，请钉住你安装的版本，升级前先读发行说明。
+- **Node。** 十二个包都声明 `22.15+`；`archive-rsi` 与 `dsh-360` 靠它解码拼接 zstd 会话日志。
 - **平台。** 只有 `context-lib` 的预览需要 macOS，其余插件没有平台相关调用。
 - **可选能力。** 两个语音插件需要实验性 Voice input bundle 与麦克风；`voice-companion` 与 `novel-forge` 分别需要 TTS 服务与已配置模型。
 - **已退役 / 被取代的包。** 独立的 `realtime-voice` 听写已并入 `voice-companion`；`skills-360` 与 `agents-360` 已并入 `dsh-360`；`voice-control` 的热键与按会话路由也已并入 `voice-companion ≥0.4.0`，它保留在索引里只为老安装，不再加新功能。它和 `voice-companion` 都占用 `Ctrl+Shift+Space`，两者只启用一个。
@@ -251,7 +264,7 @@ dsh plugin install "git+https://github.com/Feahter/dsh-plugins.git#<commit>&path
 DeepSeek Harness（`dsh`）是 DeepSeek AI 开源、基于 Cordis 的「一切皆插件」架构搭建的 agent 运行框架，以本地 Web UI / 桌面应用形式运行，插件为它加上面板、工具和服务。
 
 **dsh-plugins 是什么？**
-一个收录十一个 DSH 插件的仓库，外加一份自托管的 format-1 插件市场索引（`index.json`）。把索引地址加进 DSH 发现页，十一个插件都能一键安装。
+一个收录十二个 DSH 插件的仓库，外加一份自托管的 format-1 插件市场索引（`index.json`）。把索引地址加进 DSH 发现页，十二个插件都能一键安装。
 
 **这些是 DeepSeek 官方插件吗？**
 不是。dsh-plugins 是由 [Feahter](https://github.com/Feahter) 维护的独立社区项目，对接公开的 DSH 插件 API，不由 DeepSeek 发布或背书。
@@ -322,7 +335,7 @@ dsh-plugins/
 
 欢迎提 issue 和 PR。插件 PR 应当包含：带 `engines.dsh` 的 `package.json`、`cordis.patch.yml`、写明要求与数据路径的 README，以及在 `index.json` 里带钉死 commit 的条目。开 PR 前请先跑该插件自己的测试。
 
-如果你在别的地方做了 DSH 插件，给仓库加上 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，方便别人找到。改文档前先跑 `node docs/verify-readme.mjs`：它检查所有相对链接与锚点是否有效，以及十一个插件是否都出现在 `index.json`、`llms.txt` 与两个 README 里。
+如果你在别的地方做了 DSH 插件，给仓库加上 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，方便别人找到。改文档前先跑 `node docs/verify-readme.mjs`：它检查所有相对链接与锚点是否有效，以及十二个插件是否都出现在 `index.json`、`llms.txt` 与两个 README 里。
 
 ## 许可证
 

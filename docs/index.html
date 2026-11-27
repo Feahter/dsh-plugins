@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dsh-plugins — eleven plugins for DeepSeek Harness (dsh)</title>
-<meta name="description" content="Eleven open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub triage, session archiving, health checks, mind maps and a task ledger.">
+<title>dsh-plugins — twelve plugins for DeepSeek Harness (dsh)</title>
+<meta name="description" content="Twelve open-source plugins for DeepSeek Harness (dsh): offline voice input, GitHub triage, session archiving, health checks, mind maps, a task ledger and a sidebar entry editor.">
 <link rel="canonical" href="https://feahter.github.io/dsh-plugins/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1116'/%3E%3Ctext x='16' y='23' font-family='Helvetica,Arial' font-size='17' font-weight='700' fill='%2393b2ff' text-anchor='middle'%3Ed%3C/text%3E%3C/svg%3E">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="dsh-plugins">
 <meta property="og:locale" content="en_US">
-<meta property="og:title" content="dsh-plugins — eleven plugins for DeepSeek Harness (dsh)">
-<meta property="og:description" content="A self-hosted plugin market index and eleven MIT-licensed plugins for DeepSeek Harness: voice, GitHub, session archiving, health checks, mind maps, a context library, a task ledger and a novel pipeline.">
+<meta property="og:title" content="dsh-plugins — twelve plugins for DeepSeek Harness (dsh)">
+<meta property="og:description" content="A self-hosted plugin market index and twelve MIT-licensed plugins for DeepSeek Harness: voice, GitHub, session archiving, health checks, mind maps, a context library, a task ledger and a novel pipeline.">
 <meta property="og:url" content="https://feahter.github.io/dsh-plugins/">
 <meta name="twitter:card" content="summary_large_image">
 <meta property="og:image" content="https://feahter.github.io/dsh-plugins/og.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="dsh-plugins — eleven open-source plugins for DeepSeek Harness (dsh)">
+<meta property="og:image:alt" content="dsh-plugins — twelve open-source plugins for DeepSeek Harness (dsh)">
 <meta name="twitter:image" content="https://feahter.github.io/dsh-plugins/og.png">
 <meta name="twitter:title" content="dsh-plugins — plugins for DeepSeek Harness (dsh)">
-<meta name="twitter:description" content="Eleven open-source plugins plus a format-1 plugin market index for DeepSeek Harness. Install everything from one index URL.">
+<meta name="twitter:description" content="Twelve open-source plugins plus a format-1 plugin market index for DeepSeek Harness. Install everything from one index URL.">
 <meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">
 <meta name="robots" content="index, follow">
@@ -187,9 +187,9 @@
 <main id="main" class="wrap">
   <div class="hero">
     <p class="kicker">Plugin collection and market index</p>
-    <h1>dsh-plugins: eleven open-source plugins for DeepSeek Harness (dsh)</h1>
+    <h1>dsh-plugins: twelve open-source plugins for DeepSeek Harness (dsh)</h1>
     <p class="lede">
-      <strong>dsh-plugins is a collection of eleven open-source plugins for DeepSeek Harness (dsh), the agent harness built on the everything-is-a-plugin Cordis architecture, plus the self-hosted format-1 plugin market index that installs them.</strong>
+      <strong>dsh-plugins is a collection of twelve open-source plugins for DeepSeek Harness (dsh), the agent harness built on the everything-is-a-plugin Cordis architecture, plus the self-hosted format-1 plugin market index that installs them.</strong>
       Each plugin is a standard DSH bundle: a Host half, an optional Web client half, and a
       <code>cordis.patch.yml</code> that wires it into the app.
     </p>
@@ -208,7 +208,7 @@
   </div>
 
   <nav class="toc" aria-labelledby="toc-heading">
-    <h2 id="toc-heading">The eleven plugins</h2>
+    <h2 id="toc-heading">The twelve plugins</h2>
     <ul>
       <li><a href="#realtime-voice">Realtime voice input</a> <span class="cn" lang="zh-CN">实时语音输入</span></li>
       <li><a href="#voice-companion">Voice companion</a> <span class="cn" lang="zh-CN">语音看板娘</span></li>
@@ -220,6 +220,7 @@
       <li><a href="#context-lib">Context library</a> <span class="cn" lang="zh-CN">上下文资源库</span></li>
       <li><a href="#task-ledger">Task ledger</a> <span class="cn" lang="zh-CN">任务账本</span></li>
       <li><a href="#update-check">Version update check</a> <span class="cn" lang="zh-CN">版本更新检查</span></li>
+      <li><a href="#sidebar-entries">Sidebar entries</a> <span class="cn" lang="zh-CN">侧边栏入口设置</span></li>
       <li><a href="#novel-forge">Ink Furnace — novel forge</a> <span class="cn" lang="zh-CN">墨炉 · 小说炼炉</span></li>
     </ul>
   </nav>
@@ -415,6 +416,24 @@
     </p>
   </section>
 
+  <section id="sidebar-entries" class="plugin" aria-labelledby="sidebar-entries-h">
+    <h2 id="sidebar-entries-h">Sidebar entries <span class="cn" lang="zh-CN">侧边栏入口设置</span></h2>
+    <p class="def">Sidebar entries adds an Entry settings row to the DSH sidebar: reorder the left-hand entries, hide the ones you rarely open, and keep both choices after a reload or a restart.</p>
+    <p class="def-zh" lang="zh-CN">给 DSH 左侧入口列表加一行「入口设置」：调整上下顺序、隐藏不常用的入口，刷新与重启都保留；隐藏的入口仍能在「更多」里打开。</p>
+    <ul>
+      <li>Order and visibility are persisted in <code>localStorage</code> (<code>dsh.sidebar.entryPrefs.v1</code>), so a refresh no longer resets them.</li>
+      <li>A hidden entry stays reachable under <em>More</em>; <em>Plugins</em> is the fallback route and can never be hidden.</li>
+      <li>Each dialog row carries move-up / move-down buttons and a visibility checkbox; collapsed to the rail, the row shows its gear icon only.</li>
+      <li><em>Restore defaults</em> clears both lists and brings every entry back.</li>
+      <li>The plugin ships the patched sidebar client bundle and disables the core row from its own <code>cordis.patch.yml</code>; uninstalling restores the official sidebar. Restart the app after installing.</li>
+    </ul>
+    <p class="meta">
+      <span><b>Version</b> <code>0.1.0</code></span>
+      <span><b>Data</b> one localStorage key — <code>dsh.sidebar.entryPrefs.v1</code>; no host files</span>
+          <span><b>Source</b> <a href="https://github.com/Feahter/dsh-plugins/tree/main/plugins/sidebar-entries">plugins/sidebar-entries</a></span>
+    </p>
+  </section>
+
   <section id="novel-forge" class="plugin" aria-labelledby="novel-forge-h">
     <h2 id="novel-forge-h">Ink Furnace — novel forge <span class="cn" lang="zh-CN">墨炉 · 小说炼炉</span></h2>
     <p class="def">Ink Furnace — novel forge runs one premise through a resumable stage pipeline to a finished, continuity-checked novel.</p>
@@ -553,8 +572,8 @@
   "@context": "https://schema.org",
   "@type": "ItemList",
   "name": "dsh-plugins plugin catalog",
-  "description": "The eleven plugins in dsh-plugins.",
-  "numberOfItems": 11,
+  "description": "The twelve plugins in dsh-plugins.",
+  "numberOfItems": 12,
   "itemListOrder": "https://schema.org/ItemListOrderAscending",
   "itemListElement": [
     {"@type": "ListItem", "position": 1, "name": "Realtime voice input", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/realtime-voice", "description": "Superseded by Voice companion 0.4.0, which absorbed its dictation; kept for existing installs."},
@@ -567,7 +586,8 @@
     {"@type": "ListItem", "position": 8, "name": "Context library", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/context-lib"},
     {"@type": "ListItem", "position": 9, "name": "Task ledger", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/task-ledger"},
     {"@type": "ListItem", "position": 10, "name": "Version update check", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/update-check"},
-    {"@type": "ListItem", "position": 11, "name": "Ink Furnace — novel forge", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/novel-forge"}
+    {"@type": "ListItem", "position": 11, "name": "Sidebar entries", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/sidebar-entries"},
+    {"@type": "ListItem", "position": 12, "name": "Ink Furnace — novel forge", "url": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/novel-forge"}
   ]
 }
 </script>

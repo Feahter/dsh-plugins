@@ -1362,6 +1362,55 @@
           }
         }
       ]
+    },
+    {
+      "name": "dsh-sidebar-entries",
+      "title": {
+        "en": "Sidebar entries",
+        "zh": "侧边栏入口设置"
+      },
+      "description": {
+        "en": "Adds an Entry settings row to the DSH sidebar. Reorder the left-hand entries, hide the ones you rarely open, and keep both choices across reloads and restarts. Hidden entries stay reachable under More, and Plugins can never be hidden, so there is always a way back.",
+        "zh": "给 DSH 左侧入口列表加一行「入口设置」：调整上下顺序、勾选显示或隐藏，刷新与重启都保留。隐藏的入口仍可在「更多」里打开，「插件」是兜底入口、不可隐藏，所以不会出现找不到回来的死路。"
+      },
+      "icon": "plugins/sidebar-entries/icon.svg",
+      "author": "Feahter",
+      "homepage": "https://github.com/Feahter/dsh-plugins/tree/main/plugins/sidebar-entries",
+      "repository": {
+        "url": "https://github.com/Feahter/dsh-plugins",
+        "directory": "plugins/sidebar-entries"
+      },
+      "metadata": {
+        "category": "developer-tools",
+        "keywords": [
+          "sidebar",
+          "entries",
+          "layout",
+          "settings"
+        ],
+        "labels": [
+          "beta"
+        ],
+        "sortKeys": {
+          "updated": 1795749753
+        }
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1795749753,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/Feahter/dsh-plugins",
+            "commit": "4920a553d27fd0c7245e2d99e324e0f486903b09",
+            "path": "plugins/sidebar-entries"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.4 <0.3.0-0",
+            "node": ">=22.15"
+          }
+        }
+      ]
     }
   ]
 }

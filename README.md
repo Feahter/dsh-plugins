@@ -2,30 +2,20 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-2f9e44.svg)](./LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DSH-0.2.1--rc.4%2B-4c6ef5.svg)](https://github.com/deepseek-ai/deepseek-harness)
-[![Plugins](https://img.shields.io/badge/plugins-11-7048e8.svg)](#plugin-catalog)
+[![Plugins](https://img.shields.io/badge/plugins-12-7048e8.svg)](#plugin-catalog)
 [![Topic](https://img.shields.io/badge/topic-dsh--plugin-1c7ed6.svg)](https://github.com/topics/dsh-plugin)
 
 **English** · [简体中文](README.zh-CN.md)
 
-**dsh-plugins is a collection of eleven open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — the open-source agent harness built on the everything-is-a-plugin [Cordis](https://github.com/cordiverse/cordis) architecture — plus the self-hosted, machine-readable plugin market index that installs them.**
+**dsh-plugins is a collection of twelve open-source plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) — the open-source agent harness built on the everything-is-a-plugin [Cordis](https://github.com/cordiverse/cordis) architecture — plus the self-hosted, machine-readable plugin market index that installs them.**
 
 The plugins cover voice input and speech output, GitHub project management, session archiving with a PDCA self-improvement loop, skills and agent-instruction health checks, mind mapping, a local context library, an external task ledger, version update checks, and a full novel-writing pipeline. Each one is a standard DSH bundle: a Host half, an optional Web client half, and a `cordis.patch.yml` that wires it into the app.
 
-- **One index URL, no build step.** Add the index in DSH's plugin market and install any of the eleven.
+- **One index URL, no build step.** Add the index in DSH's plugin market and install any of the twelve.
 - **Local first.** Recognition, scanning, scoring and ledger data stay on the machine; the few features that call out are listed under [Privacy and data](#privacy-and-data).
 - **MIT licensed.** Every plugin, including the index format, is in this repository.
 
 **Docs site:** <https://feahter.github.io/dsh-plugins/> — the same catalog as a static landing page, with one anchor per plugin (`#novel-forge`, `#voice-companion`, …), an install block and an FAQ. Its plugin list, anchors and versions are checked against `index.json` by `docs/verify-readme.mjs`, so it never lists a plugin the market does not have.
-
-## 中文导读
-
-一个仓库收录十一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件，并自带一份可被插件市场直接读取的索引。在 DSH Web UI 的 **插件 → 发现** 里添加：
-
-```
-https://raw.githubusercontent.com/Feahter/dsh-plugins/main/index.json
-```
-
-即可搜索并安装全部插件。十一个插件分别覆盖：本地连续语音输入、语音看板娘（通话/听写/热键）、GitHub 项目管理、会话归档与 PDCA 炼金、技能与 Agents 说明书体检、无限画布脑图、本机上下文资源库、外置任务账本、版本更新检查、长篇小说流水线。**完整中文说明见 [README.zh-CN.md](README.zh-CN.md)。**
 
 ## Contents
 
@@ -78,7 +68,7 @@ Replace `<commit>` with the commit recorded for the version you want in [`index.
 ### Requirements at a glance
 
 - DSH **`>=0.2.1-rc.4 <0.3.0-0`** — every plugin declares that exact range in `engines.dsh` (developer preview; breaking changes can happen between releases).
-- Node **22.15** or newer — declared by all eleven packages; `archive-rsi` and `dsh-360` need it to decode concatenated-zstd session logs.
+- Node **22.15** or newer — declared by all twelve packages; `archive-rsi` and `dsh-360` need it to decode concatenated-zstd session logs.
 - macOS for the `context-lib` document previews (`textutil`, `qlmanage`); everything else on that plugin is cross-platform.
 - The experimental **Voice input** bundle, a microphone, and a TTS provider on the Host for the two voice plugins.
 - A configured model for `novel-forge` and for `mind-canvas`'s **AI branch**.
@@ -86,7 +76,7 @@ Replace `<commit>` with the commit recorded for the version you want in [`index.
 
 ## Plugin catalog
 
-Eleven plugins, grouped by what they are for. Nine are actively maintained; `voice-control` is retired and `realtime-voice` is superseded by Voice companion. The market title in brackets is the name shown in DSH Discover.
+Twelve plugins, grouped by what they are for. Ten are actively maintained; `voice-control` is retired and `realtime-voice` is superseded by Voice companion. The market title in brackets is the name shown in DSH Discover.
 
 | Plugin | Category | What it does |
 | --- | --- | --- |
@@ -100,6 +90,7 @@ Eleven plugins, grouped by what they are for. Nine are actively maintained; `voi
 | [Context library](./plugins/context-lib) | Context engineering | Indexes documents, code, images and session logs already on the machine into one searchable library with nine `context_lib_*` tools. |
 | [Task ledger](./plugins/task-ledger) | Context engineering | Moves goals, decisions and evidence out of the transcript into an external ledger, so a task resumes after any session ends. |
 | [Version update check](./plugins/update-check) | Developer tools | Shows the installed DSH version, the newest version on your update feed, and hands the upgrade to the in-app updater. |
+| [Sidebar entries](./plugins/sidebar-entries) | Developer tools | Adds an Entry settings row to the sidebar: reorder entries and hide the ones you rarely open, both persisted across reloads and restarts. |
 | [Ink Furnace — novel forge](./plugins/novel-forge) | Creative | Premise to finished novel: world bible, characters, outline, beats, prose, continuity review, revision, Markdown/EPUB export. |
 
 `plugins/voice-control` is retired: its hotkey moved into **Voice companion**, and it should not be enabled alongside it.
@@ -213,6 +204,17 @@ One premise in, a finished novel out: premise → world bible → characters →
 
 *Requirements:* DSH ≥ 0.2.1-rc.4 and a configured model — a missing key fails fast with a config hint instead of retrying three times. Data lives in `~/.dsh/novel-forge/`; projects export to Markdown or EPUB.
 
+### [Sidebar entries](./plugins/sidebar-entries)
+
+An **Entry settings** row below *More* in the sidebar: reorder the left-hand entries, hide the ones you rarely open, and keep both choices after a reload or a full restart.
+
+- **Persisted, not in-memory.** Order and visibility live in `localStorage` (`dsh.sidebar.entryPrefs.v1`); the official sidebar keeps its pin set in memory only, so it forgets on refresh.
+- **Nothing gets lost.** A hidden entry stays reachable under *More*, and *Plugins* is the fallback route, so it can never be hidden. *Restore defaults* clears both lists.
+- **One row, two controls.** Each dialog row is the original icon and label plus move-up / move-down buttons and a visibility checkbox; collapsed to the rail, the settings row shows its gear icon only.
+- **It replaces the core sidebar.** The plugin ships the sidebar client bundle with that patch applied and disables the core row through its own `cordis.patch.yml`; uninstalling restores the official sidebar.
+
+*Requirements:* DSH ≥ 0.2.1-rc.4. Restart the app after installing — the client bundle is read once at host start. Data: one `localStorage` key; no host files.
+
 ## Which plugin do I need?
 
 | If you want to… | Install |
@@ -224,6 +226,7 @@ One premise in, a finished novel out: premise → world bible → characters →
 | See whether your skills and `AGENTS.md` are actually loaded and read | [dsh-360](./plugins/dsh-360) |
 | Think in a tree and export it to XMind or Markdown | [Mind canvas](./plugins/mind-canvas) |
 | Make the files already on disk searchable for the agent | [Context library](./plugins/context-lib) |
+| Keep the sidebar short, and in my own order | [Sidebar entries](./plugins/sidebar-entries) |
 | Keep a long task alive across sessions and models | [Task ledger](./plugins/task-ledger) |
 | Know whether your DSH install is current | [Version update check](./plugins/update-check) |
 | Write a long novel with continuity checks | [Ink Furnace — novel forge](./plugins/novel-forge) |
@@ -249,7 +252,7 @@ Original session files and scanned documents are never modified, moved or delete
 
 ## Compatibility
 
-- **DSH version.** All eleven plugins require DSH `>=0.2.1-rc.4 <0.3.0-0`; a newer major line needs its own `engines` update and release. DSH is in developer preview, so pin the version you install and read the release notes before upgrading.
+- **DSH version.** All twelve plugins require DSH `>=0.2.1-rc.4 <0.3.0-0`; a newer major line needs its own `engines` update and release. DSH is in developer preview, so pin the version you install and read the release notes before upgrading.
 - **Node.** `archive-rsi` and `dsh-360` need Node `22.15+` to decode concatenated-zstd session logs.
 - **Platform.** macOS is required only for `context-lib` previews; the other ten plugins make no platform-specific calls.
 - **Optional capabilities.** The voice plugins need the experimental Voice input bundle and a microphone; `voice-companion` and `novel-forge` need a TTS provider or a configured model respectively.
@@ -261,7 +264,7 @@ Original session files and scanned documents are never modified, moved or delete
 DeepSeek Harness (`dsh`) is an open-source agent harness from DeepSeek AI, built on an everything-is-a-plugin architecture powered by Cordis. It runs as a local Web UI / desktop app, and plugins add panels, tools and services to it.
 
 **What is dsh-plugins?**
-A repository of eleven DSH plugins plus a self-hosted format-1 plugin market index (`index.json`). Adding the index URL to DSH Discover makes all eleven installable with one click.
+A repository of twelve DSH plugins plus a self-hosted format-1 plugin market index (`index.json`). Adding the index URL to DSH Discover makes all twelve installable with one click.
 
 **Are these official DeepSeek plugins?**
 No. dsh-plugins is an independent community project maintained by [Feahter](https://github.com/Feahter). It targets the public DSH plugin API and is not published or endorsed by DeepSeek.
@@ -309,7 +312,7 @@ It carries bilingual titles and descriptions, categories, keywords, and an exact
 dsh-plugins/
 ├── index.json           # format-1 plugin market index (bilingual titles, pinned commits)
 ├── README.md            # this file (English)
-├── README.zh-CN.md      # 简体中文说明
+├── README.zh-CN.md      # Simplified Chinese edition
 ├── llms.txt             # compact machine-readable summary for AI assistants
 ├── docs/                # SEO/GEO checklist + README consistency check
 ├── LICENSE              # MIT
@@ -332,7 +335,7 @@ Each plugin directory is a standard DSH bundle: `package.json`, `cordis.patch.ym
 
 Issues and pull requests are welcome. A plugin PR should include: a `package.json` with `engines.dsh`, a `cordis.patch.yml`, a README that states requirements and data paths, and an entry in `index.json` with a pinned commit. Run the plugin's own tests before opening the PR.
 
-If you build a DSH plugin somewhere else, add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your repository so it can be found. For a docs change, run `node docs/verify-readme.mjs` first — it checks that every relative link and anchor resolves and that all eleven plugins appear in `index.json`, `llms.txt` and both READMEs.
+If you build a DSH plugin somewhere else, add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your repository so it can be found. For a docs change, run `node docs/verify-readme.mjs` first — it checks that every relative link and anchor resolves and that all twelve plugins appear in `index.json`, `llms.txt` and both READMEs.
 
 ## License
 
